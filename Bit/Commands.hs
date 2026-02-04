@@ -8,6 +8,7 @@ import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
 import Bit.Remote (getDefaultRemote, resolveRemote)
 import System.Environment (getArgs)
 import System.Exit (ExitCode(..), exitWith)
+import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
@@ -35,11 +36,20 @@ runCommand args = do
     let skipScan = cmd == ["init"]
                 || cmd `elem` [["verify"], ["verify", "--remote"], ["fsck"], ["remote", "check"]]
                 || (length cmd == 3 && take 2 cmd == ["remote", "check"])
-    localFiles <- if skipScan then return [] else Scan.scanWorkingDir cwd
-    unless skipScan $ Scan.writeMetadataFiles cwd localFiles
+    
+    -- Only scan and write metadata if .bit directory exists (repo is initialized)
+    bitExists <- Dir.doesDirectoryExist (cwd </> ".bit")
+    localFiles <- if skipScan || not bitExists then return [] else Scan.scanWorkingDir cwd
+    unless (skipScan || not bitExists) $ Scan.writeMetadataFiles cwd localFiles
     mRemote <- getDefaultRemote cwd
 
     let env = BitEnv cwd localFiles mRemote isForce isForceWithLease
+
+    -- Check if repository is initialized for commands that need it
+    let needsRepo = cmd /= ["init"]
+    when (needsRepo && not bitExists) $ do
+        hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
+        exitWith (ExitFailure 1)
 
     case cmd of
         ["init"]                        -> Bit.init
