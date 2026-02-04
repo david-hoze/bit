@@ -11,6 +11,13 @@ cd test\cli\work & git -C .bit\index config --get init.defaultBranch
 main
 >>>= 0
 
+# Verify core.quotePath was set to "false" (for Unicode filename support)
+cd test\cli\work & git -C .bit\index config --get core.quotePath
+<<<
+>>>
+false
+>>>= 0
+
 # Verify merge driver was configured
 cd test\cli\work & git -C .bit\index config --get merge.bit-metadata.driver
 <<<

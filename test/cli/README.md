@@ -54,3 +54,13 @@ Fsck does not check remote; use `bit verify --remote` for that.
 Tests `bit remote check`: runs **rclone check** between local working tree and the configured remote (excludes `.bit`). Requires rclone on PATH. Covers:
 - No remote configured: prints "Error: No remote URL configured." and exits 0.
 - Local directory as "remote" (remote_mirror): add remote, change local file, run `bit remote check` → exits 1 and reports differences (e.g. "differences found", "size differ", "hash differ").
+
+## unicode.test
+
+Tests Unicode/Hebrew support in bit on Windows. Verifies that:
+- `core.quotePath` is set to `false` during `bit init` (so git displays Unicode filenames properly instead of octal escapes)
+- Files with Hebrew characters (שלום.txt) can be added, committed, and displayed correctly
+- Mixed Unicode filenames (Hebrew קובץ, Arabic ملف, Chinese 文件, Emoji 📁) work end-to-end
+- Git commands show actual Unicode characters, not escape sequences like `\327\251...`
+
+This test validates the UTF-8 encoding setup in `Bit.hs` (Windows codepage 65001, locale encoding, stdout/stderr encoding) and the git configuration in `Bit/Core.hs`.

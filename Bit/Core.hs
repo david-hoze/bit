@@ -202,6 +202,9 @@ initializeRepoAt targetDir = do
     -- This affects future branch operations in this repo
     void $ Git.runGitAt targetBitIndexPath ["config", "init.defaultBranch", "main"]
     
+    -- 4a. Configure core.quotePath to false (display Unicode filenames properly)
+    void $ Git.runGitAt targetBitIndexPath ["config", "core.quotePath", "false"]
+    
     -- 5. Rename the initial branch to "main" if it's "master"
     -- Git init creates "master" by default, so we rename it
     (code, _, _) <- Git.runGitAt targetBitIndexPath ["branch", "-m", "master", "main"]
