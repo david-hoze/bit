@@ -80,6 +80,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Exception (try, throwIO, SomeException, IOException)
 import System.IO (hFlush, stdout, stderr, hPutStrLn, hIsTerminalDevice)
+import System.Process (readProcessWithExitCode)
 import Data.Maybe (fromMaybe, listToMaybe, maybe, maybeToList)
 import Data.Either (either)
 import Bit.Utils (toPosix, filterOutBitPaths)
@@ -176,6 +177,12 @@ initializeRepo = do
             putStrLn "Running: git init in .bit/index"
             -- Initialize git in .bit/index, which will create .bit/index/.git
             void $ Git.init bitGitDir
+            
+            -- Fix for Windows external/USB drives: add to safe.directory
+            -- git 2.35.2+ rejects directories with different ownership
+            absIndex <- Dir.makeAbsolute bitIndexPath
+            let safePath = map (\c -> if c == '\\' then '/' else c) absIndex
+            void $ readProcessWithExitCode "git" ["config", "--global", "--add", "safe.directory", safePath] ""
 
     -- 3a. Create .git/bundles directory for storing bundle files
     Dir.createDirectoryIfMissing True (bitGitDir </> "bundles")
