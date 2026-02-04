@@ -71,6 +71,7 @@ runCommand args = do
         ("commit":rest)                 -> Bit.commit rest >>= exitWith
         ("diff":rest)                   -> Bit.diff rest >>= exitWith
         ("log":rest)                    -> Bit.log rest >>= exitWith
+        ("ls-files":rest)               -> Bit.lsFiles rest >>= exitWith
         ("restore":rest)                -> runBitM env (Bit.restore rest) >>= exitWith
         ("checkout":rest)               -> runBitM env (Bit.checkout rest) >>= exitWith
         ("status":rest)                 -> runBitM env (Bit.status rest) >>= exitWith

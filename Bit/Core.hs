@@ -15,6 +15,7 @@ module Bit.Core
     , commit
     , diff
     , log
+    , lsFiles
     , restore
     , checkout
     , status
@@ -118,6 +119,9 @@ diff args = Git.runGitRaw ("diff" : args)
 
 log :: [String] -> IO ExitCode
 log args = Git.runGitRaw ("log" : args)
+
+lsFiles :: [String] -> IO ExitCode
+lsFiles args = Git.runGitRaw ("ls-files" : args)
 
 reset :: [String] -> IO ExitCode
 reset args = Git.runGitRaw ("reset" : args)
