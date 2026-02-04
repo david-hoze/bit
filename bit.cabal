@@ -31,6 +31,7 @@ executable bit
                       Internal.Transport
     build-depends:    base16-bytestring ^>=1.0.2.0,
                       base,
+                      async,
                       directory,
                       uuid ^>=1.3.13,
                       filepath,

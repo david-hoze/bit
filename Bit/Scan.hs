@@ -39,6 +39,10 @@ import qualified Data.Set as Set
 import qualified Crypto.Hash.MD5 as MD5
 import Data.ByteString.Base16 (encode)
 import qualified Data.Text as T
+import Control.Concurrent.Async (mapConcurrently)
+import Control.Concurrent (getNumCapabilities)
+import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
+import Control.Exception (bracket_)
 
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]
@@ -128,6 +132,12 @@ checkIgnoredFiles root paths = do
             let isIgnored p = any (`matchesPattern` p) patterns
             return $ Set.fromList $ filter isIgnored paths
 
+-- | Bounded parallel map: runs up to @bound@ actions concurrently.
+mapConcurrentlyBounded :: Int -> (a -> IO b) -> [a] -> IO [b]
+mapConcurrentlyBounded bound f xs = do
+    sem <- newQSem bound
+    mapConcurrently (\x -> bracket_ (waitQSem sem) (signalQSem sem) (f x)) xs
+
 -- Main scan function
 scanWorkingDir :: FilePath -> IO [FileEntry]
 scanWorkingDir root = do
@@ -141,22 +151,26 @@ scanWorkingDir root = do
     let filePaths = [p | (p, False) <- allPaths]  -- Only check files, not directories
     ignoredSet <- checkIgnoredFiles root filePaths
     
-    -- Second pass: hash/classify non-ignored files in single pass, skip ignored ones
-    entries <- forM allPaths $ \(rel, isDir) -> do
-        if isDir
-            then return $ Just $ FileEntry { path = rel, kind = Directory }
-            else if Set.member (normalizePath rel) ignoredSet
-                then return Nothing  -- Skip ignored files
-                else do
-                    let fullPath = root </> rel
-                    size <- getFileSize fullPath
-                    (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
-                    return $ Just $ FileEntry
-                        { path = rel
-                        , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
-                        }
+    -- Separate directories from files to hash
+    let (dirs, files) = partition snd allPaths
+        dirEntries = [FileEntry { path = rel, kind = Directory } | (rel, _) <- dirs]
+        filesToHash = [(rel, root </> rel) | (rel, False) <- allPaths
+                                           , not (Set.member (normalizePath rel) ignoredSet)]
     
-    return $ concat [[e] | Just e <- entries]
+    -- Hash/classify files in parallel (bounded by numCapabilities * 4)
+    caps <- getNumCapabilities
+    let concurrency = max 4 (caps * 4)
+    fileEntries <- mapConcurrentlyBounded concurrency
+        (\(rel, fullPath) -> do
+            size <- getFileSize fullPath
+            (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
+            return $ FileEntry
+                { path = rel
+                , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
+                }
+        ) filesToHash
+    
+    return $ dirEntries ++ fileEntries
   where
     collectPaths :: FilePath -> IO [(FilePath, Bool)]
     collectPaths path = do
