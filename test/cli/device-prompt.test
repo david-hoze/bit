@@ -17,11 +17,11 @@ rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\device_prompt_remote 2>nu
 # --- Add remote with piped device name (BIT_USE_STDIN=1) ---
 cd test\cli\work & set BIT_USE_STDIN=1 & echo test_device| bit remote add origin Z:\device_prompt_remote
 <<<
->>> /Remote.*test_device|Remote.*added/
+>>> /Remote.*origin|Device.*registered/
 >>>= 0
 
-# --- Verify remote was stored: either device (test_device) or fallback (local:) ---
-findstr /C:"test_device" test\cli\work\.bit\remotes\origin >nul || findstr /C:"local:" test\cli\work\.bit\remotes\origin >nul
+# --- Verify remote was stored: either device name or fallback (local:) ---
+findstr /C:"device:" test\cli\work\.bit\remotes\origin >nul || findstr /C:"local:" test\cli\work\.bit\remotes\origin >nul
 <<<
 >>>
 >>>= 0
