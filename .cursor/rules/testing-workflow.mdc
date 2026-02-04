@@ -1,0 +1,60 @@
+---
+description: How to run and monitor CLI tests for the bit project
+globs:
+  - "test/cli/**"
+  - "Bit/**/*.hs"
+  - "Internal/**/*.hs"
+alwaysApply: true
+---
+
+# Testing Workflow
+
+## Fixing a Bug
+
+When fixing a bug, use this targeted approach:
+
+1. **Build and install:**
+   ```
+   cabal install --overwrite-policy=always
+   ```
+
+2. **Run only the related test(s) first:**
+   ```
+   shelltest test/cli/specific.test --debug
+   ```
+   This gives fast feedback on your fix.
+
+3. **Once the related tests pass**, run the full test suite for verification:
+   ```
+   rm .\test.txt 2>nul; shelltest test/cli --debug | tee "test.txt" -a
+   ```
+
+## Running Full Test Suite
+
+When running the full test suite (new features, refactors, or final verification):
+
+1. **Build and install first:**
+   ```
+   cabal install --overwrite-policy=always
+   ```
+
+2. **Run tests with shelltest:**
+   ```
+   rm .\test.txt 2>nul; shelltest test/cli --debug | tee "test.txt" -a
+   ```
+   Use `block_until_ms: 0` to background this immediately.
+
+3. **Monitor test.txt periodically** (every 10-15 seconds) by reading from the end of the file. Look for `[Failed]` lines.
+
+4. **When you see a failure**, immediately start investigating and fixing it while tests continue running. Don't wait for all tests to complete.
+
+5. **Do NOT rebuild or re-run tests after each fix.** Continue monitoring test.txt for additional failures and fix them all.
+
+6. **Only after tests finish AND all fixes are complete**, do ONE final rebuild and full test run to verify everything.
+
+## After Tests Pass
+
+Once all tests pass, suggest a commit message:
+
+- **One-line message** for most changes: `Fix/Add/Update <what changed>`
+- **Multi-line message** only for major refactors or features that need explanation

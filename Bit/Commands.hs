@@ -39,6 +39,25 @@ runCommand args = do
     
     -- Only scan and write metadata if .bit directory exists (repo is initialized)
     bitExists <- Dir.doesDirectoryExist (cwd </> ".bit")
+    
+    -- Copy .bitignore to .bit/index/.gitignore before scan (if repo exists)
+    -- Using .gitignore directly since git check-ignore reads it automatically
+    -- Read and re-write to normalize line endings and remove trailing spaces
+    when (bitExists && not skipScan) $ do
+        let bitignoreSrc = cwd </> ".bitignore"
+        let bitignoreDest = cwd </> ".bit" </> "index" </> ".gitignore"
+        bitignoreExists <- Dir.doesFileExist bitignoreSrc
+        if bitignoreExists
+            then do
+                content <- readFile bitignoreSrc
+                -- Normalize: trim each line, remove empty lines, use LF endings
+                let normalizedLines = filter (not . null) $ map (dropWhile (== ' ') . reverse . dropWhile (== ' ') . reverse . filter (/= '\r')) (lines content)
+                writeFile bitignoreDest (unlines normalizedLines)
+            else do
+                -- Remove stale .gitignore if root .bitignore doesn't exist
+                destExists <- Dir.doesFileExist bitignoreDest
+                when destExists $ Dir.removeFile bitignoreDest
+    
     localFiles <- if skipScan || not bitExists then return [] else Scan.scanWorkingDir cwd
     unless (skipScan || not bitExists) $ Scan.writeMetadataFiles cwd localFiles
     mRemote <- getDefaultRemote cwd

@@ -233,6 +233,9 @@ initializeRepoAt targetDir = do
     Dir.createDirectoryIfMissing True (targetBitGitDir </> "info")
     writeFile (targetBitGitDir </> "info" </> "attributes") "* merge=bit-metadata -text\n"
 
+    -- 5c. The .git/info/exclude file is created in Commands.hs from .bitignore
+    -- (this happens before each scan, not during init)
+
     -- Note: We do NOT create an initial commit here.
     -- This keeps the repo empty until first real commit or pull.
     -- On first pull, we simply checkout the remote's history (no merge needed).

@@ -20,7 +20,8 @@ import System.Directory
       listDirectory,
       getFileSize,
       createDirectoryIfMissing,
-      copyFileWithMetadata )
+      copyFileWithMetadata,
+      getCurrentDirectory )
 import Data.List
 import qualified Data.ByteString as BS
 import Data.Text (unpack)
@@ -30,6 +31,9 @@ import Data.Char (toLower)
 import qualified Internal.ConfigFile as ConfigFile
 import Bit.Utils (atomicWriteFileStr)
 import Bit.Internal.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
+import System.Process (readProcessWithExitCode)
+import System.Exit (ExitCode(..))
+import qualified Data.Set as Set
 
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]
@@ -66,35 +70,87 @@ classifyFile filePath size = do
                                 Left _ -> return False  -- Invalid UTF-8
                                 Right _ -> return True   -- Valid text file
 
+-- | Normalize a file path for consistent comparison (forward slashes, trimmed)
+normalizePath :: FilePath -> FilePath
+normalizePath = map (\c -> if c == '\\' then '/' else c) . filter (/= '\r')
+
+-- | Check if a filename matches a gitignore-style pattern.
+-- Supports: *.ext (extension match), filename (exact match)
+matchesPattern :: String -> FilePath -> Bool
+matchesPattern pattern path =
+    let filename = takeFileName path
+        whitespace = ['\r', '\n', ' '] :: [Char]
+        normalizedPattern = filter (`notElem` whitespace) pattern
+    in if "*." `isPrefixOf` normalizedPattern
+       then -- Extension pattern like *.log
+            let ext = drop 1 normalizedPattern  -- Remove the *
+            in ext `isSuffixOf` filename
+       else -- Exact filename match
+            normalizedPattern == filename
+
+-- | Check which files should be ignored based on .bitignore patterns.
+-- Reads patterns from .bit/index/.gitignore and matches against paths.
+checkIgnoredFiles :: FilePath -> [FilePath] -> IO (Set.Set FilePath)
+checkIgnoredFiles root paths = do
+    let gitignorePath = root </> ".bit" </> "index" </> ".gitignore"
+    exists <- doesFileExist gitignorePath
+    if not exists
+        then return Set.empty
+        else do
+            content <- readFile gitignorePath
+            let whitespace = ['\r', '\n', ' '] :: [Char]
+            let patterns = filter (not . null) $ 
+                           filter (not . ("#" `isPrefixOf`)) $  -- Skip comments
+                           map (filter (`notElem` whitespace)) (lines content)
+            let isIgnored p = any (`matchesPattern` p) patterns
+            return $ Set.fromList $ filter isIgnored paths
+
 -- Main scan function
 scanWorkingDir :: FilePath -> IO [FileEntry]
-scanWorkingDir root = go root
+scanWorkingDir root = do
+    -- First pass: collect all paths (without hashing)
+    allPaths <- collectPaths root
+    
+    -- Filter through git check-ignore
+    let filePaths = [p | (p, False) <- allPaths]  -- Only check files, not directories
+    ignoredSet <- checkIgnoredFiles root filePaths
+    
+    -- Second pass: hash/classify non-ignored files, skip ignored ones
+    entries <- forM allPaths $ \(rel, isDir) -> do
+        if isDir
+            then return $ Just $ FileEntry { path = rel, kind = Directory }
+            else if Set.member (normalizePath rel) ignoredSet
+                then return Nothing  -- Skip ignored files
+                else do
+                    let fullPath = root </> rel
+                    h <- hashFile fullPath
+                    size <- getFileSize fullPath
+                    isText <- classifyFile fullPath (fromIntegral size)
+                    return $ Just $ FileEntry
+                        { path = rel
+                        , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
+                        }
+    
+    return $ concat [[e] | Just e <- entries]
   where
-    go :: FilePath -> IO [FileEntry]
-    go path = do
+    collectPaths :: FilePath -> IO [(FilePath, Bool)]
+    collectPaths path = do
       isDir <- doesDirectoryExist path
       let rel = makeRelative root path
 
-      -- ignore .bit folder and .git (git metadata / pointer)
+      -- ignore .bit folder, .git, .bitignore, and .gitignore (the latter two are config files)
       if rel == ".bit" || (".bit" `isPrefixOf` rel)
           || rel == ".git" || (".git" `isPrefixOf` rel)
+          || rel == ".bitignore"
+          || rel == ".gitignore"
         then pure []
         else if isDir
           then do
             names <- listDirectory path
             let children = map (path </>) names
-            childEntries <- concat <$> mapM go children
-            let dirEntry = FileEntry { path = rel, kind = Directory }
-            pure (dirEntry : childEntries)
-        else do
-          h <- hashFile path
-          size <- getFileSize path
-          isText <- classifyFile path (fromIntegral size)
-          let fEntry = FileEntry
-                { path = rel
-                , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
-                }
-          pure [fEntry]
+            childPaths <- concat <$> mapM collectPaths children
+            pure ((rel, True) : childPaths)
+        else pure [(rel, False)]
 
 writeMetadataFiles :: FilePath -> [FileEntry] -> IO ()
 writeMetadataFiles root entries = do
