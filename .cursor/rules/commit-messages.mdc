@@ -1,0 +1,48 @@
+---
+description: Provide commit message suggestions after completing tasks
+alwaysApply: true
+---
+
+# Commit Message Suggestions
+
+When you finish implementing a task or making changes to the codebase, provide a one-liner commit message suggestion.
+
+## Format
+
+Follow conventional commit style:
+- **Imperative mood**: "Add feature" not "Added feature" or "Adds feature"
+- **Concise**: Keep under 72 characters for the subject line
+- **Descriptive**: Clearly state what the commit does
+
+## Examples
+
+```bash
+# Good commit messages
+Add safe.directory config to fix git dubious ownership on USB drives
+Fix memory leak in pipeline processing
+Update documentation for remote configuration
+Refactor device prompt validation logic
+Add test for Windows USB drive initialization
+
+# Bad commit messages
+Fixed bug
+Update code
+Changes
+WIP
+```
+
+## When to Suggest
+
+Provide a commit message when:
+- You've completed implementing a feature or fix
+- You've made changes that should be committed
+- The user asks for a commit message
+- The task appears to be done and ready for commit
+
+## Format for Suggestion
+
+Present it clearly:
+```
+Suggested commit message:
+Add feature X to handle Y scenario
+```
