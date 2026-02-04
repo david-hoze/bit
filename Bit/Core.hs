@@ -14,6 +14,7 @@ module Bit.Core
     , add
     , commit
     , diff
+    , log
     , restore
     , checkout
     , status
@@ -86,7 +87,7 @@ import qualified Bit.Device as Device
 import qualified Bit.DevicePrompt as DevicePrompt
 import qualified Bit.Conflict as Conflict
 import Bit.Remote (Remote, remoteName, displayRemote, resolveRemote, remoteUrl, RemoteState(..), FetchResult(..))
-import Prelude hiding (init)
+import Prelude hiding (init, log)
 import Control.Exception (bracket)
 
 -- ============================================================================
@@ -113,6 +114,9 @@ commit args = Git.runGitRaw ("commit" : args)
 
 diff :: [String] -> IO ExitCode
 diff args = Git.runGitRaw ("diff" : args)
+
+log :: [String] -> IO ExitCode
+log args = Git.runGitRaw ("log" : args)
 
 reset :: [String] -> IO ExitCode
 reset args = Git.runGitRaw ("reset" : args)

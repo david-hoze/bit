@@ -135,3 +135,15 @@ cd test\cli\work & bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
+
+# Test bit log - should show commit history
+cd test\cli\work & bit log --oneline
+<<<
+>>> /Update test\.txt/
+>>>= 0
+
+# Test bit log with formatting - should work like git log
+cd test\cli\work & bit log --pretty=format:"%s" -n 1
+<<<
+>>> /Update test\.txt/
+>>>= 0

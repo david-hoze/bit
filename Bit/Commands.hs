@@ -16,7 +16,7 @@ run :: IO ()
 run = do
     args <- getArgs
     case args of
-        [] -> hPutStrLn stderr "Usage: bit [init|status|add|commit|restore|checkout|fetch|pull|push|verify|verify --remote|fsck|branch --unset-upstream|remote add <name> <url>|remote show [<name>]|remote check [<name>]]"
+        [] -> hPutStrLn stderr "Usage: bit [init|status|add|commit|log|restore|checkout|fetch|pull|push|verify|verify --remote|fsck|branch --unset-upstream|remote add <name> <url>|remote show [<name>]|remote check [<name>]]"
         _  -> runCommand args
 
 runCommand :: [String] -> IO ()
@@ -60,6 +60,7 @@ runCommand args = do
         ("add":rest)                    -> void $ Bit.add rest
         ("commit":rest)                 -> void $ Bit.commit rest
         ("diff":rest)                   -> void $ Bit.diff rest
+        ("log":rest)                    -> void $ Bit.log rest
         ("restore":rest)                -> runBitM env $ Bit.restore rest
         ("checkout":rest)               -> runBitM env $ Bit.checkout rest
         ("status":rest)                 -> runBitM env $ Bit.status rest
