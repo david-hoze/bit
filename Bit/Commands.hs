@@ -67,13 +67,13 @@ runCommand args = do
         ["verify"]                      -> runBitM env $ Bit.verify False
         ["verify", "--remote"]          -> runBitM env $ Bit.verify True
         ["fsck"]                        -> Bit.fsck cwd
-        ("add":rest)                    -> void $ Bit.add rest
-        ("commit":rest)                 -> void $ Bit.commit rest
-        ("diff":rest)                   -> void $ Bit.diff rest
-        ("log":rest)                    -> void $ Bit.log rest
-        ("restore":rest)                -> runBitM env $ Bit.restore rest
-        ("checkout":rest)               -> runBitM env $ Bit.checkout rest
-        ("status":rest)                 -> runBitM env $ Bit.status rest
+        ("add":rest)                    -> Bit.add rest >>= exitWith
+        ("commit":rest)                 -> Bit.commit rest >>= exitWith
+        ("diff":rest)                   -> Bit.diff rest >>= exitWith
+        ("log":rest)                    -> Bit.log rest >>= exitWith
+        ("restore":rest)                -> runBitM env (Bit.restore rest) >>= exitWith
+        ("checkout":rest)               -> runBitM env (Bit.checkout rest) >>= exitWith
+        ("status":rest)                 -> runBitM env (Bit.status rest) >>= exitWith
         ["fetch"]                       -> runBitM env Bit.fetch
         ["pull"]                        -> runBitM env $ Bit.pull Bit.defaultPullOptions
         ["pull", "--accept-remote"]     -> runBitM env $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
