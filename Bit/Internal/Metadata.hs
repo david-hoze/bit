@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
 module Bit.Internal.Metadata
@@ -17,12 +18,13 @@ module Bit.Internal.Metadata
 import Bit.Types (Hash(..), HashAlgo(..), hashToText)
 import System.Directory (doesFileExist, doesDirectoryExist, listDirectory)
 import System.FilePath ((</>))
+import System.IO (withFile, IOMode(ReadMode), hIsEOF)
 import Data.List (isPrefixOf, isInfixOf)
 import Data.Maybe (listToMaybe)
 import Control.Monad (filterM)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
-import Data.Text.Encoding (decodeUtf8)
+import Data.Text.Encoding (decodeUtf8, decodeUtf8')
 import qualified Crypto.Hash.MD5 as MD5
 import Data.ByteString.Base16 (encode)
 
@@ -78,7 +80,11 @@ parseMetadataFile fp = do
   exists <- doesFileExist fp
   if not exists
     then pure Nothing
-    else parseMetadata <$> readFile fp
+    else do
+      bs <- BS.readFile fp
+      case decodeUtf8' bs of
+        Left _ -> pure Nothing  -- Binary file, not valid metadata
+        Right txt -> pure (parseMetadata (T.unpack txt))
 
 -- | Read a metadata file OR (if it's a text file whose content is stored directly)
 -- compute hash/size from the file bytes. This is the replacement for the fallback
@@ -89,15 +95,21 @@ readMetadataOrComputeHash fp = do
   if not exists
     then pure Nothing
     else do
-      content <- readFile fp
-      case parseMetadata content of
-        Just mc -> pure (Just mc)
-        Nothing -> do
-          -- Not a metadata file — treat as text file content, compute hash from bytes
-          bs <- BS.readFile fp
+      bs <- BS.readFile fp
+      case decodeUtf8' bs of
+        Left _ -> do
+          -- Binary file — compute hash from bytes
           let h = hashFileBytes bs
               sz = fromIntegral (BS.length bs)
           pure (Just (MetaContent h sz))
+        Right txt ->
+          case parseMetadata (T.unpack txt) of
+            Just mc -> pure (Just mc)
+            Nothing -> do
+              -- Not a metadata file — treat as text file content, compute hash from bytes
+              let h = hashFileBytes bs
+                  sz = fromIntegral (BS.length bs)
+              pure (Just (MetaContent h sz))
 
 -- | Truncate hash for human-readable display.
 -- Shows first 16 chars + "..." if longer.
@@ -112,9 +124,20 @@ hashFileBytes bs =
   let md5hex = decodeUtf8 (encode (MD5.hash bs))
   in Hash (T.pack "md5:" <> md5hex)
 
--- | Compute MD5 hash of a file on disk.
+-- | Compute MD5 hash of a file on disk using streaming (constant memory).
+-- Reads file in 64KB chunks to avoid loading entire file into RAM.
 hashFile :: FilePath -> IO (Hash 'MD5)
-hashFile fp = hashFileBytes <$> BS.readFile fp
+hashFile fp = withFile fp ReadMode $ \handle -> do
+  let loop !ctx = do
+        eof <- hIsEOF handle
+        if eof
+          then do
+            let md5hex = decodeUtf8 (encode (MD5.finalize ctx))
+            return (Hash (T.pack "md5:" <> md5hex))
+          else do
+            chunk <- BS.hGet handle 65536  -- 64KB chunks
+            loop (MD5.update ctx chunk)
+  loop MD5.init
 
 -- Conflict marker utilities (preserved from old Internal.Metadata) --
 
@@ -123,8 +146,10 @@ conflictMarkers = ["<<<<<<<", "=======", ">>>>>>>"]
 
 hasConflictMarkers :: FilePath -> IO Bool
 hasConflictMarkers path = do
-  content <- readFile path
-  return $ any (\m -> m `isInfixOf` content) conflictMarkers
+  bs <- BS.readFile path
+  case decodeUtf8' bs of
+    Left _ -> return False  -- Binary file, no conflict markers possible
+    Right txt -> return $ any (\m -> m `isInfixOf` T.unpack txt) conflictMarkers
 
 listAllFiles :: FilePath -> IO [FilePath]
 listAllFiles dir = do

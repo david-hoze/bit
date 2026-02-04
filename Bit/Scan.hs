@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -22,11 +23,12 @@ import System.Directory
       createDirectoryIfMissing,
       copyFileWithMetadata,
       getCurrentDirectory )
+import System.IO (withFile, IOMode(ReadMode), hIsEOF)
 import Data.List
 import qualified Data.ByteString as BS
 import Data.Text (unpack)
 import Control.Monad
-import Data.Text.Encoding (decodeUtf8')
+import Data.Text.Encoding (decodeUtf8, decodeUtf8')
 import Data.Char (toLower)
 import qualified Internal.ConfigFile as ConfigFile
 import Bit.Utils (atomicWriteFileStr)
@@ -34,41 +36,62 @@ import Bit.Internal.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFi
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import qualified Data.Set as Set
+import qualified Crypto.Hash.MD5 as MD5
+import Data.ByteString.Base16 (encode)
+import qualified Data.Text as T
 
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]
 binaryExtensions = [".mp4", ".zip", ".bin", ".exe", ".dll", ".so", ".dylib", ".jpg", ".jpeg", ".png", ".gif", ".pdf", ".gz", ".bz2", ".xz", ".tar", ".rar", ".7z", ".iso", ".img", ".dmg", ".deb", ".rpm", ".msi"]
 
--- | Classify a file as text or binary based on heuristics:
--- 1. Size < configured limit (from .rgit/config)
--- 2. No NULL bytes in first 8KB
--- 3. Valid UTF-8 (or ASCII subset)
--- 4. Not in binary extension list
--- 5. Extension matches configured text extensions (optional hint)
-classifyFile :: FilePath -> Integer -> IO Bool
-classifyFile filePath size = do
-    config <- ConfigFile.readTextConfig
-    -- Check size limit first (fast path)
-    if size >= ConfigFile.textSizeLimit config
-        then return False
-        else do
-            -- Check extension
-            let ext = map toLower (takeExtension filePath)
-            -- Binary extensions always win
-            if ext `elem` binaryExtensions
-                then return False
-                else do
-                    -- Read first 8KB and check for NULL bytes and UTF-8 validity
-                    content <- BS.readFile filePath
-                    let sample = BS.take 8192 content
-                    -- Check for NULL bytes
-                    if BS.elem 0 sample
-                        then return False
-                        else do
-                            -- Check UTF-8 validity
-                            case decodeUtf8' sample of
-                                Left _ -> return False  -- Invalid UTF-8
-                                Right _ -> return True   -- Valid text file
+-- | Single-pass file hash and classification. Returns (hash, isText).
+-- For large files or binary extensions: streams hash only, returns isText=False.
+-- For others: reads first 8KB for text classification, then streams remaining chunks for hash.
+hashAndClassifyFile :: FilePath -> Integer -> ConfigFile.TextConfig -> IO (Hash 'MD5, Bool)
+hashAndClassifyFile filePath size config = do
+    let ext = map toLower (takeExtension filePath)
+    
+    -- Fast path: large files or known binary extensions - just stream hash
+    if size >= ConfigFile.textSizeLimit config || ext `elem` binaryExtensions
+        then do
+            h <- streamHash filePath
+            return (h, False)
+        else
+            -- Single-pass: read first 8KB for classification, continue streaming for hash
+            withFile filePath ReadMode $ \handle -> do
+                firstChunk <- BS.hGet handle 8192
+                let isText = not (BS.elem 0 firstChunk) &&
+                             case decodeUtf8' firstChunk of
+                                 Left _ -> False
+                                 Right _ -> True
+                
+                -- Continue streaming hash from where we left off
+                let loop !ctx = do
+                        eof <- hIsEOF handle
+                        if eof
+                            then do
+                                let md5hex = decodeUtf8 (encode (MD5.finalize ctx))
+                                return (Hash (T.pack "md5:" <> md5hex))
+                            else do
+                                chunk <- BS.hGet handle 65536
+                                loop (MD5.update ctx chunk)
+                
+                -- Start with first chunk already included
+                h <- loop (MD5.update MD5.init firstChunk)
+                return (h, isText)
+  where
+    -- Stream hash for files we're not classifying
+    streamHash fp = withFile fp ReadMode $ \h -> do
+        let loop !ctx = do
+                eof <- hIsEOF h
+                if eof
+                    then do
+                        let md5hex = decodeUtf8 (encode (MD5.finalize ctx))
+                        return (Hash (T.pack "md5:" <> md5hex))
+                    else do
+                        chunk <- BS.hGet h 65536
+                        loop (MD5.update ctx chunk)
+        loop MD5.init
 
 -- | Normalize a file path for consistent comparison (forward slashes, trimmed)
 normalizePath :: FilePath -> FilePath
@@ -108,6 +131,9 @@ checkIgnoredFiles root paths = do
 -- Main scan function
 scanWorkingDir :: FilePath -> IO [FileEntry]
 scanWorkingDir root = do
+    -- Read config once for all files
+    config <- ConfigFile.readTextConfig
+    
     -- First pass: collect all paths (without hashing)
     allPaths <- collectPaths root
     
@@ -115,7 +141,7 @@ scanWorkingDir root = do
     let filePaths = [p | (p, False) <- allPaths]  -- Only check files, not directories
     ignoredSet <- checkIgnoredFiles root filePaths
     
-    -- Second pass: hash/classify non-ignored files, skip ignored ones
+    -- Second pass: hash/classify non-ignored files in single pass, skip ignored ones
     entries <- forM allPaths $ \(rel, isDir) -> do
         if isDir
             then return $ Just $ FileEntry { path = rel, kind = Directory }
@@ -123,9 +149,8 @@ scanWorkingDir root = do
                 then return Nothing  -- Skip ignored files
                 else do
                     let fullPath = root </> rel
-                    h <- hashFile fullPath
                     size <- getFileSize fullPath
-                    isText <- classifyFile fullPath (fromIntegral size)
+                    (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
                     return $ Just $ FileEntry
                         { path = rel
                         , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
