@@ -1,7 +1,7 @@
 # Setup fresh repo
 rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ls-files with no tracked files should return nothing

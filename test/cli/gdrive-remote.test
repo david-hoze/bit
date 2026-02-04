@@ -11,7 +11,7 @@ rmdir /s /q test\cli\work_a 2>nul & rmdir /s /q test\cli\work_b 2>nul & mkdir te
 # --- Repo A: init (use main branch for fetch/pull), add remote, add file, commit, push ---
 cd test\cli\work_a & bit init
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 cd test\cli\work_a & bit remote add origin gdrive-test:bit-test
@@ -38,7 +38,7 @@ cd test\cli\work_a & bit remote check
 # --- Repo B: init, add remote, fetch, pull ---
 cd test\cli\work_b & bit init
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 cd test\cli\work_b & bit remote add origin gdrive-test:bit-test

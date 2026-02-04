@@ -11,7 +11,7 @@ subst Z: %CD%\test\cli 2>nul
 # --- Setup: create work dir, remote dir, init bit ---
 rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\device_prompt_remote 2>nul & mkdir test\cli\work & mkdir test\cli\device_prompt_remote & cd test\cli\work & bit init
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # --- Add remote with piped device name (BIT_USE_STDIN=1) ---

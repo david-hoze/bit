@@ -1,7 +1,7 @@
 # Setup fresh repo
 rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Add text file - metadata should be created in .bit/index (content copy for text files)

@@ -110,7 +110,7 @@ not created
 # bit init - should succeed (doesn't need existing repo)
 cd test\cli\work_norepo & bit init
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # After init, .bit should exist

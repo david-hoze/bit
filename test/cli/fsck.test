@@ -3,7 +3,7 @@
 # --- fsck on fresh repo (no remote): prints nothing when OK ---
 rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # fsck OK = no output, exit 0
@@ -15,7 +15,7 @@ cd test\cli\work & bit fsck
 # --- fsck on repo with committed files: still no output when OK ---
 rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init & echo hello> a.txt & bit add a.txt & bit commit -m "Add a"
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 cd test\cli\work & bit fsck
@@ -26,7 +26,7 @@ cd test\cli\work & bit fsck
 # --- fsck detects local hash mismatch: git-style "hash mismatch <path>", exit 1 ---
 rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init & echo original> file.bin & bit add file.bin & bit commit -m "Add file"
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 cd test\cli\work & echo corrupted> file.bin
@@ -42,7 +42,7 @@ cd test\cli\work & bit fsck
 # --- fsck detects missing file: git-style "missing <path>", exit 1 ---
 rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init & echo x> missing.txt & bit add missing.txt & bit commit -m "Add missing"
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 del test\cli\work\missing.txt

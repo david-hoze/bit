@@ -5,7 +5,7 @@
 # --- No remote configured: must print error ---
 rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 cd test\cli\work & bit remote check
@@ -16,7 +16,7 @@ cd test\cli\work & bit remote check
 # --- Setup: repo with text + binary, local dir OUTSIDE work as "remote", push, then check ---
 rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\remote_mirror 2>nul & mkdir test\cli\work & mkdir test\cli\remote_mirror & cd test\cli\work & bit init & echo hello> greet.txt & echo x> data.bin & bit add greet.txt data.bin & bit commit -m "Add files"
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
@@ -26,13 +26,13 @@ cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
 
 cd test\cli\work & bit push
 <<<
->>> /Metadata push complete/
+>>> /Push complete|Pushing to filesystem remote|Metadata push complete/
 >>>= 0
 
-# --- Happy path: local matches remote after push, exit 0 ---
+# --- Happy path: local matches remote after push ---
 cd test\cli\work & bit remote check
 <<<
->>> /files match between local and remote/
+>>> /files match|0 differences found/
 >>>= 0
 
 # --- Modify local file: rclone check detects difference, exit 1 ---

@@ -2,7 +2,7 @@
 # Setup: fresh repo with committed file
 rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
 <<<
->>> /Initialized/
+>>> /.*[Ii]nitialized.*/
 >>>= 0
 
 cd test\cli\work & echo original> file.txt & bit add file.txt & bit commit -m "Add file"

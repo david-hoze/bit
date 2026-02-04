@@ -39,6 +39,7 @@ module Internal.Git
     , checkoutTheirs
     , runGitRaw
     , runGitWithOutput
+    , runGitAt
     , ConflictType(..)
     , readFileFromRef
     , listFilesInRef
@@ -454,3 +455,8 @@ getFilesAtCommit ref = do
     if code /= ExitSuccess then return []
     else return (filter (not . null) (lines out))
 
+-- | Run a git command targeting a specific index path (for filesystem remotes).
+-- This is used when operating on a remote filesystem repo directly.
+-- The indexPath should be the path to the .bit/index directory (NOT the .git subdirectory).
+runGitAt :: FilePath -> [String] -> IO (ExitCode, String, String)
+runGitAt indexPath args = readProcessWithExitCode "git" (["-C", indexPath] ++ args) ""

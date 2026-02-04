@@ -1,0 +1,33 @@
+# Testing Principles
+
+## Test vs Code Correctness
+
+When tests fail, **never blindly change code to fit tests**. Instead:
+
+1. **Analyze conceptually which is wrong** - the test expectations or the implementation
+2. **Apply domain knowledge** to determine correct behavior:
+   - Error messages belong on stderr, not stdout
+   - Success messages belong on stdout
+   - Interactive prompts need proper input handling in tests
+3. **Fix the incorrect one**, whether that's the test or the code
+
+## Common Patterns
+
+### Error Output
+- Production code SHOULD write errors to stderr (`hPutStrLn stderr`)
+- Tests expecting errors on stdout are wrong and should be fixed to check stderr
+
+### Flexible Regex Patterns
+- Use flexible regex patterns that tolerate reasonable output variations
+- Example: `/Initialized/` should match both "Initialized" and "bit initialized successfully!"
+- Avoid overly strict pattern matching that breaks on cosmetic changes
+
+### Interactive Operations
+- Tests for interactive features need either:
+  - Mock stdin input
+  - Non-interactive flags (`--accept-remote`, `-y`, etc.)
+  - Explicit expectation of failure when stdin is unavailable
+
+## The Rule
+
+**Fix the wrong one, not the convenient one.**
