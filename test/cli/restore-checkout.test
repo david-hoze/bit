@@ -1,0 +1,123 @@
+# Test restore and checkout commands (git-compatible syntax)
+# Setup: fresh repo with committed file
+rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
+<<<
+>>> /Initialized/
+>>>= 0
+
+cd test\cli\work & echo original> file.txt & bit add file.txt & bit commit -m "Add file"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Modify file, then restore (discard working tree changes)
+cd test\cli\work & echo modified> file.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work & bit restore file.txt
+<<<
+>>>
+>>>= 0
+
+findstr /C:"original" test\cli\work\file.txt >nul
+<<<
+>>>
+>>>= 0
+
+# Modify again, use restore -- (explicit pathspec separator, like git)
+cd test\cli\work & echo changed> file.txt & bit restore -- file.txt
+<<<
+>>>
+>>>= 0
+
+findstr /C:"original" test\cli\work\file.txt >nul
+<<<
+>>>
+>>>= 0
+
+# Modify, then checkout -- (legacy git syntax)
+cd test\cli\work & echo discarded> file.txt & bit checkout -- file.txt
+<<<
+>>>
+>>>= 0
+
+findstr /C:"original" test\cli\work\file.txt >nul
+<<<
+>>>
+>>>= 0
+
+# Test restore --staged (unstage without discarding working tree)
+cd test\cli\work & echo staged change> file.txt & bit add file.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work & bit restore --staged file.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work & bit status
+<<<
+>>> /modified:.*file\.txt/
+>>>= 0
+
+findstr /C:"staged change" test\cli\work\file.txt >nul
+<<<
+>>>
+>>>= 0
+
+# Restore working tree (discard the modification)
+cd test\cli\work & bit restore file.txt
+<<<
+>>>
+>>>= 0
+
+findstr /C:"original" test\cli\work\file.txt >nul
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# Test restore . (all files)
+cd test\cli\work & echo a> a.txt & echo b> b.txt & bit add . & bit commit -m "Add a and b"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+cd test\cli\work & echo x> a.txt & echo y> b.txt & bit restore .
+<<<
+>>>
+>>>= 0
+
+findstr /C:"a" test\cli\work\a.txt >nul
+<<<
+>>>
+>>>= 0
+
+findstr /C:"b" test\cli\work\b.txt >nul
+<<<
+>>>
+>>>= 0
+
+# Test checkout -- with multiple paths
+cd test\cli\work & echo XX> a.txt & echo YY> b.txt & bit checkout -- a.txt b.txt
+<<<
+>>>
+>>>= 0
+
+findstr /C:"a" test\cli\work\a.txt >nul
+<<<
+>>>
+>>>= 0
+
+findstr /C:"b" test\cli\work\b.txt >nul
+<<<
+>>>
+>>>= 0

@@ -1,0 +1,50 @@
+# This configuration uses a 'direct' cradle as a workaround for HLS/GHC issues on Windows.
+# 
+# THE PROBLEM:
+# By default, the haskell-language-server-wrapper is "too smart": it tries to invoke 
+# 'cabal' to automatically discover build flags. However, in Windows environments, 
+# it often fails to pass the correct library paths to the internal GHC scripts it 
+# generates, leading to "Could not load module" errors for basic packages like 
+# 'directory' or 'process'.
+#
+# THE SOLUTION:
+# We bypass the automatic discovery (the 'cabal' cradle) and explicitly tell the 
+# server which packages to load. This ensures a stable environment for the IDE
+# without relying on the fragile wrapper scripts.
+#
+# MAINTENANCE:
+# If you add new dependencies to your .cabal file, you must also add them to the 
+# 'arguments' list below using the "-package" flag to keep the IDE synchronized.
+
+cradle:
+  direct:
+    arguments:
+      - "-package"
+      - "yaml"
+      - "-package"
+      - "directory"
+      - "-package"
+      - "filepath"
+      - "-package"
+      - "time"
+      - "-package"
+      - "process"
+      - "-package"
+      - "base"
+      - "-package"
+      - "cryptohash-md5"
+      - "-package"
+      - "base16-bytestring"
+      - "-package"
+      - "aeson"
+      - "-package"
+      - "transformers"
+      - "-package"
+      - "containers"
+      - "-package"
+      - "cryptohash-sha256"
+      - "-package"
+      - "bytestring"
+      - "-package"
+      - "text"
+      - "Rgit.hs"

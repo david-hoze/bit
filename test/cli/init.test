@@ -1,0 +1,12 @@
+# Setup: clean environment
+rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
+<<<
+>>> /Initialized/
+>>>= 0
+
+# Verify .bit directory was created
+if exist "test\cli\work\.bit\" (echo exists) else (echo missing)
+<<<
+>>>
+exists
+>>>= 0

@@ -1,0 +1,53 @@
+# bit remote check tests
+# Runs rclone check between local working tree and remote (excludes .bit).
+# Requires: rclone on PATH.
+
+# --- No remote configured: must print error ---
+rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
+<<<
+>>> /Initialized/
+>>>= 0
+
+cd test\cli\work & bit remote check
+<<<
+>>>2 /fatal: No remote configured/
+>>>= 1
+
+# --- Setup: repo with text + binary, local dir OUTSIDE work as "remote", push, then check ---
+rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\remote_mirror 2>nul & mkdir test\cli\work & mkdir test\cli\remote_mirror & cd test\cli\work & bit init & echo hello> greet.txt & echo x> data.bin & bit add greet.txt data.bin & bit commit -m "Add files"
+<<<
+>>> /Initialized/
+>>>= 0
+
+cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\work & bit push
+<<<
+>>> /Metadata push complete/
+>>>= 0
+
+# --- Happy path: local matches remote after push, exit 0 ---
+cd test\cli\work & bit remote check
+<<<
+>>> /files match between local and remote/
+>>>= 0
+
+# --- Modify local file: rclone check detects difference, exit 1 ---
+cd test\cli\work & echo changed> greet.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work & bit remote check
+<<<
+>>> /content differs|differences,/
+>>>= 1
+
+# --- Cleanup ---
+rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\remote_mirror 2>nul
+<<<
+>>>
+>>>= 0

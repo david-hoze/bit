@@ -1,0 +1,521 @@
+# =============================================================================
+# bit merge tests (local directory as remote, no cloud needed)
+#
+# Inspired by Git's t7600-merge.sh and t7611-merge-abort.sh.
+# Tests the full two-repo push/pull/merge cycle.
+#
+# Requires: rclone on PATH (used for local file sync).
+# Convention: work_a = "pusher", work_b = "puller", shared_remote = rclone target.
+#
+# Test categories (cf. Git t64xx / t76xx):
+#   1. First pull into unborn branch
+#   2. Fast-forward merge (no local divergence)
+#   3. Clean three-way merge (non-conflicting parallel changes)
+#   4. Content conflict — resolve keep-local
+#   5. Content conflict — resolve take-remote
+#   6. Binary metadata conflict — resolve keep-local
+#   7. Multiple simultaneous conflicts — mixed resolution
+#   8. Merge abort (no merge in progress)
+#   9. Merge continue (no merge in progress)
+#  10. Pull --accept-remote
+#  11. Add/add conflict (both repos create same new file)
+#  12. Verify working tree clean after resolved merge
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+rmdir /s /q test\cli\work_a 2>nul & rmdir /s /q test\cli\work_b 2>nul & rmdir /s /q test\cli\shared_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP — shared remote + two repos with common base state
+# ======================================================================
+
+# ---- Create shared remote directory ----
+mkdir test\cli\shared_remote
+<<<
+>>>
+>>>= 0
+
+# ---- Repo A: init ----
+mkdir test\cli\work_a & cd test\cli\work_a & bit init
+<<<
+>>> /Initialized/
+>>>= 0
+
+# ---- Repo A: add remote ----
+cd test\cli\work_a & bit remote add origin "%CD%\test\cli\shared_remote"
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+# ---- Repo A: create base text file, add, commit ----
+cd test\cli\work_a & echo base content> text.txt & bit add text.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_a & bit commit -m "Base: add text.txt"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ---- Repo A: create base binary file, add, commit ----
+cd test\cli\work_a & echo binarydata> data.bin & bit add data.bin
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_a & bit commit -m "Base: add data.bin"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ---- Repo A: push base state to shared remote ----
+cd test\cli\work_a & bit push
+<<<
+>>> /Metadata push complete|Remote is empty|Remote check passed/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: FIRST PULL — repo B fetches from shared remote (unborn branch)
+# (Mirrors Git's test of merge with unborn HEAD)
+# ======================================================================
+
+# ---- Repo B: init ----
+mkdir test\cli\work_b & cd test\cli\work_b & bit init
+<<<
+>>> /Initialized/
+>>>= 0
+
+# ---- Repo B: add same remote ----
+cd test\cli\work_b & bit remote add origin "%CD%\test\cli\shared_remote"
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+# ---- Repo B: fetch ----
+cd test\cli\work_b & bit fetch
+<<<
+>>>2 /From.*shared_remote|new branch.*origin\/main/
+>>>= 0
+
+# ---- Repo B: pull (first pull — checkout remote as main) ----
+cd test\cli\work_b & bit pull
+<<<
+>>> /first pull|Checking out|Syncing binaries/
+>>>= 0
+
+# ---- Verify B has the text file from A (content stored in .bit/index) ----
+findstr /C:"base content" test\cli\work_b\.bit\index\text.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ---- Verify B has the binary file metadata ----
+findstr /C:"hash:" test\cli\work_b\.bit\index\data.bin >nul
+<<<
+>>>
+>>>= 0
+
+# ---- Verify B's working tree has the text file ----
+if exist "test\cli\work_b\text.txt" (echo file exists) else (echo missing)
+<<<
+>>>
+file exists
+>>>= 0
+
+# ---- Verify B status is clean after first pull ----
+cd test\cli\work_b & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: FAST-FORWARD MERGE — A pushes, B pulls with no local changes
+# (Mirrors Git's "merge c0 with c1" ff test in t7600)
+# ======================================================================
+
+# ---- A: add a new file and push ----
+cd test\cli\work_a & echo new from A> extra.txt & bit add extra.txt & bit commit -m "Add extra.txt"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+cd test\cli\work_a & bit push
+<<<
+>>> /Metadata push complete|Remote check passed/
+>>>= 0
+
+# ---- B: pull — should merge cleanly (B has no local divergence) ----
+cd test\cli\work_b & bit fetch
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_b & bit pull
+<<<
+>>> /Updating|Merge made|Syncing binaries/
+>>>= 0
+
+# ---- Verify B has the new file ----
+findstr /C:"new from A" test\cli\work_b\.bit\index\extra.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ---- Verify B status is clean ----
+cd test\cli\work_b & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 4: CLEAN THREE-WAY MERGE — non-conflicting parallel changes
+# (Mirrors Git's "merge c1 with c2" where changes are in different hunks)
+# ======================================================================
+
+# ---- A: modify text.txt and push ----
+cd test\cli\work_a & echo updated by A> text.txt & bit add text.txt & bit commit -m "A: update text.txt"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+cd test\cli\work_a & bit push
+<<<
+>>> /Metadata push complete|Remote check passed/
+>>>= 0
+
+# ---- B: add a NEW file (doesn't overlap with A's changes) and commit ----
+cd test\cli\work_b & echo B only file> bonly.txt & bit add bonly.txt & bit commit -m "B: add bonly.txt"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ---- B: pull — should merge cleanly since changes don't overlap ----
+cd test\cli\work_b & bit pull
+<<<
+>>> /Merge made|Syncing binaries|Updating/
+>>>= 0
+
+# ---- Verify B has A's updated text.txt ----
+findstr /C:"updated by A" test\cli\work_b\.bit\index\text.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ---- Verify B still has its own bonly.txt ----
+findstr /C:"B only file" test\cli\work_b\.bit\index\bonly.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ---- Verify B status is clean ----
+cd test\cli\work_b & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 5: CONTENT CONFLICT — resolve keep-local
+# Both A and B modify the same text file with different content.
+# bit detects the conflict in .bit/index/ and prompts for resolution.
+# User chooses (l)ocal.
+# (Mirrors Git's "merge c1 with c2 — content conflict" in t7600)
+# ======================================================================
+
+# ---- Synchronize: B pushes its current state so both are aligned ----
+cd test\cli\work_b & bit push
+<<<
+>>> /Metadata push complete|Remote check passed|up to date/
+>>>= 0
+
+cd test\cli\work_a & bit fetch & bit pull
+<<<
+>>> //
+>>>= 0
+
+# ---- A: modify text.txt to A's version and push ----
+cd test\cli\work_a & echo conflict version A> text.txt & bit add text.txt & bit commit -m "A: conflict version"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+cd test\cli\work_a & bit push
+<<<
+>>> /Metadata push complete|Remote check passed/
+>>>= 0
+
+# ---- B: modify SAME text.txt to B's version and commit locally ----
+cd test\cli\work_b & echo conflict version B> text.txt & bit add text.txt & bit commit -m "B: conflict version"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ---- B: pull — conflict expected; pipe "l" to keep local ----
+cd test\cli\work_b & bit pull
+<<<
+l
+>>> /Automatic merge failed|CONFLICT|Resolving conflicts|Merge complete|conflict/
+>>>= 0
+
+# ---- Verify B kept local version in metadata (B's content wins) ----
+findstr /C:"conflict version B" test\cli\work_b\.bit\index\text.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 6: CONTENT CONFLICT — resolve take-remote
+# Same setup: both modify same file, but user chooses (r)emote.
+# (Mirrors Git's checkout --theirs pattern)
+# ======================================================================
+
+# ---- Re-sync: push B's state, pull to A ----
+cd test\cli\work_b & bit push
+<<<
+>>> /Metadata push complete|Remote check passed|up to date/
+>>>= 0
+
+cd test\cli\work_a & bit fetch & bit pull
+<<<
+>>> //
+>>>= 0
+
+# ---- A: modify text.txt to "remote wins" and push ----
+cd test\cli\work_a & echo remote wins version> text.txt & bit add text.txt & bit commit -m "A: remote wins"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+cd test\cli\work_a & bit push
+<<<
+>>> /Metadata push complete|Remote check passed/
+>>>= 0
+
+# ---- B: modify SAME text.txt differently and commit locally ----
+cd test\cli\work_b & echo local loses version> text.txt & bit add text.txt & bit commit -m "B: local loses"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ---- B: pull — conflict expected; pipe "r" to take remote ----
+cd test\cli\work_b & bit pull
+<<<
+r
+>>> /Automatic merge failed|CONFLICT|Resolving conflicts|Merge complete|conflict/
+>>>= 0
+
+# ---- Verify B took remote version in metadata (A's content wins) ----
+findstr /C:"remote wins version" test\cli\work_b\.bit\index\text.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 7: MULTIPLE SIMULTANEOUS CONFLICTS — mixed resolution
+# Both A and B modify two files. B picks (l)ocal for first, (r)emote for second.
+# (Mirrors Git's "merge with multiple conflicting files" tests)
+# ======================================================================
+
+# ---- Re-sync ----
+cd test\cli\work_b & bit push
+<<<
+>>> /Metadata push complete|Remote check passed|up to date/
+>>>= 0
+
+cd test\cli\work_a & bit fetch & bit pull
+<<<
+>>> //
+>>>= 0
+
+# ---- A: modify both files and push ----
+cd test\cli\work_a & (echo A multi 1)> file1.txt & (echo A multi 2)> file2.txt & bit add file1.txt file2.txt & bit commit -m "A: modify two files"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+cd test\cli\work_a & bit push
+<<<
+>>> /Metadata push complete|Remote check passed/
+>>>= 0
+
+# ---- B: modify SAME two files differently and commit ----
+cd test\cli\work_b & (echo B multi 1)> file1.txt & (echo B multi 2)> file2.txt & bit add file1.txt file2.txt & bit commit -m "B: modify two files"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ---- B: pull — two conflicts; pipe "l" then "r" ----
+cd test\cli\work_b & bit pull
+<<<
+l
+r
+>>> /Automatic merge failed|CONFLICT|Resolving conflicts|Merge complete|2 conflict/
+>>>= 0
+
+# ---- Verify: file1.txt kept local (B's version), file2.txt took remote (A's version) ----
+findstr /C:"B multi 1" test\cli\work_b\.bit\index\file1.txt >nul
+<<<
+>>>
+>>>= 0
+
+findstr /C:"A multi 2" test\cli\work_b\.bit\index\file2.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 8: ADD/ADD CONFLICT — both repos create the same new file
+# (Mirrors Git's "CONFLICT (add/add)" tests in t6422)
+# ======================================================================
+
+# ---- Re-sync ----
+cd test\cli\work_b & bit push
+<<<
+>>> /Metadata push complete|Remote check passed|up to date/
+>>>= 0
+
+cd test\cli\work_a & bit fetch & bit pull
+<<<
+>>> //
+>>>= 0
+
+# ---- A: create brand-new file "shared_new.txt" and push ----
+cd test\cli\work_a & echo A created this> shared_new.txt & bit add shared_new.txt & bit commit -m "A: add shared_new.txt"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+cd test\cli\work_a & bit push
+<<<
+>>> /Metadata push complete|Remote check passed/
+>>>= 0
+
+# ---- B: create SAME filename "shared_new.txt" with different content, commit ----
+cd test\cli\work_b & echo B created this> shared_new.txt & bit add shared_new.txt & bit commit -m "B: add shared_new.txt"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ---- B: pull — add/add conflict; choose "r" (take remote) ----
+cd test\cli\work_b & bit pull
+<<<
+r
+>>> /Automatic merge failed|CONFLICT|Resolving conflicts|Merge complete|conflict/
+>>>= 0
+
+# ---- Verify B took A's version ----
+findstr /C:"A created this" test\cli\work_b\.bit\index\shared_new.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 9: MERGE --ABORT with no merge in progress
+# (Mirrors Git's t7611 "git merge --abort fails without MERGE_HEAD")
+# ======================================================================
+
+# ---- Verify clean state first ----
+cd test\cli\work_b & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ---- merge --abort when nothing in progress: should print error ----
+cd test\cli\work_b & bit merge --abort
+<<<
+>>>2 /no merge in progress/
+>>>= 1
+
+# ======================================================================
+# SECTION 10: MERGE --CONTINUE with no merge in progress
+# (Mirrors Git's "git merge --continue fails without in-progress merge")
+# ======================================================================
+
+cd test\cli\work_b & bit merge --continue
+<<<
+>>>2 /no merge in progress|error/
+>>>= 1
+
+# ======================================================================
+# SECTION 11: PULL --ACCEPT-REMOTE
+# A pushes a change; B has diverged locally. B uses --accept-remote
+# to accept whatever is on the remote as truth.
+# (bit-specific: no Git equivalent; tests the remote-reality acceptance flow)
+# ======================================================================
+
+# ---- Re-sync ----
+cd test\cli\work_b & bit push
+<<<
+>>> /Metadata push complete|Remote check passed|up to date/
+>>>= 0
+
+cd test\cli\work_a & bit fetch & bit pull
+<<<
+>>> //
+>>>= 0
+
+# ---- A: modify text.txt and push ----
+cd test\cli\work_a & echo accept remote test> text.txt & bit add text.txt & bit commit -m "A: accept-remote test"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+cd test\cli\work_a & bit push
+<<<
+>>> /Metadata push complete|Remote check passed/
+>>>= 0
+
+# ---- B: pull with --accept-remote (skip conflict resolution, accept remote) ----
+cd test\cli\work_b & bit pull --accept-remote
+<<<
+>>> /Accepting remote file state|accept-remote completed|Scanning remote/
+>>>= 0
+
+# ---- Verify B accepted A's content ----
+findstr /C:"accept remote test" test\cli\work_b\.bit\index\text.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 12: VERIFY FINAL STATE — working tree clean, no dangling state
+# (Mirrors Git's post-merge state verification: no MERGE_HEAD, clean diff)
+# ======================================================================
+
+# ---- B: status should be clean ----
+cd test\cli\work_b & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ---- B: fsck should find no issues ----
+cd test\cli\work_b & bit fsck
+<<<
+>>>
+>>>= 0
+
+# ---- A: status should be clean ----
+cd test\cli\work_a & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ---- A: fsck should find no issues ----
+cd test\cli\work_a & bit fsck
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+rmdir /s /q test\cli\work_a 2>nul & rmdir /s /q test\cli\work_b 2>nul & rmdir /s /q test\cli\shared_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

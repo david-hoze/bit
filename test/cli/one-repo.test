@@ -1,0 +1,137 @@
+# Setup fresh repo
+rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
+<<<
+>>> /Initialized/
+>>>= 0
+
+# Add text file - metadata should be created in .bit/index (content copy for text files)
+cd test\cli\work & echo hello> test.txt & bit add test.txt
+<<<
+>>>
+>>>= 0
+
+# Verify text file metadata: .bit/index/test.txt exists and contains the content
+if exist "test\cli\work\.bit\index\test.txt" (echo metadata exists) else (echo missing)
+<<<
+>>>
+metadata exists
+>>>= 0
+
+findstr /C:"hello" test\cli\work\.bit\index\test.txt >nul
+<<<
+>>>
+>>>= 0
+
+# Status: new file staged
+cd test\cli\work & bit status
+<<<
+>>> /new file:.*test\.txt/
+>>>= 0
+
+# Commit the staged file
+cd test\cli\work & bit commit -m "Add test.txt"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Status after commit: working tree clean
+cd test\cli\work & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# Add binary file - metadata should have hash and size
+cd test\cli\work & echo x> file.bin & bit add file.bin
+<<<
+>>>
+>>>= 0
+
+# Verify binary metadata: .bit/index/file.bin exists with hash: and size: lines
+if exist "test\cli\work\.bit\index\file.bin" (echo metadata exists) else (echo missing)
+<<<
+>>>
+metadata exists
+>>>= 0
+
+findstr /C:"hash:" test\cli\work\.bit\index\file.bin >nul
+<<<
+>>>
+>>>= 0
+
+findstr /C:"size:" test\cli\work\.bit\index\file.bin >nul
+<<<
+>>>
+>>>= 0
+
+# Status: new binary file staged
+cd test\cli\work & bit status
+<<<
+>>> /new file:.*file\.bin/
+>>>= 0
+
+# Commit binary
+cd test\cli\work & bit commit -m "Add file.bin"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Add multiple files with "add ."
+cd test\cli\work & echo data> data.txt & echo notes> notes.txt & bit add .
+<<<
+>>>
+>>>= 0
+
+# Verify both metadata files exist
+if exist "test\cli\work\.bit\index\data.txt" (echo data ok) else (echo missing)
+<<<
+>>>
+data ok
+>>>= 0
+
+if exist "test\cli\work\.bit\index\notes.txt" (echo notes ok) else (echo missing)
+<<<
+>>>
+notes ok
+>>>= 0
+
+# Status: both new files staged
+cd test\cli\work & bit status
+<<<
+>>> /new file:.*data\.txt/
+>>>= 0
+
+# Commit multiple files
+cd test\cli\work & bit commit -m "Add data and notes"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Modify text file, add it
+cd test\cli\work & echo hello world> test.txt & bit add test.txt
+<<<
+>>>
+>>>= 0
+
+# Verify metadata was updated (new content)
+findstr /C:"hello world" test\cli\work\.bit\index\test.txt >nul
+<<<
+>>>
+>>>= 0
+
+# Status: modified file staged
+cd test\cli\work & bit status
+<<<
+>>> /modified:.*test\.txt/
+>>>= 0
+
+# Commit modification
+cd test\cli\work & bit commit -m "Update test.txt"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Final status: clean
+cd test\cli\work & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0

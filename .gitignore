@@ -1,0 +1,30 @@
+# Haskell / Cabal
+dist-newstyle/
+.ghc.environment.*
+*.o
+*.hi
+*.hie
+*.chi
+*.chs
+*.bak
+
+# VS Code
+.vscode/
+.history/
+
+# rgit specific
+.rgit-cache.yaml
+*.tmp
+
+# CLI test work directories
+test/cli/work/
+test/cli/work_a/
+test/cli/work_b/
+test/cli/shared_remote/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Artifacts
+literate-output/
