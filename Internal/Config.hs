@@ -12,10 +12,9 @@ newtype GitRelPath = GitRelPath FilePath deriving (Show, Eq)
 -- | Path relative to CWD. Used for direct filesystem operations (copyFile, doesFileExist, etc).
 newtype CwdPath = CwdPath FilePath deriving (Show, Eq)
 
-bitDir, bitTargetPath, bitIgnore, bitGitDir, bitIndexPath, bitDevicesDir, bitRemotesDir :: FilePath
+bitDir, bitTargetPath, bitGitDir, bitIndexPath, bitDevicesDir, bitRemotesDir :: FilePath
 bitDir           = ".bit"
 bitTargetPath    = bitDir </> "target"
-bitIgnore        = bitDir </> "ignore"
 bitDevicesDir    = bitDir </> "devices"
 bitRemotesDir    = bitDir </> "remotes"
 bitIndexPath     = bitDir </> "index"
