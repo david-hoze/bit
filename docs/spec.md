@@ -483,13 +483,24 @@ HLint errors appear in IDE and CI, preventing lazy IO from being reintroduced.
 - Prevents lazy IO from being reintroduced during refactoring
 - Documents the policy explicitly
 
-### Concurrent File Scanning
+### Concurrent File Scanning and Metadata Writing
 
-The file scanner (`Bit/Scan.hs`) uses bounded parallelism:
+The file scanner (`Bit/Scan.hs`) uses bounded parallelism for both scanning and writing:
+
+**Scanning**:
 - `QSem` limits concurrent file reads (default: `numCapabilities * 4`)
 - Each file is fully read, hashed, and closed before moving to next
 - Progress reporting uses `IORef` with `atomicModifyIORef'` for thread-safe updates
 - Cache entries use strict ByteString read/write
+
+**Metadata Writing** (`writeMetadataFiles`):
+- Parallel execution with same bounded concurrency as scanning
+- Skip-unchanged optimization: Before writing, checks if metadata already matches
+  - Binary files: reads existing metadata, compares hash/size
+  - Text files: compares mtime/size of source vs destination
+- Three-phase write: (1) create directories sequentially, (2) create file parent directories, (3) write files in parallel
+- Progress reporting shows files written, skipped count, and percentage
+- Atomic writes for binary metadata using temp-file-rename pattern
 
 ---
 
@@ -661,7 +672,7 @@ Interactive per-file conflict resolution:
 
 - **Text file handling**: Classification (`isText`) exists in the type system but text file sync (copy content to index, sync back on pull) needs completion.
 - **Transaction logging**: For resumable push/pull operations.
-- **Progress reporting**: For long operations (scanning, uploading). Note: File scanning has progress reporting implemented.
+- **Progress reporting**: File scanning and metadata writing have progress reporting implemented. Still needed for upload/download operations (rclone).
 - **Error messages**: Some need polish to match Git's style and include actionable hints.
 - **`isTextFileInIndex` fragility**: The current check (looking for `"hash: "` prefix) works but is indirect. A more robust approach might check whether the file parses as metadata vs. has arbitrary content. Low priority since current approach works correctly.
 
@@ -713,7 +724,7 @@ Interactive per-file conflict resolution:
 | `Internal/ConfigFile.hs` | Config file parsing (strict ByteString) |
 | `bit/Types.hs` | Core types: Hash, FileEntry, BitEnv, BitM |
 | `bit/Internal/Metadata.hs` | Canonical metadata parser/serializer |
-| `bit/Scan.hs` | Working directory scanning, hash computation (concurrent, strict IO) |
+| `bit/Scan.hs` | Working directory scanning, hash computation, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO) |
 | `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
 | `bit/Plan.hs` | Pure plan: GitDiff → RcloneAction |
 | `bit/Pipeline.hs` | Composed pipeline: diffAndPlan, pushSyncFiles, pullSyncFiles |
