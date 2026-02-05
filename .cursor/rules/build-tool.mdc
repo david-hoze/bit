@@ -1,0 +1,21 @@
+---
+description: Build tool conventions for this project
+alwaysApply: true
+---
+
+# Build Tool
+
+This project uses **cabal** exclusively for building.
+
+**Never use stack.** Always use cabal commands:
+
+```bash
+# Build the project
+cabal build
+
+# Clean
+cabal clean
+
+# Install
+cabal install
+```
