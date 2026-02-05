@@ -4,6 +4,44 @@ CLI tests use **[shelltest](https://hackage.haskell.org/package/shelltestrunner)
 
 **Run from the repository root** so paths like `test\cli\work_merge_a` resolve correctly.
 
+## Forbidden Patterns
+
+Test files **must not** use Windows environment variables that expand before command execution. These patterns are **banned** and enforced by the `lint-tests` test suite and the pre-commit hook:
+
+### Banned Patterns
+
+- **`%CD%`** — Current directory. Expands before command chains execute, so if a `cd` fails, subsequent commands run in the wrong directory (potentially the main repo).
+- **`%~dp0`** — Batch script directory. Same timing issue as `%CD%`.
+- **`%USERPROFILE%`**, **`%APPDATA%`**, **`%HOMEDRIVE%`**, **`%HOMEPATH%`** — User directories. Could resolve outside the test sandbox.
+
+### Why Dangerous
+
+Example of the problem:
+
+```batch
+cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+```
+
+On Windows, `%CD%` expands **before** the command chain runs. If the `cd` command fails (or hasn't executed yet due to timing), `bit remote add origin` runs in the **main repository directory**, changing the development repo's remote URL instead of the test repo's. This corrupts the development environment.
+
+### The Fix: Use Relative Paths
+
+```batch
+# WRONG (banned):
+cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+
+# CORRECT:
+cd test\cli\work & bit remote add origin ..\remote_mirror
+```
+
+Relative paths resolve at the time the command executes, so they work correctly even if the working directory changes.
+
+### Enforcement
+
+1. **`cabal test lint-tests`** — Scans all `.test` files and fails with a detailed error if violations are found
+2. **Pre-commit hook** — Run `scripts\install-hooks.bat` to install a git hook that blocks commits containing these patterns
+3. **CI** — The lint test runs in continuous integration, catching violations before merge
+
 ## Test Infrastructure
 
 ### Directory Naming

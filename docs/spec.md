@@ -781,6 +781,84 @@ Interactive per-file conflict resolution:
 
 ---
 
+## Test Infrastructure
+
+### Lint Test Suite (Pattern Safety)
+
+**Purpose**: Prevent dangerous Windows environment variable patterns in test files that can cause commands to escape test sandboxes.
+
+**Problem**: Windows expands environment variables like `%CD%` before command chains execute. Example:
+```batch
+cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+```
+If the `cd` fails, `%CD%` still expands to the current directory (potentially the main repo), causing `bit remote add` to modify the development repo's remote URL instead of the test repo's.
+
+**Solution**: Automated guards enforcing relative path usage.
+
+#### Lint Test (Primary Guard)
+
+**Location**: `test/LintTestFiles.hs`
+
+**Test Suite**: `cabal test lint-tests`
+
+**What it does**:
+- Recursively scans all `.test` files under `test/cli/`
+- Detects dangerous patterns (case-insensitive):
+  - `%CD%` — current directory, expands before command execution
+  - `%~dp0` — batch script directory variable
+  - `%USERPROFILE%`, `%APPDATA%`, `%HOMEDRIVE%`, `%HOMEPATH%` — user directory variables
+- Fails with detailed error showing file, line number, pattern, reason, and fix
+- Runs as part of `cabal test` and CI
+
+**Example Output on Violation**:
+```
+DANGEROUS PATTERN in test/cli/remote-check.test:15
+  Found: %CD%
+  Line:  cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+
+  Why dangerous: Windows expands %CD% before the command chain executes.
+  If the preceding `cd` fails, commands run in the main repo directory.
+  Fix: Use relative paths (e.g., ..\remote_mirror) instead.
+```
+
+#### Pre-commit Hook (Secondary Guard)
+
+**Location**: `scripts/pre-commit`
+
+**Installation**: `scripts\install-hooks.bat` (run once after cloning)
+
+**What it does**:
+- Scans only staged `.test` files before commit
+- Checks for the same dangerous patterns
+- Blocks commit if violations found
+- Provides clear error message with fix guidance
+
+**Note**: Optional developer convenience; the lint test is the primary enforcement mechanism.
+
+#### Forbidden Patterns List
+
+The patterns are centrally defined in `test/LintTestFiles.hs`:
+- `%CD%` — expands to current directory before command chains execute
+- `%~dp0` — batch script directory, same timing issue
+- `%USERPROFILE%` — could resolve to real user directories
+- `%APPDATA%` — could resolve to real app data directories
+- `%HOMEDRIVE%` / `%HOMEPATH%` — could resolve to real user paths
+
+**Correct Pattern**: Use relative paths that resolve at command execution time:
+```batch
+# WRONG (banned):
+cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+
+# CORRECT:
+cd test\cli\work & bit remote add origin ..\remote_mirror
+```
+
+#### Documentation
+
+See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation and examples.
+
+---
+
 ## Guardrails
 
 **DO NOT:**

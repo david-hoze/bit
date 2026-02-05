@@ -1,0 +1,55 @@
+#!/bin/sh
+# Pre-commit hook to check for dangerous patterns in test files
+# Run scripts/install-hooks.bat to install this hook
+
+# Dangerous patterns that must not appear in test files
+PATTERNS="%CD% %~dp0 %USERPROFILE% %APPDATA% %HOMEDRIVE% %HOMEPATH%"
+
+# Get list of staged .test files
+STAGED_TEST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.test$')
+
+if [ -z "$STAGED_TEST_FILES" ]; then
+    # No .test files staged, allow commit
+    exit 0
+fi
+
+# Check each staged test file for dangerous patterns
+VIOLATIONS=""
+for FILE in $STAGED_TEST_FILES; do
+    LINE_NUM=1
+    while IFS= read -r LINE; do
+        for PATTERN in $PATTERNS; do
+            # Case-insensitive check
+            LOWER_LINE=$(echo "$LINE" | tr '[:upper:]' '[:lower:]')
+            LOWER_PATTERN=$(echo "$PATTERN" | tr '[:upper:]' '[:lower:]')
+            
+            if echo "$LOWER_LINE" | grep -q "$LOWER_PATTERN"; then
+                VIOLATIONS="${VIOLATIONS}
+DANGEROUS PATTERN in ${FILE}:${LINE_NUM}
+  Found: ${PATTERN}
+  Line:  ${LINE}
+"
+            fi
+        done
+        LINE_NUM=$((LINE_NUM + 1))
+    done < "$FILE"
+done
+
+if [ -n "$VIOLATIONS" ]; then
+    echo "========================================"
+    echo "PRE-COMMIT HOOK: DANGEROUS PATTERNS FOUND"
+    echo "========================================"
+    echo "$VIOLATIONS"
+    echo ""
+    echo "Why dangerous: Windows expands environment variables like %CD% before"
+    echo "the command chain executes. If a preceding 'cd' fails, subsequent commands"
+    echo "run in the main repo directory, potentially corrupting the development repo."
+    echo ""
+    echo "Fix: Use relative paths (e.g., ..\\remote_mirror) instead."
+    echo ""
+    echo "Commit REJECTED. Please fix the violations and try again."
+    echo "========================================"
+    exit 1
+fi
+
+exit 0

@@ -3,7 +3,7 @@
 # Uses subst on Windows to create a writable volume root for .bit-store
 
 # --- Setup: subst creates Z: -> test/cli so we can write .bit-store at volume root ---
-subst Z: %CD%\test\cli 2>nul
+cd test\cli & subst Z: . & cd ..\..
 <<<
 >>>
 >>>= 0

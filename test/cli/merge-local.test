@@ -46,7 +46,7 @@ mkdir test\cli\work_merge_a & cd test\cli\work_merge_a & bit init
 >>>= 0
 
 # ---- Repo A: add remote ----
-cd test\cli\work_merge_a & bit remote add origin "%CD%\test\cli\shared_merge_remote"
+cd test\cli\work_merge_a & bit remote add origin ..\shared_merge_remote
 <<<
 >>> /Remote.*added/
 >>>= 0
@@ -91,7 +91,7 @@ mkdir test\cli\work_merge_b & cd test\cli\work_merge_b & bit init
 >>>= 0
 
 # ---- Repo B: add same remote ----
-cd test\cli\work_merge_b & bit remote add origin "%CD%\test\cli\shared_merge_remote"
+cd test\cli\work_merge_b & bit remote add origin ..\shared_merge_remote
 <<<
 >>> /Remote.*added/
 >>>= 0

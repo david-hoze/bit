@@ -118,3 +118,14 @@ test-suite generate-literate-docs
     build-depends:       base, process, directory, filepath
     build-tool-depends:  bit:generate-literate
     default-language:    Haskell2010
+
+test-suite lint-tests
+    type:                exitcode-stdio-1.0
+    main-is:             LintTestFiles.hs
+    hs-source-dirs:      test
+    build-depends:       base,
+                         directory,
+                         filepath,
+                         tasty,
+                         tasty-hunit
+    default-language:    Haskell2010
