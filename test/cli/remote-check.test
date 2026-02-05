@@ -19,7 +19,7 @@ rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\remote_mirror 2>nul & mkd
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+cd test\cli\work & bit remote add origin ..\remote_mirror
 <<<
 >>> /Remote.*added/
 >>>= 0
