@@ -21,18 +21,47 @@ module Internal.Transport
 import System.Process (readProcessWithExitCode, readProcess, readCreateProcess, CreateProcess(..), StdStream(..), proc, waitForProcess, createProcess)
 import System.Exit (ExitCode(..))
 import System.Directory (removeFile, doesFileExist)
-import System.IO (hPutStrLn, stderr, hGetLine, hIsEOF, Handle)
+import System.IO (hPutStrLn, stderr, hGetLine, hIsEOF, hClose, hGetContents, Handle)
 import System.FilePath (normalise)
 import Control.Monad (when, unless)
 import Data.List (isInfixOf, isPrefixOf)
 import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy.Char8 as LBS
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
 import Data.Maybe (fromMaybe)
 import Data.String (fromString)
 import Bit.Remote (Remote, remoteUrl)
 import Data.IORef (IORef, modifyIORef')
 import Control.Exception (bracket)
+
+-- | Run a process and capture stdout as raw bytes (avoiding locale encoding issues).
+-- Returns (ExitCode, ByteString, String) where stdout is raw bytes and stderr is String.
+readProcessBytes :: FilePath -> [String] -> IO (ExitCode, LBS.ByteString, String)
+readProcessBytes cmd args = do
+    let cp = (proc cmd args)
+            { std_out = CreatePipe
+            , std_err = CreatePipe
+            , std_in = Inherit
+            }
+    (_, Just hOut, Just hErr, ph) <- createProcess cp
+    -- Read strictly to avoid lazy IO issues
+    outBytes <- BS.hGetContents hOut  -- Strict read
+    errStr   <- hGetContents' hErr     -- Strict read for stderr
+    code     <- waitForProcess ph
+    return (code, LBS.fromStrict outBytes, errStr)
+  where
+    -- Strict reading of handle contents
+    hGetContents' :: Handle -> IO String
+    hGetContents' h = go []
+      where
+        go acc = do
+            eof <- hIsEOF h
+            if eof
+                then return (concat (reverse acc))
+                else do
+                    line <- hGetLine h
+                    go ((line ++ "\n") : acc)
 
 -- | Build a full remote path from Remote + relative path.
 -- Handles trailing-slash normalization internally.
@@ -139,28 +168,30 @@ mkdirRemote remote relPath = do
     return code
 
 -- | List remote directory as JSON (at remote root)
-listRemoteJson :: Remote -> Int -> IO (ExitCode, String, String)
+-- Returns (ExitCode, ByteString, String) where stdout is raw bytes for proper UTF-8 handling
+listRemoteJson :: Remote -> Int -> IO (ExitCode, LBS.ByteString, String)
 listRemoteJson remote maxDepth =
-    readProcessWithExitCode "rclone" ["lsjson", "--max-depth", show maxDepth, remoteUrl remote] ""
+    readProcessBytes "rclone" ["lsjson", "--max-depth", show maxDepth, remoteUrl remote]
 
 -- | List remote directory items (at remote root, parsed)
 listRemoteItems :: Remote -> Int -> IO (Either String [TransportItem])
 listRemoteItems remote maxDepth = do
-    (code, out, err) <- listRemoteJson remote maxDepth
+    (code, outBytes, err) <- listRemoteJson remote maxDepth
     case code of
         ExitFailure _ -> 
             if "directory not found" `isInfixOf` err 
             then return (Right [])  -- Empty directory
             else return (Left err)  -- Network or other error
         ExitSuccess -> do
-            case Aeson.decode (LBS.pack out) :: Maybe [RcloneItem] of
+            case Aeson.decode outBytes :: Maybe [RcloneItem] of
                 Nothing -> return (Left "Failed to parse rclone JSON output")
                 Just items -> return (Right [TransportItem (name item) (isDir item) | item <- items])
 
 -- | List remote recursively with hashes
-listRemoteJsonWithHash :: Remote -> IO (ExitCode, String, String)
+-- Returns (ExitCode, ByteString, String) where stdout is raw bytes for proper UTF-8 handling
+listRemoteJsonWithHash :: Remote -> IO (ExitCode, LBS.ByteString, String)
 listRemoteJsonWithHash remote =
-    readProcessWithExitCode "rclone" ["lsjson", remoteUrl remote, "--hash", "--recursive"] ""
+    readProcessBytes "rclone" ["lsjson", remoteUrl remote, "--hash", "--recursive"]
 
 -- | Check local against remote with optional progress tracking
 checkRemote :: FilePath -> Remote -> Maybe (IORef Int) -> IO CheckResult

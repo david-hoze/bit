@@ -11,7 +11,6 @@ module Bit.Remote.Scan
 import GHC.Generics (Generic)
 import qualified Data.Map as Map
 import Data.Map (Map)
-import qualified Data.ByteString.Lazy.Char8 as LBSC
 import Data.Aeson (FromJSON(..), decode, withObject, (.:), (.:?))
 import System.Exit (ExitCode(..))
 import System.FilePath (normalise)
@@ -37,12 +36,12 @@ data RemoteError
 
 fetchRemoteFiles :: Remote -> IO (Either RemoteError [FileEntry])
 fetchRemoteFiles remote = do
-    (code, raw, _err) <- Transport.listRemoteJsonWithHash remote
+    (code, rawBytes, _err) <- Transport.listRemoteJsonWithHash remote
     case code of
         ExitSuccess -> pure $ maybe
             (Left (DecodeFailed "Invalid rclone JSON output"))
             (Right . map rcloneFileToFileEntry . filter (not . rfIsDir))
-            (decode (LBSC.pack raw) :: Maybe [RcloneFile])
+            (decode rawBytes :: Maybe [RcloneFile])
         _ -> pure (Left RcloneFailed)
 
 ----------------------------------------------------------------------
