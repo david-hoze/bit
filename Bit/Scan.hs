@@ -13,7 +13,7 @@ module Bit.Scan
   , EntryKind(..)
   ) where
 
-import Bit.Types
+import Bit.Types (Hash(..), HashAlgo(..), FileEntry(..), EntryKind(..), hashToText)
 import System.FilePath
 import System.Directory
     ( doesDirectoryExist,
@@ -22,13 +22,15 @@ import System.Directory
       getFileSize,
       createDirectoryIfMissing,
       copyFileWithMetadata,
-      getCurrentDirectory )
+      getCurrentDirectory,
+      getModificationTime )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hIsTerminalDevice, hPutStr, hFlush, stderr)
 import Data.List
+import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
 import Data.Text (unpack)
 import Control.Monad
-import Data.Text.Encoding (decodeUtf8, decodeUtf8')
+import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
 import qualified Internal.ConfigFile as ConfigFile
 import Bit.Utils (atomicWriteFileStr)
@@ -44,6 +46,7 @@ import Control.Concurrent (getNumCapabilities, forkIO, threadDelay, killThread)
 import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
 import Control.Exception (bracket_, finally)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
+import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]
@@ -97,6 +100,80 @@ hashAndClassifyFile filePath size config = do
                         chunk <- BS.hGet h 65536
                         loop (MD5.update ctx chunk)
         loop MD5.init
+
+-- | Cache entry for file metadata to skip re-hashing unchanged files
+data CacheEntry = CacheEntry
+  { ceMtime :: Integer
+  , ceSize :: Integer
+  , ceHash :: Hash 'MD5
+  , ceIsText :: Bool
+  } deriving (Show, Eq)
+
+-- | Serialize cache entry to string format
+serializeCacheEntry :: CacheEntry -> String
+serializeCacheEntry ce =
+  "mtime: " ++ show (ceMtime ce) ++ "\n"
+  ++ "size: " ++ show (ceSize ce) ++ "\n"
+  ++ "hash: " ++ T.unpack (hashToText (ceHash ce)) ++ "\n"
+  ++ "isText: " ++ show (ceIsText ce) ++ "\n"
+
+-- | Parse cache entry from string format
+parseCacheEntry :: String -> Maybe CacheEntry
+parseCacheEntry content = do
+  let ls = lines content
+  mtimeLine <- listToMaybe [ drop (length ("mtime: " :: String)) l
+                           | l <- ls, "mtime: " `isPrefixOf` l ]
+  sizeLine <- listToMaybe [ drop (length ("size: " :: String)) l
+                          | l <- ls, "size: " `isPrefixOf` l ]
+  hashLine <- listToMaybe [ drop (length ("hash: " :: String)) l
+                          | l <- ls, "hash: " `isPrefixOf` l ]
+  isTextLine <- listToMaybe [ drop (length ("isText: " :: String)) l
+                            | l <- ls, "isText: " `isPrefixOf` l ]
+  mtime <- readMaybeInt (trim mtimeLine)
+  size <- readMaybeInt (trim sizeLine)
+  let hashVal = trim hashLine
+  isText <- readMaybeBool (trim isTextLine)
+  if null hashVal
+    then Nothing
+    else Just CacheEntry
+      { ceMtime = mtime
+      , ceSize = size
+      , ceHash = Hash (T.pack hashVal)
+      , ceIsText = isText
+      }
+  where
+    trim = dropWhile isSpaceChar . reverse . dropWhile isSpaceChar . reverse
+    isSpaceChar c = c == ' ' || c == '\t' || c == '\r' || c == '\n'
+    readMaybeInt s = case reads s of
+      [(n, "")] -> Just n
+      [(n, r)] | all isSpaceChar r -> Just n
+      _ -> Nothing
+    readMaybeBool s = case s of
+      "True" -> Just True
+      "False" -> Just False
+      _ -> Nothing
+
+-- | Load cache entry for a file, returns Nothing if missing or malformed
+loadCacheEntry :: FilePath -> FilePath -> IO (Maybe CacheEntry)
+loadCacheEntry root relPath = do
+  let cachePath = root </> ".bit" </> "cache" </> relPath
+  exists <- doesFileExist cachePath
+  if not exists
+    then return Nothing
+    else do
+      -- Use strict bytestring reading to avoid lazy file handle issues on Windows
+      bs <- BS.readFile cachePath
+      case decodeUtf8' bs of
+        Left _ -> return Nothing
+        Right txt -> return (parseCacheEntry (T.unpack txt))
+
+-- | Save cache entry for a file (non-atomic write, cache corruption is acceptable)
+saveCacheEntry :: FilePath -> FilePath -> CacheEntry -> IO ()
+saveCacheEntry root relPath entry = do
+  let cachePath = root </> ".bit" </> "cache" </> relPath
+  createDirectoryIfMissing True (takeDirectory cachePath)
+  -- Use strict bytestring writing to ensure file handle is closed immediately
+  BS.writeFile cachePath (encodeUtf8 (T.pack (serializeCacheEntry entry)))
 
 -- | Normalize a file path for consistent comparison (forward slashes, trimmed)
 normalizePath :: FilePath -> FilePath
@@ -187,12 +264,26 @@ scanWorkingDir root = do
     
     let hashWithProgress (rel, fullPath) = do
             size <- getFileSize fullPath
-            (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
-            atomicModifyIORef' counter (\n -> (n + 1, ()))
-            return $ FileEntry
-                { path = rel
-                , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
-                }
+            mtime <- getModificationTime fullPath
+            let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+            cached <- loadCacheEntry root rel
+            case cached of
+              Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
+                -- Cache hit: reuse hash and isText
+                atomicModifyIORef' counter (\n -> (n + 1, ()))
+                return $ FileEntry
+                    { path = rel
+                    , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fIsText = ceIsText ce }
+                    }
+              _ -> do
+                -- Cache miss: hash the file, save cache entry
+                (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
+                saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h isText)
+                atomicModifyIORef' counter (\n -> (n + 1, ()))
+                return $ FileEntry
+                    { path = rel
+                    , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
+                    }
     
     fileEntries <- finally
         (mapConcurrentlyBounded concurrency hashWithProgress filesToHash)

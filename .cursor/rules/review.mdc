@@ -1,0 +1,7 @@
+---
+alwaysApply: true
+---
+
+# Question to ask after tests pass
+
+You introduced some bugs while implementing this feature, right? Analyze why this happened structurally. What about the code's design made it easy to break [X] when touching [Y]? Suggest a refactor that would make this class of bug impossible or caught at compile time."
