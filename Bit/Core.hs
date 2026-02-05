@@ -581,41 +581,55 @@ verifyProgressLoop counter total = go
 remoteShow :: Maybe String -> BitM ()
 remoteShow mRemoteName = do
     cwd <- asks envCwd
-    name <- case mRemoteName of
-        Just n -> return n
-        Nothing -> liftIO Git.getTrackedRemoteName
-    mRemote <- liftIO $ resolveRemote cwd name
-    mTarget <- liftIO $ Device.readRemoteFile cwd name
-    display <- liftIO $ case mTarget of
-        Just _ -> formatRemoteDisplay cwd name mTarget
-        Nothing -> return (name ++ " → " ++ maybe "(not configured)" displayRemote mRemote)
-    case mRemote of
+    case mRemoteName of
         Nothing -> do
-            liftIO $ putStrLn "No remote configured. (Use 'bit remote add <name> <url>')"
-        Just remote -> do
-            liftIO $ putStrLn display
-            liftIO $ putStrLn ""
-            let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
-            hasBundle <- liftIO $ Dir.doesFileExist fetchedPath
-            if hasBundle
-                then liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
+            -- List all configured remotes
+            let remotesDir = cwd </> bitRemotesDir
+            dirExists <- liftIO $ Dir.doesDirectoryExist remotesDir
+            if not dirExists
+                then liftIO $ putStrLn "No remotes configured. Use 'bit remote add <name> <url>' to add one."
                 else do
-                    maybeBundlePath <- liftIO $ fetchRemoteBundle remote
-                    case maybeBundlePath of
-                        Just bPath -> do
-                            liftIO $ saveFetchedBundle remote (Just bPath)
-                            liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
-                        Nothing -> liftIO $ do
-                            putStrLn $ "  Fetch URL: " ++ remoteUrl remote
-                            putStrLn $ "  Push  URL: " ++ remoteUrl remote
-                            putStrLn ""
-                            putStrLn "  HEAD branch: (unknown)"
-                            putStrLn ""
-                            putStrLn "  Local branch configured for 'bit pull':"
-                            putStrLn "    main merges with remote (unknown)"
-                            putStrLn ""
-                            putStrLn "  Local refs configured for 'bit push':"
-                            putStrLn "    main pushes to main (unknown)"
+                    remoteNames <- liftIO $ Dir.listDirectory remotesDir
+                    if null remoteNames
+                        then liftIO $ putStrLn "No remotes configured. Use 'bit remote add <name> <url>' to add one."
+                        else liftIO $ forM_ remoteNames $ \name -> do
+                            mTarget <- Device.readRemoteFile cwd name
+                            display <- formatRemoteDisplay cwd name mTarget
+                            putStrLn display
+        Just name -> do
+            -- Show detailed info for a specific remote
+            mRemote <- liftIO $ resolveRemote cwd name
+            mTarget <- liftIO $ Device.readRemoteFile cwd name
+            display <- liftIO $ case mTarget of
+                Just _ -> formatRemoteDisplay cwd name mTarget
+                Nothing -> return (name ++ " → " ++ maybe "(not configured)" displayRemote mRemote)
+            case mRemote of
+                Nothing -> do
+                    liftIO $ putStrLn "No remotes configured. Use 'bit remote add <name> <url>' to add one."
+                Just remote -> do
+                    liftIO $ putStrLn display
+                    liftIO $ putStrLn ""
+                    let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
+                    hasBundle <- liftIO $ Dir.doesFileExist fetchedPath
+                    if hasBundle
+                        then liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
+                        else do
+                            maybeBundlePath <- liftIO $ fetchRemoteBundle remote
+                            case maybeBundlePath of
+                                Just bPath -> do
+                                    liftIO $ saveFetchedBundle remote (Just bPath)
+                                    liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
+                                Nothing -> liftIO $ do
+                                    putStrLn $ "  Fetch URL: " ++ remoteUrl remote
+                                    putStrLn $ "  Push  URL: " ++ remoteUrl remote
+                                    putStrLn ""
+                                    putStrLn "  HEAD branch: (unknown)"
+                                    putStrLn ""
+                                    putStrLn "  Local branch configured for 'bit pull':"
+                                    putStrLn "    main merges with remote (unknown)"
+                                    putStrLn ""
+                                    putStrLn "  Local refs configured for 'bit push':"
+                                    putStrLn "    main pushes to main (unknown)"
 
 remoteCheck :: Maybe String -> BitM ()
 remoteCheck mName = do
