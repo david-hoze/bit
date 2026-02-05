@@ -79,7 +79,7 @@ import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Exception (try, throwIO, SomeException, IOException)
-import System.IO (hFlush, stdout, stderr, hPutStrLn, hIsTerminalDevice)
+import System.IO (hFlush, stdout, stderr, hPutStr, hPutStrLn, hIsTerminalDevice)
 import System.Process (readProcessWithExitCode)
 import Data.Maybe (fromMaybe, listToMaybe, maybe, maybeToList, mapMaybe)
 import Data.Either (either)
@@ -502,7 +502,7 @@ verify isRemote
               -- Clean up: kill reporter thread and print final line
               maybe (return ()) killThread reporterThread
               when shouldShowProgress $ do
-                hPutStrLn stderr "\r\ESC[K"  -- Clear line
+                hPutStr stderr "\r\ESC[K"  -- Clear line
                 hFlush stderr
             )
           
@@ -547,7 +547,7 @@ verify isRemote
               -- Clean up: kill reporter thread and print final line
               maybe (return ()) killThread reporterThread
               when shouldShowProgress $ do
-                hPutStrLn stderr "\r\ESC[K"  -- Clear line
+                hPutStr stderr "\r\ESC[K"  -- Clear line
                 hFlush stderr
             )
           
@@ -573,7 +573,7 @@ verifyProgressLoop counter total = go
     go = do
       n <- readIORef counter
       let pct = (n * 100) `div` max 1 total
-      hPutStrLn stderr $ "\rChecking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)..."
+      hPutStr stderr $ "\r\ESC[KChecking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
       hFlush stderr
       threadDelay 100000  -- 100ms
       when (n < total) go
@@ -585,7 +585,7 @@ checkProgressLoop counter total = go
     go = do
       n <- readIORef counter
       let pct = (n * 100) `div` max 1 total
-      hPutStrLn stderr $ "\rChecking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)..."
+      hPutStr stderr $ "\r\ESC[KChecking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
       hFlush stderr
       threadDelay 100000  -- 100ms
       when (n < total) go
@@ -691,7 +691,7 @@ remoteCheck mName = do
                     -- Clean up: kill reporter thread and clear line
                     maybe (return ()) killThread reporterThread
                     when shouldShowProgress $ do
-                        hPutStrLn stderr "\r\ESC[K"  -- Clear line
+                        hPutStr stderr "\r\ESC[K"  -- Clear line
                         hFlush stderr
                     
                     case res of

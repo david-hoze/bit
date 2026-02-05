@@ -94,7 +94,7 @@ doFsck cwd = do
         go = do
           n <- readIORef counter
           let pct = (n * 100) `div` max 1 total
-          hPutStr stderr $ "\r[1/2] Checking working tree: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)..."
+          hPutStr stderr $ "\r\ESC[K[1/2] Checking working tree: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
           hFlush stderr
           threadDelay 100000  -- 100ms
           when (n < total) go
