@@ -553,42 +553,76 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 
 ## Performance Optimizations
 
-### Skip Scan for Read-Only Commands
+### Scan-on-Demand Architecture
 
-**Problem**: By default, `bit/Commands.hs` performs a full working directory scan (`scanWorkingDir`) followed by metadata file writes (`writeMetadataFiles`) before executing any command. For read-only commands that never modify the working directory or metadata (e.g., `log`, `ls-files`, `remote show`), this scan is unnecessary overhead.
+**Problem**: The original design scanned the entire working directory *before* dispatching to a command, then maintained a growing `skipScan` whitelist of commands that don't need it. This was backwards:
 
-**Solution**: Commands are classified into two categories:
+1. **Wrong default** — new commands scan by default, silently wasting time if someone forgets to add them to `skipScan`
+2. **Duplication** — the command must be listed in *both* `skipScan` and the `case` dispatch
+3. **Fragile** — easy to miss commands (e.g., `remote add` was discovered to be missing from `skipScan`, causing 860 files to be scanned for a config-only operation)
 
-1. **Read-only commands** (skip scan):
-   - `init` — no repo exists yet
-   - `log` — reads git history only
-   - `ls-files` — reads git index only
-   - `remote show` — reads remote config only
-   - `remote check` — checks remote connectivity only
-   - `verify` — compares files against existing metadata
-   - `fsck` — verifies integrity without modifying state
-
-2. **Write commands** (require scan):
-   - `status`, `add`, `commit` — need current working directory state
-   - `push`, `pull`, `fetch` — sync operations that may need file comparison
-   - `diff` — compares working directory changes against index (needs scan)
+**Solution**: Invert the logic — scan on demand, not by default. Commands are now classified into three tiers, with each command explicitly declaring its needs:
 
 **Implementation** (`bit/Commands.hs`):
 
 ```haskell
-let skipScan = cmd == ["init"]
-            || cmd `elem` [["verify"], ["verify", "--remote"], ["fsck"]]
-            || (not (null cmd) && head cmd == "log")
-            || (not (null cmd) && head cmd == "ls-files")
-            || (length cmd >= 2 && take 2 cmd == ["remote", "check"])
-            || (length cmd >= 2 && take 2 cmd == ["remote", "show"])
+-- Lightweight env (no scan) — for read-only commands
+let baseEnv = do
+        mRemote <- getDefaultRemote cwd
+        return $ BitEnv cwd [] mRemote isForce isForceWithLease
+
+-- Full env (scan + bitignore sync + metadata write) — for write commands
+let scannedEnv = do
+        syncBitignoreToIndex cwd
+        localFiles <- Scan.scanWorkingDir cwd
+        Scan.writeMetadataFiles cwd localFiles
+        mRemote <- getDefaultRemote cwd
+        return $ BitEnv cwd localFiles mRemote isForce isForceWithLease
+
+case cmd of
+    -- ── No env needed ────────────────────────────────────
+    ["init"]              -> Bit.init
+    ["remote", "add", ...] -> Bit.remoteAdd name url
+    ["fsck"]              -> Bit.fsck cwd ...
+    ["merge", "--abort"]  -> Bit.mergeAbort
+    
+    -- ── Lightweight env (no scan) ────────────────────────
+    ("log":rest)          -> Bit.log rest >>= exitWith
+    ("ls-files":rest)     -> Bit.lsFiles rest >>= exitWith
+    ["remote", "show"]    -> baseEnv >>= \env -> runBitM env $ Bit.remoteShow Nothing
+    ["verify"]            -> baseEnv >>= \env -> runBitM env $ Bit.verify False ...
+    
+    -- ── Full scanned env (needs working directory state) ─
+    ("add":rest)          -> do _ <- scannedEnv; Bit.add rest >>= exitWith
+    ("status":rest)       -> scannedEnv >>= \env -> runBitM env (Bit.status rest) >>= exitWith
+    ("push":...)          -> scannedEnv >>= \env -> runBitM env Bit.push
+    ("pull":...)          -> scannedEnv >>= \env -> runBitM env $ Bit.pull ...
 ```
 
-The pattern matches the command prefix, allowing flags and arguments to pass through (e.g., `bit log --oneline`, `bit ls-files --stage`, `bit remote show origin`).
+**Key Changes**:
 
-**Key Invariant**: Commands that only read git history, the git index, or config files must not trigger a scan. Commands that compare working-directory state against the index (`status`, `add`, `commit`, `diff`, `push`, `pull`) must perform the scan to detect changes.
+1. **No `skipScan` variable** — it no longer exists
+2. **Lazy env builders** — `baseEnv` and `scannedEnv` are `IO BitEnv` actions, only executed when called
+3. **Explicit tier assignment** — every command branch explicitly picks: no env, `baseEnv`, or `scannedEnv`
+4. **Safe by default** — new commands default to not scanning (if you forget to call `scannedEnv`, you just get an empty `localFiles` list, which is harmless)
+5. **Bitignore sync colocated with scan** — `syncBitignoreToIndex` only runs when `scannedEnv` is called, keeping related concerns together
 
-**Performance Impact**: In large repositories, skipping the scan for read-only commands provides instant response times instead of waiting for a full directory traversal and metadata write pass.
+**Command Classification**:
+
+1. **No env needed**: Commands that operate on simple config or don't need any environment (`init`, `remote add`, `fsck`, `merge --abort`)
+
+2. **Lightweight env (no scan)**: Read-only commands that read git history, index, or config without needing working directory state
+   - `log`, `ls-files` — read git objects only
+   - `remote show`, `remote check` — read config/connectivity
+   - `verify`, `verify --remote` — compare against existing metadata
+
+3. **Full scanned env**: Commands that need current working directory state
+   - `status`, `restore`, `checkout` — need `localFiles` from env
+   - `add`, `commit`, `diff` — need scan for side effects (metadata write), even though they don't use `localFiles` directly
+   - `push`, `pull`, `fetch` — need working directory state for sync
+   - `merge --continue` — needs working directory state to resolve conflicts
+
+**Performance Impact**: In large repositories, read-only commands now have instant response times. The old design would scan 860 files for `bit remote add`, the new design scans zero.
 
 ---
 
