@@ -125,6 +125,18 @@ runCommand args = do
         hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
         exitWith (ExitFailure 1)
 
+    -- Helper functions for running commands
+    let runScanned action = scannedEnv >>= \env -> runBitM env action
+    let runBase action = baseEnv >>= \env -> runBitM env action
+    let runScannedWithRemote name action = do
+            env <- scannedEnv
+            mNamedRemote <- resolveRemote cwd name
+            runBitM env { envRemote = mNamedRemote } action
+    let runBaseWithRemote name action = do
+            env <- baseEnv
+            mNamedRemote <- resolveRemote cwd name
+            runBitM env { envRemote = mNamedRemote } action
+
     case cmd of
         -- ── No env needed ────────────────────────────────────
         ["init"]                        -> Bit.init
@@ -136,18 +148,12 @@ runCommand args = do
         -- ── Lightweight env (no scan) ────────────────────────
         ("log":rest)                    -> Bit.log rest >>= exitWith
         ("ls-files":rest)               -> Bit.lsFiles rest >>= exitWith
-        ["remote", "show"]              -> baseEnv >>= \env -> runBitM env $ Bit.remoteShow Nothing
-        ["remote", "show", name]        -> do
-            env <- baseEnv
-            mNamedRemote <- resolveRemote cwd name
-            runBitM env { envRemote = mNamedRemote } $ Bit.remoteShow (Just name)
-        ["remote", "check"]             -> baseEnv >>= \env -> runBitM env $ Bit.remoteCheck Nothing
-        ["remote", "check", name]       -> do
-            env <- baseEnv
-            mNamedRemote <- resolveRemote cwd name
-            runBitM env { envRemote = mNamedRemote } $ Bit.remoteCheck (Just name)
-        ["verify"]                      -> baseEnv >>= \env -> runBitM env $ Bit.verify False (if isSequential then Sequential else Parallel 0)
-        ["verify", "--remote"]          -> baseEnv >>= \env -> runBitM env $ Bit.verify True (if isSequential then Sequential else Parallel 0)
+        ["remote", "show"]              -> runBase $ Bit.remoteShow Nothing
+        ["remote", "show", name]        -> runBaseWithRemote name $ Bit.remoteShow (Just name)
+        ["remote", "check"]             -> runBase $ Bit.remoteCheck Nothing
+        ["remote", "check", name]       -> runBaseWithRemote name $ Bit.remoteCheck (Just name)
+        ["verify"]                      -> runBase $ Bit.verify False (if isSequential then Sequential else Parallel 0)
+        ["verify", "--remote"]          -> runBase $ Bit.verify True (if isSequential then Sequential else Parallel 0)
 
         -- ── Full scanned env (needs working directory state) ─
         ("add":rest)                    -> do
@@ -159,50 +165,29 @@ runCommand args = do
         ("diff":rest)                   -> do
             _ <- scannedEnv
             Bit.diff rest >>= exitWith
-        ("status":rest)                 -> scannedEnv >>= \env -> runBitM env (Bit.status rest) >>= exitWith
-        ("restore":rest)                -> scannedEnv >>= \env -> runBitM env (Bit.restore rest) >>= exitWith
-        ("checkout":rest)               -> scannedEnv >>= \env -> runBitM env (Bit.checkout rest) >>= exitWith
+        ("status":rest)                 -> runScanned (Bit.status rest) >>= exitWith
+        ("restore":rest)                -> runScanned (Bit.restore rest) >>= exitWith
+        ("checkout":rest)               -> runScanned (Bit.checkout rest) >>= exitWith
         
         -- push
-        ["push"]                        -> scannedEnv >>= \env -> runBitM env Bit.push
+        ["push"]                        -> runScanned Bit.push
         ["push", "-u", name]            -> scannedEnv >>= \env -> pushWithUpstream env cwd name
         ["push", "--set-upstream", name] -> scannedEnv >>= \env -> pushWithUpstream env cwd name
-        ["push", name]                  -> do
-            env <- scannedEnv
-            mNamedRemote <- resolveRemote cwd name
-            runBitM env { envRemote = mNamedRemote } Bit.push
+        ["push", name]                  -> runScannedWithRemote name Bit.push
         
         -- pull
-        ["pull"]                        -> scannedEnv >>= \env -> runBitM env $ Bit.pull Bit.defaultPullOptions
-        ["pull", name]                  -> do
-            env <- scannedEnv
-            mNamedRemote <- resolveRemote cwd name
-            runBitM env { envRemote = mNamedRemote } $ Bit.pull Bit.defaultPullOptions
-        ["pull", "--accept-remote"]     -> scannedEnv >>= \env -> runBitM env $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
-        ["pull", "--manual-merge"]      -> scannedEnv >>= \env -> runBitM env $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
-        ["pull", name, "--accept-remote"] -> do
-            env <- scannedEnv
-            mNamedRemote <- resolveRemote cwd name
-            runBitM env { envRemote = mNamedRemote } $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
-        ["pull", "--accept-remote", name] -> do
-            env <- scannedEnv
-            mNamedRemote <- resolveRemote cwd name
-            runBitM env { envRemote = mNamedRemote } $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
-        ["pull", name, "--manual-merge"] -> do
-            env <- scannedEnv
-            mNamedRemote <- resolveRemote cwd name
-            runBitM env { envRemote = mNamedRemote } $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
-        ["pull", "--manual-merge", name] -> do
-            env <- scannedEnv
-            mNamedRemote <- resolveRemote cwd name
-            runBitM env { envRemote = mNamedRemote } $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
+        ["pull"]                        -> runScanned $ Bit.pull Bit.defaultPullOptions
+        ["pull", name]                  -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions
+        ["pull", "--accept-remote"]     -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
+        ["pull", "--manual-merge"]      -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
+        ["pull", name, "--accept-remote"] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
+        ["pull", "--accept-remote", name] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
+        ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
+        ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
         
         -- fetch
-        ["fetch"]                       -> scannedEnv >>= \env -> runBitM env Bit.fetch
-        ["fetch", name]                 -> do
-            env <- scannedEnv
-            mNamedRemote <- resolveRemote cwd name
-            runBitM env { envRemote = mNamedRemote } Bit.fetch
+        ["fetch"]                       -> runScanned Bit.fetch
+        ["fetch", name]                 -> runScannedWithRemote name Bit.fetch
         
-        ["merge", "--continue"]         -> scannedEnv >>= \env -> runBitM env Bit.mergeContinue
+        ["merge", "--continue"]         -> runScanned Bit.mergeContinue
         _                               -> hPutStrLn stderr "Unknown command."
