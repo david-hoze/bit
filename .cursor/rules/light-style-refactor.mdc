@@ -1,0 +1,21 @@
+---
+description: Light style refactor guidelines for Haskell code
+globs: **/*.hs
+alwaysApply: false
+---
+
+# Light Style Refactor
+
+Perform a light style refactor pass on the codebase. Focus on readability improvements that reduce nesting depth and make the code easier to maintain. Will be run as a dedicated task occasionally.
+
+## What to look for
+
+- **Long inline lambdas (>5 lines):** Extract into named helper functions with type signatures.
+- **Deep parenthesis nesting:** Flatten using `$`, `case` expressions, or `where` bindings.
+- **`either`/`maybe` with large anonymous functions:** Prefer `case ... of`. Leave simple one-liners alone.
+
+## Constraints
+
+- **No behavior changes.** This is purely structural. Every function should produce identical output before and after.
+- **Keep changes minimal.** Only refactor spots that are genuinely hard to read. Don't rewrite code that's already clear.
+- **Preserve existing style** in surrounding code — don't introduce inconsistencies.
