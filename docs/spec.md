@@ -259,10 +259,13 @@ past the merge).
 
 4. **Default remote selection**:
    - If `branch.main.remote` is set, it's used as the default
-   - If not set and "origin" exists, it's used as fallback
-   - If neither, commands fail with error suggesting `bit push <remote>` or `bit push -u <remote>`
+   - If not set and "origin" exists, **`bit push` uses it as fallback** (git-standard behavior)
+   - If not set and "origin" exists, **`bit pull` and `bit fetch` require explicit remote** (no fallback)
+   - If neither upstream nor "origin", commands fail with error suggesting `bit push <remote>` or `bit push -u <remote>`
 
-This makes bit's remote behavior predictable for git users: explicit tracking setup via `-u`, explicit remote selection via argument, sensible defaults when configured.
+5. **First pull does NOT set upstream**: When pulling for the first time (unborn branch), `checkoutRemoteAsMain` uses `git checkout -B main --no-track refs/remotes/origin/main`. This prevents automatic upstream tracking setup. Users must use `bit push -u <remote>` to explicitly configure tracking.
+
+This makes bit's remote behavior predictable for git users: explicit tracking setup via `-u`, explicit remote selection via argument, sensible defaults when configured, and git-standard fallback to "origin" for push operations.
 
 ---
 
@@ -365,18 +368,18 @@ filesystemPull :: FilePath -> Remote -> PullOptions -> IO ()
 ```
 
 1. **Fetch remote into local**: `git -C local/.bit/index fetch remote/.bit/index/.git main:refs/remotes/origin/main`
-2. **Set up tracking**: Configure `branch.main.remote` and `branch.main.merge`
-3. **Merge locally**: Reuse existing merge logic (handles unborn branch, conflicts, `--accept-remote`)
-4. **Sync files**: Copy changed files from remote working tree to local working tree
+2. **Merge locally**: Reuse existing merge logic (handles unborn branch, conflicts, `--accept-remote`)
+   - Note: Upstream tracking (`branch.main.remote`) is NOT auto-set; user must use `bit push -u <remote>`
+3. **Sync files**: Copy changed files from remote working tree to local working tree
    - Text files: Copy from local index (git merged the content there)
    - Binary files: Copy from remote working tree
-5. **Update tracking ref**: Set `refs/remotes/origin/main` to the remote's HEAD hash
+4. **Update tracking ref**: Set `refs/remotes/origin/main` to the remote's HEAD hash
 
 The merge follows the same patterns as cloud pull:
-- First pull (unborn branch): `checkoutRemoteAsMain` then sync all files
+- First pull (unborn branch): `checkoutRemoteAsMain` (with `--no-track` to prevent auto-setting upstream) then sync all files
 - Normal: `git merge --no-commit --no-ff` then `applyMergeToWorkingDir`
 - Conflicts: Same `Conflict.resolveAll` flow with (l)ocal/(r)emote choices
-- `--accept-remote`: Force-checkout then sync files
+- `--accept-remote`: Force-checkout (with `--no-track`) then sync files
 
 #### Text vs Binary File Sync
 
@@ -436,7 +439,7 @@ a merge. Git manages the index; we only sync actual files.
 The flow:
 1. Fetch remote bundle (git gets remote history)
 2. Record current HEAD (for diff-based sync)
-3. `git checkout -f -B main refs/remotes/origin/main` (force-checkout remote)
+3. `git checkout -f -B main --no-track refs/remotes/origin/main` (force-checkout remote without setting upstream)
 4. `applyMergeToWorkingDir` (diff old HEAD vs new HEAD, sync files)
 5. Update tracking ref
 
@@ -518,6 +521,15 @@ Interactive per-file conflict resolution:
     Anyone at that location can run bit commands directly. This is the natural
     model for USB drives, network shares, and local collaboration directories.
     Bundles are skipped entirely — git talks repo-to-repo via filesystem paths.
+
+13. **Upstream tracking requires explicit `-u` flag**: Following git-standard
+    behavior, `branch.main.remote` is never set automatically. Users must use
+    `bit push -u <remote>` to establish upstream tracking. This includes:
+    - `bit remote add` does NOT set upstream (unlike old bit behavior)
+    - First pull uses `git checkout -B main --no-track` to prevent auto-tracking
+    - `bit push` falls back to "origin" if it exists and no upstream is configured
+    - `bit pull` and `bit fetch` require explicit remote if no upstream is set
+    This makes bit's remote behavior predictable for git users.
 
 ### What We Deliberately Do NOT Do
 
@@ -624,6 +636,8 @@ Interactive per-file conflict resolution:
   already correct after the git operation; rescanning is redundant or harmful)
 - Use `git push` to a filesystem remote (git refuses to update checked-out
   branches; use fetch+merge at the remote instead)
+- Auto-set upstream tracking (`branch.main.remote`) on pull, fetch, or remote
+  add operations — this must only be done via explicit `bit push -u <remote>`
 
 **ALWAYS:**
 - Prefer `rclone moveto` over delete+upload when hash matches
@@ -643,3 +657,5 @@ Interactive per-file conflict resolution:
   (merge, checkout), never by writing files directly
 - Always call `git commit` after conflict resolution when `MERGE_HEAD` exists
 - Update tracking ref after filesystem pull (same invariant as cloud pull)
+- Use `--no-track` flag for any `git checkout` that should not set upstream
+  tracking (e.g., `checkoutRemoteAsMain`, `--accept-remote` flows)
