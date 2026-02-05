@@ -26,6 +26,7 @@ module Internal.Git
     , updateRemoteTrackingBranchToHead
     , updateRemoteTrackingBranchToHash
     , setupBranchTracking
+    , setupBranchTrackingFor
     , unsetBranchUpstream
     , mergeOriginMain
     , mergeNoCommit
@@ -284,16 +285,22 @@ updateRemoteTrackingBranchToHead = do
             updateRemoteTrackingBranchToHash hash
         _ -> return (ExitFailure 1)
 
--- | Set up the local branch to track origin/main
--- This configures branch.main.remote and branch.main.merge so git status knows what to compare
-setupBranchTracking :: IO ExitCode
-setupBranchTracking = do
-    -- Set branch.main.remote = origin and branch.main.merge = refs/heads/main
-    (code1, _, _) <- readProcessWithExitCode "git" (baseFlags ++ ["config", "branch.main.remote", "origin"]) ""
-    (code2, _, _) <- readProcessWithExitCode "git" (baseFlags ++ ["config", "branch.main.merge", "refs/heads/main"]) ""
+-- | Set up the local branch to track a specific remote
+-- Configures branch.main.remote and branch.main.merge
+setupBranchTrackingFor :: String -> IO ExitCode
+setupBranchTrackingFor remoteName = do
+    (code1, _, _) <- readProcessWithExitCode "git"
+        (baseFlags ++ ["config", "branch.main.remote", remoteName]) ""
+    (code2, _, _) <- readProcessWithExitCode "git"
+        (baseFlags ++ ["config", "branch.main.merge", "refs/heads/main"]) ""
     case (code1, code2) of
         (ExitSuccess, ExitSuccess) -> return ExitSuccess
         _ -> return (ExitFailure 1)
+
+-- | Set up the local branch to track origin/main
+-- This configures branch.main.remote and branch.main.merge so git status knows what to compare
+setupBranchTracking :: IO ExitCode
+setupBranchTracking = setupBranchTrackingFor "origin"
 
 -- | Unset the upstream for the current branch (clears "upstream is gone" when remote refs are missing)
 unsetBranchUpstream :: IO ExitCode
@@ -338,11 +345,13 @@ isMergeInProgress = do
 -- Used on first pull when there are no local commits (unborn branch).
 -- This avoids the need for merge and gives us the remote's history directly.
 -- Uses -f (force) to overwrite any local files created during init.
+-- Uses --no-track to prevent auto-setting upstream (user must use -u explicitly).
 checkoutRemoteAsMain :: IO ExitCode
 checkoutRemoteAsMain = do
   -- Use checkout -B to create/reset branch and checkout in one step
   -- Use -f to force overwrite of any local files (like .gitattributes from init)
-  (code, _, _) <- runGitWithOutput ["checkout", "-f", "-B", "main", "refs/remotes/origin/main"]
+  -- Use --no-track to prevent auto-setting branch.main.remote (git-standard: require explicit -u)
+  (code, _, _) <- runGitWithOutput ["checkout", "-f", "-B", "main", "--no-track", "refs/remotes/origin/main"]
   return code
 
 -- | Paths relative to work tree (index/...) that are unmerged.

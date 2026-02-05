@@ -224,20 +224,45 @@ past the merge).
 | `bit mv <src> <dst>` | `git mv` | Move/rename tracked file |
 | `bit branch` | `git branch` | Branch management |
 | `bit merge` | `git merge` | Merge branches |
-| `bit remote add <name> <url>` | `git remote add` | Set named remote URL |
+| `bit remote add <name> <url>` | `git remote add` | Add named remote (does NOT set upstream) |
 | `bit remote show [name]` | `git remote show` | Show remote status |
 | `bit remote check [name]` | — | Check remote connectivity and state |
-| `bit push` | `git push` | Cloud: push metadata bundle + sync files via rclone. Filesystem: fetch+merge at remote + sync files |
-| `bit pull` | `git pull` | Cloud: fetch metadata bundle + sync files via rclone. Filesystem: fetch from remote + merge + sync files |
+| `bit push [<remote>]` | `git push [<remote>]` | Push to specified or default remote |
+| `bit push -u <remote>` | `git push -u <remote>` | Push and set upstream tracking |
+| `bit push --set-upstream <remote>` | `git push --set-upstream <remote>` | Push and set upstream tracking (alt) |
+| `bit pull [<remote>]` | `git pull [<remote>]` | Pull from specified or default remote |
+| `bit pull <remote> --accept-remote` | — | Pull from remote, accept remote state |
 | `bit pull --accept-remote` | — | Accept remote file state as truth |
 | `bit pull --manual-merge` | — | Interactive per-file conflict resolution |
-| `bit fetch` | `git fetch` | Fetch metadata bundle only |
+| `bit fetch [<remote>]` | `git fetch [<remote>]` | Fetch metadata from specified or default remote |
 | `bit verify` | — | Verify local files match metadata |
 | `bit verify --remote` | — | Verify remote files match remote metadata |
 | `bit fsck` | `git fsck` | Full integrity check (local + remote + git) |
 | `bit merge --continue` | `git merge --continue` | Continue after conflict resolution |
 | `bit merge --abort` | `git merge --abort` | Abort current merge |
 | `bit branch --unset-upstream` | `git branch --unset-upstream` | Remove tracking config |
+
+---
+
+## Upstream Tracking (Git-Standard Behavior)
+
+**IMPORTANT**: bit follows git's upstream tracking conventions exactly:
+
+1. **`bit remote add <name> <url>` does NOT set upstream** — unlike old bit behavior, adding a remote (even "origin") does not auto-configure `branch.main.remote`. This matches git.
+
+2. **`bit push -u <remote>` sets upstream** — the `-u` / `--set-upstream` flag pushes and configures `branch.main.remote = <remote>` in one operation. This is the standard way to establish upstream tracking.
+
+3. **Commands accept explicit remote names**:
+   - `bit push <remote>` — push to named remote (no tracking change)
+   - `bit pull <remote>` — pull from named remote (no tracking change)
+   - `bit fetch <remote>` — fetch from named remote (no tracking change)
+
+4. **Default remote selection**:
+   - If `branch.main.remote` is set, it's used as the default
+   - If not set and "origin" exists, it's used as fallback
+   - If neither, commands fail with error suggesting `bit push <remote>` or `bit push -u <remote>`
+
+This makes bit's remote behavior predictable for git users: explicit tracking setup via `-u`, explicit remote selection via argument, sensible defaults when configured.
 
 ---
 

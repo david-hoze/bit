@@ -257,7 +257,6 @@ addRemote name pathOrUrl = do
         Device.CloudRemote url -> do
             Device.writeRemoteFile cwd name (Device.TargetCloud url)
             void $ Git.addRemote name url
-            when (name == "origin") $ void Git.setupBranchTracking
             putStrLn $ "Remote '" ++ name ++ "' added (" ++ url ++ ")."
         Device.FilesystemPath path -> addRemoteFilesystem cwd name path
 
@@ -284,7 +283,6 @@ addRemoteFilesystem cwd name path = do
             mInfo <- Device.readDeviceFile cwd dev
             let storeType = maybe Device.Physical Device.deviceType mInfo
             Device.writeRemoteFile cwd name (Device.TargetDevice dev relPath)
-            when (name == "origin") $ void Git.setupBranchTracking
             putStrLn $ "Remote '" ++ name ++ "' → " ++ dev ++ ":" ++ relPath
             putStrLn $ "(using existing device '" ++ dev ++ "')"
             return ()
@@ -297,7 +295,6 @@ addRemoteFilesystem cwd name path = do
                 Device.Network -> return Nothing
             Device.writeDeviceFile cwd deviceName' (Device.DeviceInfo u storeType' mSerial)
             Device.writeRemoteFile cwd name (Device.TargetDevice deviceName' relPath)
-            when (name == "origin") $ void Git.setupBranchTracking
             putStrLn $ "Remote '" ++ name ++ "' → " ++ deviceName' ++ ":" ++ relPath
             putStrLn $ "Device '" ++ deviceName' ++ "' registered (" ++ (case storeType' of Device.Physical -> "physical"; Device.Network -> "network") ++ ")."
             return ()
@@ -312,7 +309,6 @@ addRemoteFilesystem cwd name path = do
                 Device.Network -> return Nothing
             Device.writeDeviceFile cwd deviceName' (Device.DeviceInfo u storeType' mSerial)
             Device.writeRemoteFile cwd name (Device.TargetDevice deviceName' relPath)
-            when (name == "origin") $ void Git.setupBranchTracking
             putStrLn $ "Remote '" ++ name ++ "' → " ++ deviceName' ++ ":" ++ relPath
             putStrLn $ "Device '" ++ deviceName' ++ "' registered (" ++ (case storeType' of Device.Physical -> "physical"; Device.Network -> "network") ++ ")."
             return ()
@@ -323,7 +319,6 @@ addRemoteFilesystem cwd name path = do
             -- Fall back to path-based storage for local directories
             Device.writeRemoteFile cwd name (Device.TargetLocalPath absPath)
             void $ Git.addRemote name absPath
-            when (name == "origin") $ void Git.setupBranchTracking
             putStrLn $ "Remote '" ++ name ++ "' added (" ++ absPath ++ ")."
 
 doMergeAbort :: IO ()
@@ -457,6 +452,18 @@ cloudPull remote opts =
 
 fetch :: BitM ()
 fetch = withRemote $ \remote -> do
+    cwd <- asks envCwd
+    
+    -- Determine if this is a filesystem or cloud remote
+    mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
+    case mTarget of
+        Just (Device.TargetDevice _ _) -> liftIO $ filesystemFetch cwd remote
+        Just (Device.TargetLocalPath _) -> liftIO $ filesystemFetch cwd remote
+        _ -> cloudFetch remote  -- Cloud remote or no target info (use cloud flow)
+
+-- | Fetch from a cloud remote (original flow, unchanged).
+cloudFetch :: Remote -> BitM ()
+cloudFetch remote = do
     mb <- liftIO $ fetchRemoteBundle remote
     liftIO $ saveFetchedBundle remote mb
 
@@ -773,7 +780,11 @@ withRemote :: (Remote -> BitM ()) -> BitM ()
 withRemote action = do
   mRemote <- asks envRemote
   case mRemote of
-    Nothing -> liftIO $ hPutStrLn stderr "Error: No remote configured."
+    Nothing -> liftIO $ do
+        hPutStrLn stderr "fatal: No upstream configured and no remote specified."
+        hPutStrLn stderr "hint: bit push <remote>"
+        hPutStrLn stderr "hint: bit push -u <remote>    (to set default upstream)"
+        exitWith (ExitFailure 1)
     Just remote -> action remote
 
 -- ============================================================================
@@ -966,6 +977,37 @@ parseFilesystemDiffOutput = mapMaybe parseLine . lines
             | otherwise -> Nothing
         _ -> Nothing
 
+-- | Fetch from a filesystem remote. Fetches commits without merging or syncing files.
+filesystemFetch :: FilePath -> Remote -> IO ()
+filesystemFetch cwd remote = do
+    let remotePath = remoteUrl remote
+    putStrLn $ "Fetching from filesystem remote: " ++ remotePath
+    
+    -- Check if remote has .bit/ directory
+    let remoteBitDir = remotePath </> ".bit"
+    remoteHasBit <- Dir.doesDirectoryExist remoteBitDir
+    unless remoteHasBit $ do
+        hPutStrLn stderr "error: Remote is not a bit repository."
+        exitWith (ExitFailure 1)
+    
+    -- Fetch remote into local
+    let remoteIndexGit = remotePath </> ".bit" </> "index" </> ".git"
+    let localIndex = cwd </> ".bit" </> "index"
+    
+    putStrLn "Fetching remote commits..."
+    (fetchCode, fetchOut, fetchErr) <- Git.runGitWithOutput 
+        ["fetch", remoteIndexGit, "main:refs/remotes/origin/main"]
+    
+    when (fetchCode /= ExitSuccess) $ do
+        hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
+        exitWith fetchCode
+    
+    -- Output fetch results similar to cloud fetch
+    hPutStrLn stderr $ "From " ++ remoteName remote
+    hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
+    
+    putStrLn "Fetch complete."
+
 -- | Pull from a filesystem remote. Fetches directly from the remote's .bit/index/.git.
 filesystemPull :: FilePath -> Remote -> PullOptions -> IO ()
 filesystemPull cwd remote opts = do
@@ -994,10 +1036,6 @@ filesystemPull cwd remote opts = do
     -- Output fetch results similar to cloud pull
     hPutStrLn stderr $ "From " ++ remoteName remote
     hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
-    
-    -- 2. Set up tracking (if not already)
-    void $ Git.runGitWithOutput ["config", "branch.main.remote", "origin"]
-    void $ Git.runGitWithOutput ["config", "branch.main.merge", "refs/heads/main"]
     
     -- 3. Get remote HEAD hash
     (remoteHeadCode, remoteHeadOut, _) <- Git.runGitWithOutput ["rev-parse", "refs/remotes/origin/main"]

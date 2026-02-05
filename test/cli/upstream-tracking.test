@@ -1,0 +1,214 @@
+# =============================================================================
+# Upstream Tracking Tests
+#
+# Tests git-standard upstream tracking behavior:
+# - bit remote add does NOT auto-set upstream (even for "origin")
+# - bit push -u / --set-upstream sets upstream and pushes
+# - bit push/pull/fetch <remote> works without setting upstream
+# - Clear error messages when no upstream configured
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\upstream-local 2>nul & rmdir /s /q test\cli\upstream-local2 2>nul & rmdir /s /q test\cli\upstream-local3 2>nul & rmdir /s /q test\cli\upstream-local4 2>nul & rmdir /s /q test\cli\upstream-remote 2>nul & rmdir /s /q test\cli\upstream-remote3 2>nul & rmdir /s /q test\cli\upstream-remote4 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP AND BASIC TESTS
+# ======================================================================
+
+# Setup: Create local repo
+rmdir /s /q test\cli\upstream-local 2>nul & mkdir test\cli\upstream-local & cd test\cli\upstream-local & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Setup: Create remote repo (filesystem)
+rmdir /s /q test\cli\upstream-remote 2>nul & mkdir test\cli\upstream-remote & cd test\cli\upstream-remote & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Add remote (should NOT auto-set upstream, even for "origin")
+cd test\cli\upstream-local & bit remote add origin ..\upstream-remote
+<<<
+>>> /Remote 'origin' added/
+>>>= 0
+
+# Check branch.main.remote is NOT set (git config will fail)
+cd test\cli\upstream-local & git -C .bit\index config --get branch.main.remote 2>nul
+<<<
+>>>
+>>>= 1
+
+# Create initial commit in local
+cd test\cli\upstream-local & echo hello> test.txt & bit add test.txt & bit commit -m "Initial commit"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Test 1: bit push without upstream but with "origin" uses origin as fallback (git behavior)
+cd test\cli\upstream-local & bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Test 2: bit push <remote> should work without setting upstream
+cd test\cli\upstream-local & bit push origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Verify upstream is still NOT set
+cd test\cli\upstream-local & git -C .bit\index config --get branch.main.remote 2>nul
+<<<
+>>>
+>>>= 1
+
+# Create second commit
+cd test\cli\upstream-local & echo world> test2.txt & bit add test2.txt & bit commit -m "Second commit"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Test 3: bit push -u <remote> should push and set upstream
+cd test\cli\upstream-local & bit push -u origin
+<<<
+>>> /branch 'main' set up to track 'origin\/main'/
+>>>= 0
+
+# Verify upstream IS now set
+cd test\cli\upstream-local & git -C .bit\index config --get branch.main.remote
+<<<
+>>>
+origin
+>>>= 0
+
+# Test 4: After -u, plain bit push should work
+cd test\cli\upstream-local & echo more> test3.txt & bit add test3.txt & bit commit -m "Third commit"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+cd test\cli\upstream-local & bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Setup for pull/fetch test: Create second local repo without upstream
+rmdir /s /q test\cli\upstream-local2 2>nul & mkdir test\cli\upstream-local2 & cd test\cli\upstream-local2 & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\upstream-local2 & bit remote add origin ..\upstream-remote
+<<<
+>>> /Remote 'origin' added/
+>>>= 0
+
+# Test 5: bit fetch <remote> should work without setting upstream
+cd test\cli\upstream-local2 & bit fetch origin 2>&1
+<<<
+>>> /From origin/
+>>>= 0
+
+# Verify upstream still NOT set
+cd test\cli\upstream-local2 & git -C .bit\index config --get branch.main.remote 2>nul
+<<<
+>>>
+>>>= 1
+
+# Test 6: bit pull <remote> works without setting upstream
+cd test\cli\upstream-local2 & bit pull origin
+<<<
+>>> /Pull complete|Syncing binaries/
+>>>= 0
+
+# Verify upstream still NOT set after pull (git pull doesn't auto-set tracking)
+cd test\cli\upstream-local2 & git -C .bit\index config --get branch.main.remote 2>nul
+<<<
+>>>
+>>>= 1
+
+# Test 7: bit push --set-upstream <remote> is equivalent to -u
+rmdir /s /q test\cli\upstream-local3 2>nul & mkdir test\cli\upstream-local3 & cd test\cli\upstream-local3 & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Create separate remote for this test
+rmdir /s /q test\cli\upstream-remote3 2>nul & mkdir test\cli\upstream-remote3 & cd test\cli\upstream-remote3 & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\upstream-local3 & bit remote add myremote ..\upstream-remote3
+<<<
+>>> /Remote 'myremote' added/
+>>>= 0
+
+cd test\cli\upstream-local3 & echo test> file.txt & bit add file.txt & bit commit -m "Test commit"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+cd test\cli\upstream-local3 & bit push --set-upstream myremote
+<<<
+>>> /branch 'main' set up to track 'myremote\/main'/
+>>>= 0
+
+# Verify upstream is set to myremote (not origin)
+cd test\cli\upstream-local3 & git -C .bit\index config --get branch.main.remote
+<<<
+>>>
+myremote
+>>>= 0
+
+# Test 8: bit push fails with clear error when no upstream and no origin
+rmdir /s /q test\cli\upstream-local4 2>nul & mkdir test\cli\upstream-local4 & cd test\cli\upstream-local4 & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Create separate remote for this test
+rmdir /s /q test\cli\upstream-remote4 2>nul & mkdir test\cli\upstream-remote4 & cd test\cli\upstream-remote4 & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\upstream-local4 & bit remote add foo ..\upstream-remote4
+<<<
+>>> /Remote 'foo' added/
+>>>= 0
+
+cd test\cli\upstream-local4 & echo test> file.txt & bit add file.txt & bit commit -m "Test"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+cd test\cli\upstream-local4 & bit push 2>&1
+<<<
+>>> /fatal: No upstream configured/
+>>>= 1
+
+cd test\cli\upstream-local4 & bit push 2>&1
+<<<
+>>> /hint: bit push <remote>/
+>>>= 1
+
+cd test\cli\upstream-local4 & bit push 2>&1
+<<<
+>>> /hint: bit push -u <remote>/
+>>>= 1
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\upstream-local 2>nul & rmdir /s /q test\cli\upstream-local2 2>nul & rmdir /s /q test\cli\upstream-local3 2>nul & rmdir /s /q test\cli\upstream-local4 2>nul & rmdir /s /q test\cli\upstream-remote 2>nul & rmdir /s /q test\cli\upstream-remote3 2>nul & rmdir /s /q test\cli\upstream-remote4 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

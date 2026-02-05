@@ -13,6 +13,7 @@ import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
+import qualified Internal.Git as Git
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -22,8 +23,46 @@ run :: IO ()
 run = do
     args <- getArgs
     case args of
-        [] -> hPutStrLn stderr "Usage: bit [init|status|add|commit|log|restore|checkout|fetch|pull|push|verify|verify --remote|fsck|branch --unset-upstream|remote add <name> <url>|remote show [<name>]|remote check [<name>]]"
+        [] -> hPutStrLn stderr $ unlines
+            [ "Usage: bit <command> [options]"
+            , ""
+            , "Commands:"
+            , "  init                           Initialize a new bit repository"
+            , "  status                         Show working tree status"
+            , "  add <path>                     Add file contents to metadata"
+            , "  commit -m <msg>                Record changes to the repository"
+            , "  log                            Show commit history"
+            , "  diff                           Show changes"
+            , "  restore [options] [--] <path>  Restore working tree files"
+            , "  checkout [options] -- <path>   Checkout files from index"
+            , ""
+            , "  push [-u|--set-upstream] [<remote>]"
+            , "                                 Push to remote"
+            , "  pull [<remote>] [options]      Pull from remote"
+            , "      --accept-remote            Accept remote state as truth"
+            , "      --manual-merge             Manual conflict resolution"
+            , "  fetch [<remote>]               Fetch metadata from remote"
+            , ""
+            , "  remote add <name> <url>        Add a remote"
+            , "  remote show [<name>]           Show remote information"
+            , "  remote check [<name>]          Check remote connectivity"
+            , ""
+            , "  verify [--remote]              Verify file integrity"
+            , "  fsck                           Full integrity check"
+            , "  merge --continue|--abort       Continue or abort merge"
+            , "  branch --unset-upstream        Unset upstream tracking"
+            ]
         _  -> runCommand args
+
+-- | Helper function to push with upstream tracking
+pushWithUpstream :: BitEnv -> FilePath -> String -> IO ()
+pushWithUpstream env cwd name = do
+    mNamedRemote <- resolveRemote cwd name
+    let envWithRemote = env { envRemote = mNamedRemote }
+    runBitM envWithRemote Bit.push
+    -- After successful push, set upstream tracking
+    void $ Git.setupBranchTrackingFor name
+    putStrLn $ "branch 'main' set up to track '" ++ name ++ "/main'."
 
 runCommand :: [String] -> IO ()
 runCommand args = do
@@ -103,11 +142,48 @@ runCommand args = do
         ("restore":rest)                -> runBitM env (Bit.restore rest) >>= exitWith
         ("checkout":rest)               -> runBitM env (Bit.checkout rest) >>= exitWith
         ("status":rest)                 -> runBitM env (Bit.status rest) >>= exitWith
-        ["fetch"]                       -> runBitM env Bit.fetch
+        
+        -- push
+        ["push"]                        -> runBitM env Bit.push
+        ["push", "-u", name]            -> pushWithUpstream env cwd name
+        ["push", "--set-upstream", name] -> pushWithUpstream env cwd name
+        ["push", name]                  -> do
+            mNamedRemote <- resolveRemote cwd name
+            let envWithRemote = env { envRemote = mNamedRemote }
+            runBitM envWithRemote Bit.push
+        
+        -- pull
         ["pull"]                        -> runBitM env $ Bit.pull Bit.defaultPullOptions
+        ["pull", name]                  -> do
+            mNamedRemote <- resolveRemote cwd name
+            let envWithRemote = env { envRemote = mNamedRemote }
+            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions
         ["pull", "--accept-remote"]     -> runBitM env $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
         ["pull", "--manual-merge"]      -> runBitM env $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
-        ["push"]                        -> runBitM env Bit.push
+        ["pull", name, "--accept-remote"] -> do
+            mNamedRemote <- resolveRemote cwd name
+            let envWithRemote = env { envRemote = mNamedRemote }
+            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
+        ["pull", "--accept-remote", name] -> do
+            mNamedRemote <- resolveRemote cwd name
+            let envWithRemote = env { envRemote = mNamedRemote }
+            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
+        ["pull", name, "--manual-merge"] -> do
+            mNamedRemote <- resolveRemote cwd name
+            let envWithRemote = env { envRemote = mNamedRemote }
+            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
+        ["pull", "--manual-merge", name] -> do
+            mNamedRemote <- resolveRemote cwd name
+            let envWithRemote = env { envRemote = mNamedRemote }
+            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
+        
+        -- fetch
+        ["fetch"]                       -> runBitM env Bit.fetch
+        ["fetch", name]                 -> do
+            mNamedRemote <- resolveRemote cwd name
+            let envWithRemote = env { envRemote = mNamedRemote }
+            runBitM envWithRemote Bit.fetch
+        
         ["merge", "--continue"]         -> runBitM env Bit.mergeContinue
         ["merge", "--abort"]            -> Bit.mergeAbort
         ["branch", "--unset-upstream"]  -> Bit.unsetUpstream
