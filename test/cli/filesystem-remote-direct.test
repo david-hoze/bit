@@ -1,8 +1,8 @@
 # Filesystem Remote Direct Tests
 # Tests running bit commands directly at the filesystem remote location
 
-# Setup: Clean workspace
-rmdir /s /q test\cli\work_direct 2>nul & rmdir /s /q test\cli\fs_remote_direct 2>nul & mkdir test\cli\work_direct & mkdir test\cli\fs_remote_direct
+# Setup: Clean workspace (timeout helps Windows release file handles)
+timeout /t 1 >nul & rmdir /s /q test\cli\work_direct 2>nul & rmdir /s /q test\cli\fs_remote_direct 2>nul & mkdir test\cli\work_direct & mkdir test\cli\fs_remote_direct
 <<<
 >>>
 >>>= 0
@@ -88,7 +88,7 @@ other exists
 # CLEANUP
 # ======================================================================
 
-rmdir /s /q test\cli\work_direct 2>nul & rmdir /s /q test\cli\fs_remote_direct 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\work_direct 2>nul & rmdir /s /q test\cli\fs_remote_direct 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done

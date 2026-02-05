@@ -1,63 +1,63 @@
 # rclone Google Drive remote tests (gdrive-test)
-# Uses two repos: work_a (pusher) and work_b (puller).
+# Uses two repos: work_gdrive_a (pusher) and work_gdrive_b (puller).
 # Requires: rclone remote "gdrive-test" configured; path "bit-test" used on that remote.
 
-# --- Setup: clean work dirs and remote ---
-rmdir /s /q test\cli\work_a 2>nul & rmdir /s /q test\cli\work_b 2>nul & mkdir test\cli\work_a & mkdir test\cli\work_b & rclone purge gdrive-test:bit-test 2>nul & rclone mkdir gdrive-test:bit-test
+# --- Setup: clean work dirs and remote (timeout helps Windows release file handles) ---
+timeout /t 1 >nul & rmdir /s /q test\cli\work_gdrive_a 2>nul & rmdir /s /q test\cli\work_gdrive_b 2>nul & mkdir test\cli\work_gdrive_a & mkdir test\cli\work_gdrive_b & rclone purge gdrive-test:bit-test 2>nul & rclone mkdir gdrive-test:bit-test
 <<<
 >>>
 >>>= 0
 
 # --- Repo A: init (use main branch for fetch/pull), add remote, add file, commit, push ---
-cd test\cli\work_a & bit init
+cd test\cli\work_gdrive_a & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work_a & bit remote add origin gdrive-test:bit-test
+cd test\cli\work_gdrive_a & bit remote add origin gdrive-test:bit-test
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\work_a & echo hello from A> foo.txt & echo x> bar.bin & bit add foo.txt bar.bin & bit commit -m "Add foo and bar"
+cd test\cli\work_gdrive_a & echo hello from A> foo.txt & echo x> bar.bin & bit add foo.txt bar.bin & bit commit -m "Add foo and bar"
 <<<
 >>> /\[master|main|file changed/
 >>>= 0
 
-cd test\cli\work_a & bit push
+cd test\cli\work_gdrive_a & bit push
 <<<
 >>> /Metadata push complete\.|Remote is empty|Remote check passed/
 >>>= 0
 
 # --- A: remote check after push: all files on remote, should match ---
-cd test\cli\work_a & bit remote check
+cd test\cli\work_gdrive_a & bit remote check
 <<<
 >>> /files match between local and remote/
 >>>= 0
 
 # --- Repo B: init, add remote, fetch, pull ---
-cd test\cli\work_b & bit init
+cd test\cli\work_gdrive_b & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work_b & bit remote add origin gdrive-test:bit-test
+cd test\cli\work_gdrive_b & bit remote add origin gdrive-test:bit-test
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\work_b & bit fetch
+cd test\cli\work_gdrive_b & bit fetch
 <<<
 >>>2 /From gdrive-test:bit-test|new branch.*origin\/main/
 >>>= 0
 
-cd test\cli\work_b & bit pull
+cd test\cli\work_gdrive_b & bit pull
 <<<
 >>> /first pull|Checking out|Syncing binaries|Merge made|remote: Counting/
 >>>= 0
 
 # --- Verify B has the file from A (text in index, binary in work tree) ---
-findstr /C:"hello from A" test\cli\work_b\.bit\index\foo.txt >nul
+findstr /C:"hello from A" test\cli\work_gdrive_b\.bit\index\foo.txt >nul
 <<<
 >>>
 >>>= 0
@@ -69,68 +69,68 @@ rclone deletefile gdrive-test:bit-test/bar.bin
 >>>= 0
 
 # --- B: verify --remote may report missing file or 0 files (bundle metadata) ---
-cd test\cli\work_b & bit verify --remote
+cd test\cli\work_gdrive_b & bit verify --remote
 <<<
 >>> /Missing:|issues found|ERROR|\[OK\] All files match|Verifying 0/
 >>>= 0
 
 # --- Restore remote: push from A again (re-syncs files + bundle) ---
-cd test\cli\work_a & bit push
+cd test\cli\work_gdrive_a & bit push
 <<<
 >>> /Metadata push complete\.|Remote check passed|Pulling changes|up to date/
 >>>= 0
 
 # --- B: fetch and pull to get restored state ---
-cd test\cli\work_b & bit fetch
+cd test\cli\work_gdrive_b & bit fetch
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_b & bit pull
+cd test\cli\work_gdrive_b & bit pull
 <<<
 >>> /up to date|Merge made|Syncing binaries|first pull/
 >>>= 0
 
 # --- B: verify --remote should be clean again ---
-cd test\cli\work_b & bit verify --remote
+cd test\cli\work_gdrive_b & bit verify --remote
 <<<
 >>> /\[OK\] All files match|Verifying/
 >>>= 0
 
-findstr /C:"hello from A" test\cli\work_b\.bit\index\foo.txt >nul
+findstr /C:"hello from A" test\cli\work_gdrive_b\.bit\index\foo.txt >nul
 <<<
 >>>
 >>>= 0
 
 # --- Second round: A adds another file, pushes; B pulls ---
-cd test\cli\work_a & echo second file> baz.txt & bit add baz.txt & bit commit -m "Add baz" & bit push
+cd test\cli\work_gdrive_a & echo second file> baz.txt & bit add baz.txt & bit commit -m "Add baz" & bit push
 <<<
 >>> /Metadata push complete\.|Remote check passed|file changed/
 >>>= 0
 
-cd test\cli\work_b & bit fetch & bit pull
+cd test\cli\work_gdrive_b & bit fetch & bit pull
 <<<
 >>>2 /From (gdrive-test|\.git\\fetched_remote\.bundle)|Merge made|Syncing|Updating|remote: Counting/
 >>>= 0
 
-findstr /C:"second file" test\cli\work_b\.bit\index\baz.txt >nul
+findstr /C:"second file" test\cli\work_gdrive_b\.bit\index\baz.txt >nul
 <<<
 >>>
 >>>= 0
 
 # --- Corrupt again: add an orphan file on remote with rclone ---
-echo junk content> test\cli\work_b\junk.tmp & rclone copyto test\cli\work_b\junk.tmp gdrive-test:bit-test/orphan.txt
+echo junk content> test\cli\work_gdrive_b\junk.tmp & rclone copyto test\cli\work_gdrive_b\junk.tmp gdrive-test:bit-test/orphan.txt
 <<<
 >>>
 >>>= 0
 
 # --- B: fetch (bundle unchanged), then pull: local should not get orphan; verify --remote ---
-cd test\cli\work_b & bit fetch
+cd test\cli\work_gdrive_b & bit fetch
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_b & bit verify --remote
+cd test\cli\work_gdrive_b & bit verify --remote
 <<<
 >>> /Verifying|All files match|issues found/
 >>>= 0
@@ -139,4 +139,11 @@ cd test\cli\work_b & bit verify --remote
 rclone deletefile gdrive-test:bit-test/orphan.txt
 <<<
 >>>
+>>>= 0
+
+# --- Final cleanup: remove local work directories ---
+timeout /t 1 >nul & rmdir /s /q test\cli\work_gdrive_a & rmdir /s /q test\cli\work_gdrive_b & echo cleanup done
+<<<
+>>>
+cleanup done
 >>>= 0

@@ -1,0 +1,16 @@
+# =============================================================================
+# Global Pre-Test Cleanup
+#
+# This file runs first alphabetically (000-) and ensures a clean test state
+# before any other tests execute. This prevents test interference due to
+# leftover directories from previous test runs or interrupted tests.
+#
+# Note: We use timeout to give Windows time to release file handles.
+# =============================================================================
+
+# ---- Clean up all known test directories ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\work_a 2>nul & rmdir /s /q test\cli\work_b 2>nul & rmdir /s /q test\cli\work_gdrive_a 2>nul & rmdir /s /q test\cli\work_gdrive_b 2>nul & rmdir /s /q test\cli\work_merge_a 2>nul & rmdir /s /q test\cli\work_merge_b 2>nul & rmdir /s /q test\cli\work_direct 2>nul & rmdir /s /q test\cli\shared_remote 2>nul & rmdir /s /q test\cli\shared_merge_remote 2>nul & rmdir /s /q test\cli\fs_remote_direct 2>nul & rmdir /s /q test\cli\device_prompt_remote 2>nul & rmdir /s /q test\cli\remote_mirror 2>nul & echo global cleanup done
+<<<
+>>>
+global cleanup done
+>>>= 0
