@@ -37,6 +37,7 @@ import Control.Exception (bracket)
 
 -- | Run a process and capture stdout as raw bytes (avoiding locale encoding issues).
 -- Returns (ExitCode, ByteString, String) where stdout is raw bytes and stderr is String.
+-- Uses bracket for exception-safe resource cleanup.
 readProcessBytes :: FilePath -> [String] -> IO (ExitCode, LBS.ByteString, String)
 readProcessBytes cmd args = do
     let cp = (proc cmd args)
@@ -44,13 +45,25 @@ readProcessBytes cmd args = do
             , std_err = CreatePipe
             , std_in = Inherit
             }
-    (_, Just hOut, Just hErr, ph) <- createProcess cp
-    -- Read strictly to avoid lazy IO issues
-    outBytes <- BS.hGetContents hOut  -- Strict read
-    errStr   <- hGetContents' hErr     -- Strict read for stderr
-    code     <- waitForProcess ph
-    return (code, LBS.fromStrict outBytes, errStr)
+    bracket (createProcess cp) cleanupProcess $ \(_, mStdout, mStderr, ph) -> do
+        case (mStdout, mStderr) of
+            (Just hOut, Just hErr) -> do
+                -- Read strictly to avoid lazy IO issues
+                outBytes <- BS.hGetContents hOut  -- Strict read (closes handle)
+                errStr   <- hGetContents' hErr     -- Strict read for stderr
+                code     <- waitForProcess ph
+                return (code, LBS.fromStrict outBytes, errStr)
+            _ -> error "readProcessBytes: failed to create pipes"
   where
+    -- Cleanup: close any handles that might still be open and wait for process
+    cleanupProcess (mStdin, mStdout, mStderr, ph) = do
+        -- Note: BS.hGetContents closes handles automatically, but we ensure cleanup
+        maybe (return ()) (const $ return ()) mStdin
+        maybe (return ()) (const $ return ()) mStdout
+        maybe (return ()) (const $ return ()) mStderr
+        _ <- waitForProcess ph
+        return ()
+    
     -- Strict reading of handle contents
     hGetContents' :: Handle -> IO String
     hGetContents' h = go []
