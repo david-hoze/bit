@@ -9,8 +9,11 @@ executable bit
         -- -Wunused-imports
         -- -Widentities
         -- -Wincomplete-patterns
-    other-modules:    Bit.Commands,
+    other-modules:    Bit.AtomicWrite,
+                      Bit.Commands,
                       Bit.Conflict,
+                      Bit.ConcurrentIO,
+                      Bit.ConcurrentFileIO,
                       Bit.Device,
                       Bit.DevicePrompt,
                       Bit.Diff,

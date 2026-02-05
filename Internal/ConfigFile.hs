@@ -14,7 +14,8 @@ import Data.List (isPrefixOf)
 import Data.Maybe (fromMaybe)
 import Control.Monad (when)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
+import qualified Data.Text.Encoding as T
+import qualified Data.ByteString as BS
 import Internal.Config (bitDir)
 
 -- | Configuration for text file classification
@@ -36,13 +37,17 @@ configPath = bitDir </> "config"
 
 -- | Read the entire config file and return TextConfig
 -- Falls back to defaultTextConfig if file doesn't exist or parsing fails
+-- Uses strict ByteString reading to avoid Windows file locking issues
 readTextConfig :: IO TextConfig
 readTextConfig = do
   exists <- doesFileExist configPath
   if not exists
     then return defaultTextConfig
     else do
-      content <- TIO.readFile configPath
+      bs <- BS.readFile configPath
+      let content = case T.decodeUtf8' bs of
+            Left _ -> T.empty  -- Invalid UTF-8, use defaults
+            Right txt -> txt
       return $ parseConfig content
 
 -- | Read config file (for future expansion)

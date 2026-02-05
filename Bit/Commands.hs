@@ -6,12 +6,17 @@ import qualified Bit.Core as Bit
 import Bit.Types (BitEnv(..), runBitM)
 import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
 import Bit.Remote (getDefaultRemote, resolveRemote)
+import Bit.Utils (atomicWriteFileStr)
 import System.Environment (getArgs)
 import System.Exit (ExitCode(..), exitWith)
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
+-- Strict IO imports to avoid Windows file locking issues
+import qualified Data.ByteString as BS
+import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8')
 
 run :: IO ()
 run = do
@@ -49,10 +54,14 @@ runCommand args = do
         bitignoreExists <- Dir.doesFileExist bitignoreSrc
         if bitignoreExists
             then do
-                content <- readFile bitignoreSrc
+                -- Use strict ByteString reading to avoid Windows file locking issues
+                bs <- BS.readFile bitignoreSrc
+                let content = case decodeUtf8' bs of
+                      Left _ -> ""
+                      Right txt -> T.unpack txt
                 -- Normalize: trim each line, remove empty lines, use LF endings
                 let normalizedLines = filter (not . null) $ map (dropWhile (== ' ') . reverse . dropWhile (== ' ') . reverse . filter (/= '\r')) (lines content)
-                writeFile bitignoreDest (unlines normalizedLines)
+                atomicWriteFileStr bitignoreDest (unlines normalizedLines)
             else do
                 -- Remove stale .gitignore if root .bitignore doesn't exist
                 destExists <- Dir.doesFileExist bitignoreDest

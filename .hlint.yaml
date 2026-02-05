@@ -1,0 +1,125 @@
+# .hlint.yaml - HLint configuration for the bit project
+#
+# This configuration bans lazy IO functions to prevent Windows file locking
+# issues in concurrent code. Use strict ByteString operations instead.
+#
+# Run: hlint .
+# CI integration: hlint --hint=.hlint.yaml .
+
+# ============================================================================
+# Ban lazy IO functions project-wide
+# ============================================================================
+
+- functions:
+  # Prelude lazy IO - these keep file handles open lazily
+  - name: Prelude.readFile
+    within: []
+    message: "Use Bit.ConcurrentFileIO.readFileBinaryStrict or BS.readFile instead"
+  
+  - name: Prelude.writeFile
+    within: []
+    message: "Use Bit.ConcurrentFileIO.writeFileBinaryStrict or Bit.Utils.atomicWriteFile instead"
+  
+  - name: Prelude.appendFile
+    within: []
+    message: "appendFile uses lazy IO. Use strict ByteString operations instead."
+  
+  - name: Prelude.getContents
+    within: []
+    message: "getContents uses lazy IO. Use strict ByteString operations instead."
+  
+  - name: Prelude.interact
+    within: []
+    message: "interact uses lazy IO. Use strict ByteString operations instead."
+
+  # System.IO lazy functions
+  - name: System.IO.readFile
+    within: []
+    message: "Use Bit.ConcurrentFileIO.readFileBinaryStrict or BS.readFile instead"
+  
+  - name: System.IO.hGetContents
+    within: []
+    message: "hGetContents uses lazy IO. Use BS.hGetContents or read in chunks instead."
+
+  # Lazy ByteString
+  - name: Data.ByteString.Lazy.readFile
+    within: []
+    message: "Use strict Data.ByteString.readFile via Bit.ConcurrentFileIO"
+  
+  - name: Data.ByteString.Lazy.hGetContents
+    within: []
+    message: "Use strict Data.ByteString.hGetContents instead"
+
+  # Lazy Text IO - particularly problematic as it combines lazy IO with encoding
+  - name: Data.Text.IO.readFile
+    within: []
+    message: "Data.Text.IO.readFile uses lazy IO. Use ByteString.readFile + decodeUtf8'"
+  
+  - name: Data.Text.Lazy.IO.readFile
+    within: []
+    message: "Use strict ByteString.readFile + decodeUtf8' instead"
+  
+  - name: Data.Text.Lazy.IO.hGetContents
+    within: []
+    message: "Use strict ByteString operations + decodeUtf8' instead"
+
+# ============================================================================
+# Ban entire lazy modules
+# ============================================================================
+
+- modules:
+  - name: Data.ByteString.Lazy
+    within: []
+    message: "Lazy ByteString banned in this project - use strict Data.ByteString"
+  
+  - name: Data.Text.Lazy.IO
+    within: []
+    message: "Lazy Text IO banned - use strict ByteString + decodeUtf8'"
+
+# ============================================================================
+# Suggest strict replacements
+# ============================================================================
+
+- warn:
+    lhs: "readFile path"
+    rhs: "BS.readFile path"
+    note: "Use strict ByteString.readFile for concurrent safety"
+
+- warn:
+    lhs: "writeFile path content"
+    rhs: "Bit.Utils.atomicWriteFile path content"
+    note: "Use atomic writes for safety on Windows"
+
+# ============================================================================
+# Project-specific hints
+# ============================================================================
+
+# Prefer atomic writes for important files
+- warn:
+    lhs: "BS.writeFile path content"
+    rhs: "Bit.Utils.atomicWriteFile path content"
+    note: "Consider using atomicWriteFile for crash safety"
+    severity: Suggestion
+
+# Encourage use of readFileMaybe pattern
+- warn:
+    lhs: "try (BS.readFile path)"
+    rhs: "Bit.ConcurrentFileIO.readFileMaybe path"
+    note: "Use readFileMaybe for cleaner error handling"
+    severity: Suggestion
+
+# ============================================================================
+# Standard HLint rules (good defaults)
+# ============================================================================
+
+- warn:
+    name: Use strict foldl
+    lhs: "foldl f z xs"
+    rhs: "Data.List.foldl' f z xs"
+    note: "Use strict foldl' to avoid space leaks"
+
+- warn:
+    name: Use strict modifyIORef
+    lhs: "modifyIORef ref f"
+    rhs: "modifyIORef' ref f"
+    note: "Use strict modifyIORef' to avoid thunk buildup"

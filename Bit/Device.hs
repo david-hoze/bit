@@ -47,6 +47,11 @@ import qualified System.Info as Info
 import Data.UUID (UUID, toString, fromString)
 import Data.UUID.V4 (nextRandom)
 import Internal.Config (bitDevicesDir, bitRemotesDir)
+-- Strict IO imports to avoid Windows file locking issues
+import qualified Data.ByteString as BS
+import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8', encodeUtf8)
+import Bit.AtomicWrite (atomicWriteFile)
 
 -- ---------------------------------------------------------------------------
 -- Types
@@ -278,7 +283,11 @@ readBitStore volumeRoot = do
   exists <- Dir.doesFileExist storePath
   if not exists then return Nothing
   else do
-    content <- readFile storePath
+    -- Use strict ByteString reading to avoid Windows file locking issues
+    bs <- BS.readFile storePath
+    let content = case decodeUtf8' bs of
+          Left _ -> ""
+          Right txt -> T.unpack txt
     return (parseBitStoreUuid content)
 
 parseBitStoreUuid :: String -> Maybe UUID
@@ -295,7 +304,8 @@ writeBitStore volumeRoot u = do
         , "created: " ++ ts
         ]
   let storePath = volumeRoot </> bitStoreFileName
-  writeFile storePath content
+  -- Use atomic write for crash safety and Windows compatibility
+  atomicWriteFile storePath (encodeUtf8 (T.pack content))
   when isWindows $ setHidden storePath
 
 setHidden :: FilePath -> IO ()
@@ -327,7 +337,13 @@ readDeviceFile repoRoot deviceName = do
   let path = repoRoot </> bitDevicesDir </> deviceName
   exists <- Dir.doesFileExist path
   if not exists then return Nothing
-  else parseDeviceFile <$> readFile path
+  else do
+    -- Use strict ByteString reading to avoid Windows file locking issues
+    bs <- BS.readFile path
+    let content = case decodeUtf8' bs of
+          Left _ -> ""
+          Right txt -> T.unpack txt
+    return (parseDeviceFile content)
 
 writeDeviceFile :: FilePath -> String -> DeviceInfo -> IO ()
 writeDeviceFile repoRoot deviceName info = do
@@ -337,7 +353,8 @@ writeDeviceFile repoRoot deviceName info = do
         [ "uuid: " ++ toString (deviceUuid info)
         , "type: " ++ (case deviceType info of Physical -> "physical"; Network -> "network")
         ] ++ [ "hardware_serial: " ++ s | Just s <- [hardwareSerial info] ]
-  writeFile path body
+  -- Use atomic write for crash safety and Windows compatibility
+  atomicWriteFile path (encodeUtf8 (T.pack body))
 
 listDeviceNames :: FilePath -> IO [String]
 listDeviceNames repoRoot = do
@@ -381,7 +398,12 @@ readRemoteFile repoRoot remoteName = do
   exists <- Dir.doesFileExist path
   if not exists then return Nothing
   else do
-    raw <- parseRemoteFile <$> readFile path
+    -- Use strict ByteString reading to avoid Windows file locking issues
+    bs <- BS.readFile path
+    let content = case decodeUtf8' bs of
+          Left _ -> ""
+          Right txt -> T.unpack txt
+    let raw = parseRemoteFile content
     case raw of
       Nothing -> return Nothing
       Just (ParsedLocal p) -> return (Just (TargetLocalPath p))
@@ -400,7 +422,8 @@ writeRemoteFile repoRoot remoteName target = do
         TargetCloud url -> "target: " ++ url
         TargetDevice dev p -> "target: " ++ dev ++ ":" ++ p
         TargetLocalPath p -> "target: local:" ++ p
-  writeFile path line
+  -- Use atomic write for crash safety and Windows compatibility
+  atomicWriteFile path (encodeUtf8 (T.pack line))
 
 -- | Parse a target string (e.g. "black_usb:Backup" or "gdrive:Projects/foo")
 parseRemoteTarget :: String -> RemoteTarget

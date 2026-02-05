@@ -202,7 +202,11 @@ checkIgnoredFiles root paths = do
     if not exists
         then return Set.empty
         else do
-            content <- readFile gitignorePath
+            -- Use strict ByteString reading to avoid lazy file handle issues on Windows
+            bs <- BS.readFile gitignorePath
+            let content = case decodeUtf8' bs of
+                    Left _ -> ""  -- Invalid UTF-8, treat as empty
+                    Right txt -> T.unpack txt
             let whitespace = ['\r', '\n', ' '] :: [Char]
             let patterns = filter (not . null) $ 
                            filter (not . ("#" `isPrefixOf`)) $  -- Skip comments

@@ -83,7 +83,11 @@ import System.IO (hFlush, stdout, stderr, hPutStrLn, hIsTerminalDevice)
 import System.Process (readProcessWithExitCode)
 import Data.Maybe (fromMaybe, listToMaybe, maybe, maybeToList, mapMaybe)
 import Data.Either (either)
-import Bit.Utils (toPosix, filterOutBitPaths)
+import Bit.Utils (toPosix, filterOutBitPaths, atomicWriteFileStr)
+-- Strict IO imports to avoid Windows file locking issues
+import qualified Data.ByteString as BS
+import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8')
 import qualified Bit.Device as Device
 import qualified Bit.DevicePrompt as DevicePrompt
 import qualified Bit.Conflict as Conflict
@@ -225,7 +229,7 @@ initializeRepoAt targetDir = do
                 , "    size-limit = 1048576  # 1MB, files larger are always binary"
                 , "    extensions = .txt,.md,.yaml,.yml,.json,.xml,.html,.css,.js,.py,.hs,.rs"
                 ]
-        writeFile configPath defaultConfig
+        atomicWriteFileStr configPath defaultConfig
 
     -- 5b. Merge driver: prevent Git from writing conflict markers; bit resolves whole-file only
     -- Use .bit/index/.git/info/attributes instead of .gitattributes in the working tree
@@ -234,7 +238,7 @@ initializeRepoAt targetDir = do
     void $ Git.runGitAt targetBitIndexPath ["config", "merge.bit-metadata.name", "bit metadata"]
     void $ Git.runGitAt targetBitIndexPath ["config", "merge.bit-metadata.driver", "false"]
     Dir.createDirectoryIfMissing True (targetBitGitDir </> "info")
-    writeFile (targetBitGitDir </> "info" </> "attributes") "* merge=bit-metadata -text\n"
+    atomicWriteFileStr (targetBitGitDir </> "info" </> "attributes") "* merge=bit-metadata -text\n"
 
     -- 5c. The .git/info/exclude file is created in Commands.hs from .bitignore
     -- (this happens before each scan, not during init)
@@ -549,7 +553,7 @@ remoteCheck mName = do
                 Right cr -> do
                     let reportPath = cwd </> bitDir </> "last-check.txt"
                     liftIO $ createDirectoryIfMissing True (cwd </> bitDir)
-                    liftIO $ writeFile reportPath (Transport.checkRawOutput cr)
+                    liftIO $ atomicWriteFileStr reportPath (Transport.checkRawOutput cr)
                     let matches = Transport.checkMatches cr
                         differs = Transport.checkDiffers cr
                         missingDest = Transport.checkMissingDest cr
@@ -691,12 +695,17 @@ copyFromIndexToWorkTree localRoot path = do
     createDirectoryIfMissing True (takeDirectory workPath)
     copyFile metaPath workPath
 
--- | Helper to read a file safely (returns Nothing on error)
+-- | Helper to read a file safely (returns Nothing on error).
+-- Uses strict ByteString reading to avoid Windows file locking issues.
 readFileMaybe :: FilePath -> IO (Maybe String)
 readFileMaybe path = do
     exists <- Dir.doesFileExist path
     if exists
-        then Just <$> readFile path
+        then do
+            bs <- BS.readFile path
+            return $ case decodeUtf8' bs of
+                Left _ -> Nothing  -- Invalid UTF-8
+                Right txt -> Just (T.unpack txt)
         else return Nothing
 
 -- ============================================================================
@@ -728,8 +737,9 @@ gitQuery = Git.runGitWithOutput
 readFileE :: FilePath -> IO (Maybe String)
 readFileE = readFileMaybe
 
+-- | Atomic write of a String (UTF-8). Uses temp file + rename pattern.
 writeFileAtomicE :: FilePath -> String -> IO ()
-writeFileAtomicE = writeFile
+writeFileAtomicE = atomicWriteFileStr
 
 copyFileE :: FilePath -> FilePath -> IO ()
 copyFileE = copyFile
@@ -884,7 +894,11 @@ isTextMetadataFile metaPath = do
     exists <- Dir.doesFileExist metaPath
     if not exists then return False
     else do
-        content <- readFile metaPath
+        -- Use strict ByteString reading to avoid Windows file locking issues
+        bs <- BS.readFile metaPath
+        let content = case decodeUtf8' bs of
+              Left _ -> ""
+              Right txt -> T.unpack txt
         return $ not (any ("hash: " `isPrefixOf`) (lines content))
 
 -- | Sync only changed files between two commits.
