@@ -94,7 +94,7 @@ cd test\cli\work_gdrive_b & bit pull
 # --- B: verify --remote should be clean again ---
 cd test\cli\work_gdrive_b & bit verify --remote
 <<<
->>> /\[OK\] All files match|Verifying/
+>>> /\[OK\] All.*files match|Checked.*files/
 >>>= 0
 
 findstr /C:"hello from A" test\cli\work_gdrive_b\.bit\index\foo.txt >nul

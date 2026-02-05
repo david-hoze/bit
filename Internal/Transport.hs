@@ -18,7 +18,7 @@ module Internal.Transport
     , CheckResult(..)
     ) where
 
-import System.Process (readProcessWithExitCode)
+import System.Process (readProcessWithExitCode, readProcess, readCreateProcess, CreateProcess(..), StdStream(..), proc, waitForProcess, createProcess)
 import System.Exit (ExitCode(..))
 import System.Directory (removeFile, doesFileExist)
 import System.IO (hPutStrLn, stderr)
@@ -196,4 +196,5 @@ checkRemote localPath remote = do
                      , head symChar == sym
                      ]
         in go
+
 

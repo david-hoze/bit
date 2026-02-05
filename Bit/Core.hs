@@ -96,7 +96,9 @@ import Prelude hiding (init, log)
 import Control.Exception (bracket)
 import qualified Bit.CopyProgress as CopyProgress
 import Bit.CopyProgress (SyncProgress)
-import Data.IORef (writeIORef)
+import Data.IORef (writeIORef, newIORef, IORef, readIORef, atomicModifyIORef')
+import Control.Concurrent (forkIO, threadDelay, killThread)
+import Control.Exception (finally)
 
 -- ============================================================================
 -- Types
@@ -474,25 +476,107 @@ verify :: Bool -> BitM ()
 verify isRemote
   | isRemote = withRemote $ \remote -> do
       cwd <- asks envCwd
-      liftIO $ putStrLn "Fetching remote metadata... done."
-      liftIO $ putStrLn "Scanning remote files... done."
-      liftIO $ putStrLn "Comparing..."
-      (fileCount, issues) <- liftIO $ Verify.verifyRemote cwd remote
-      liftIO $ putStrLn $ "Verifying " ++ show fileCount ++ " files..."
-      if null issues
-        then liftIO $ putStrLn "[OK] All files match metadata."
-        else do
-          liftIO $ mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
-          liftIO $ putStrLn $ show (length issues) ++ " issues found."
+      liftIO $ putStrLn "Fetching remote metadata..."
+      liftIO $ putStrLn "Scanning remote files..."
+      
+      -- Get file count first by doing a quick metadata load
+      remoteMeta <- liftIO $ Verify.loadMetadataFromBundle fetchedBundle
+      let fileCount = length remoteMeta
+      
+      -- Setup progress tracking if we have enough files
+      if fileCount > 5
+        then liftIO $ do
+          isTTY <- hIsTerminalDevice stderr
+          counter <- newIORef (0 :: Int)
+          let shouldShowProgress = isTTY
+          
+          -- Start progress reporter thread if in TTY
+          reporterThread <- if shouldShowProgress
+            then Just <$> forkIO (verifyProgressLoop counter fileCount)
+            else return Nothing
+          
+          -- Run verification with progress
+          (actualCount, issues) <- finally
+            (Verify.verifyRemote cwd remote (Just counter))
+            (do
+              -- Clean up: kill reporter thread and print final line
+              maybe (return ()) killThread reporterThread
+              when shouldShowProgress $ do
+                hPutStrLn stderr "\r\ESC[K"  -- Clear line
+                hFlush stderr
+            )
+          
+          -- Print final result
+          if null issues
+            then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+            else do
+              mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
+              putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
+        else liftIO $ do
+          -- Few files, no progress needed
+          (actualCount, issues) <- Verify.verifyRemote cwd remote Nothing
+          if null issues
+            then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+            else do
+              mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
+              putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
+  
   | otherwise = do
       cwd <- asks envCwd
-      (fileCount, issues) <- liftIO $ Verify.verifyLocal cwd
-      liftIO $ putStrLn $ "Verifying " ++ show fileCount ++ " files..."
-      if null issues
-        then liftIO $ putStrLn "[OK] All files match metadata."
-        else do
-          liftIO $ mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
-          liftIO $ putStrLn $ show (length issues) ++ " issues found. Run 'bit status' for details."
+      -- Get file count first by loading metadata
+      let indexDir = cwd </> ".bit/index"
+      meta <- liftIO $ Verify.loadMetadataIndex indexDir
+      let fileCount = length meta
+      
+      -- Setup progress tracking if we have enough files
+      if fileCount > 5
+        then liftIO $ do
+          isTTY <- hIsTerminalDevice stderr
+          counter <- newIORef (0 :: Int)
+          let shouldShowProgress = isTTY
+          
+          -- Start progress reporter thread if in TTY
+          reporterThread <- if shouldShowProgress
+            then Just <$> forkIO (verifyProgressLoop counter fileCount)
+            else return Nothing
+          
+          -- Run verification with progress
+          (actualCount, issues) <- finally
+            (Verify.verifyLocal cwd (Just counter))
+            (do
+              -- Clean up: kill reporter thread and print final line
+              maybe (return ()) killThread reporterThread
+              when shouldShowProgress $ do
+                hPutStrLn stderr "\r\ESC[K"  -- Clear line
+                hFlush stderr
+            )
+          
+          -- Print final result
+          if null issues
+            then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+            else do
+              mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
+              putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found. Run 'bit status' for details."
+        else liftIO $ do
+          -- Few files, no progress needed
+          (actualCount, issues) <- Verify.verifyLocal cwd Nothing
+          if null issues
+            then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+            else do
+              mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
+              putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found. Run 'bit status' for details."
+
+-- | Progress reporter loop for verify operations
+verifyProgressLoop :: IORef Int -> Int -> IO ()
+verifyProgressLoop counter total = go
+  where
+    go = do
+      n <- readIORef counter
+      let pct = (n * 100) `div` max 1 total
+      hPutStrLn stderr $ "\rChecking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)..."
+      hFlush stderr
+      threadDelay 100000  -- 100ms
+      when (n < total) go
 
 remoteShow :: Maybe String -> BitM ()
 remoteShow mRemoteName = do
@@ -554,7 +638,7 @@ remoteCheck mName = do
         Just remote -> do
             liftIO $ putStrLn $ "Checking local against remote: " ++ displayRemote remote
             liftIO $ putStrLn ""
-            liftIO $ putStrLn "Using: rclone check --combined"
+            liftIO $ putStrLn "Running remote check..."
             res <- liftIO $ try @IOException (Transport.checkRemote cwd remote)
             case res of
                 Left _ -> do

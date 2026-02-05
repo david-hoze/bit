@@ -6,13 +6,13 @@ rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit i
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-# fsck OK = no output, exit 0
+# fsck OK = status messages to stderr, exit 0
 cd test\cli\work & bit fsck
 <<<
->>>
+>>>2 /OK/
 >>>= 0
 
-# --- fsck on repo with committed files: still no output when OK ---
+# --- fsck on repo with committed files: status messages on OK ---
 rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init & echo hello> a.txt & bit add a.txt & bit commit -m "Add a"
 <<<
 >>> /.*[Ii]nitialized.*/
@@ -20,7 +20,7 @@ rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit i
 
 cd test\cli\work & bit fsck
 <<<
->>>
+>>>2 /OK/
 >>>= 0
 
 # --- fsck detects local hash mismatch: git-style "hash mismatch <path>", exit 1 ---

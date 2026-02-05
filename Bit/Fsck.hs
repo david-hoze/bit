@@ -11,7 +11,10 @@ import qualified Internal.Git as Git
 import System.FilePath ((</>))
 import System.Exit (ExitCode(..), exitWith)
 import Control.Monad (unless, when)
-import System.IO (hPutStr, hPutStrLn, hFlush, hSetBuffering, BufferMode(..), stderr)
+import System.IO (hPutStr, hPutStrLn, hFlush, hSetBuffering, BufferMode(..), stderr, hIsTerminalDevice)
+import Data.IORef (newIORef, readIORef, IORef)
+import Control.Concurrent (forkIO, threadDelay, killThread)
+import Control.Exception (finally)
 
 -- | Run local-only integrity check in the spirit of git fsck: no network.
 -- [1/2] Local working tree vs local metadata (rgit equivalent of checking objects).
@@ -21,19 +24,57 @@ import System.IO (hPutStr, hPutStrLn, hFlush, hSetBuffering, BufferMode(..), std
 doFsck :: FilePath -> IO ()
 doFsck cwd = do
   hSetBuffering stderr NoBuffering
+  
   -- [1/2] Working tree vs local metadata
-  (_, localIssues) <- Verify.verifyLocal cwd
+  -- Get file count first
+  let indexDir = cwd </> ".bit/index"
+  meta <- Verify.loadMetadataIndex indexDir
+  let fileCount = length meta
+  
+  -- Run verification with progress if enough files
+  (actualCount, localIssues) <- if fileCount > 5
+    then do
+      isTTY <- hIsTerminalDevice stderr
+      counter <- newIORef (0 :: Int)
+      let shouldShowProgress = isTTY
+      
+      -- Start progress reporter thread if in TTY
+      reporterThread <- if shouldShowProgress
+        then Just <$> forkIO (fsckProgressLoop counter fileCount)
+        else return Nothing
+      
+      -- Run verification with progress
+      result <- finally
+        (Verify.verifyLocal cwd (Just counter))
+        (do
+          -- Clean up: kill reporter thread and print final line
+          maybe (return ()) killThread reporterThread
+          when shouldShowProgress $ do
+            hPutStr stderr "\r\ESC[K"  -- Clear line
+            hFlush stderr
+        )
+      return result
+    else
+      -- Few files, no progress needed
+      Verify.verifyLocal cwd Nothing
+  
   let localOk = null localIssues
-  unless localOk $ do
-    mapM_ (printIssue Utils.toPosix) localIssues
-    hFlush stderr
+  if localOk
+    then hPutStrLn stderr $ "[1/2] Checked " ++ show actualCount ++ " files. OK."
+    else do
+      hPutStrLn stderr $ "[1/2] Checked " ++ show actualCount ++ " files. Issues found:"
+      mapM_ (printIssue Utils.toPosix) localIssues
+      hFlush stderr
 
   -- [2/2] Metadata history (git fsck in .rgit/index/.git)
+  hPutStrLn stderr "[2/2] Checking metadata history..."
   (gitCode, gitOut, gitErr) <- Git.fsck
   let gitOk = gitCode == ExitSuccess
-  unless gitOk $ do
-    putStr gitOut
-    hPutStr stderr gitErr
+  if gitOk
+    then hPutStrLn stderr "[2/2] Metadata history OK."
+    else do
+      putStr gitOut
+      hPutStr stderr gitErr
 
   when (not localOk || not gitOk) $
     exitWith (ExitFailure 1)
@@ -45,3 +86,15 @@ doFsck cwd = do
         hPutStrLn stderr $ "hash mismatch " ++ toP path
       Verify.Missing path ->
         hPutStrLn stderr $ "missing " ++ toP path
+    
+    -- Progress reporter loop for fsck operation
+    fsckProgressLoop :: IORef Int -> Int -> IO ()
+    fsckProgressLoop counter total = go
+      where
+        go = do
+          n <- readIORef counter
+          let pct = (n * 100) `div` max 1 total
+          hPutStr stderr $ "\r[1/2] Checking working tree: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)..."
+          hFlush stderr
+          threadDelay 100000  -- 100ms
+          when (n < total) go

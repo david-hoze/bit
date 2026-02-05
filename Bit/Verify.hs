@@ -30,11 +30,11 @@ import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
 import System.IO (hPutStrLn, stderr)
-import Control.Monad (when)
 import Control.Monad (when, unless)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import System.IO (hPutStrLn, stderr)
+import Data.IORef (IORef, atomicModifyIORef')
+import Data.Maybe (fromMaybe)
 
 -- | Result of comparing one file to metadata.
 data VerifyIssue
@@ -78,8 +78,9 @@ loadMetadataIndex indexDir = do
 
 -- | Verify local working tree against metadata in .rgit/index.
 -- Returns (number of files checked, list of issues).
-verifyLocal :: FilePath -> IO (Int, [VerifyIssue])
-verifyLocal cwd = do
+-- If an IORef counter is provided, it will be incremented after each file is checked.
+verifyLocal :: FilePath -> Maybe (IORef Int) -> IO (Int, [VerifyIssue])
+verifyLocal cwd mCounter = do
   let indexDir = cwd </> ".bit/index"
   meta <- loadMetadataIndex indexDir
   -- Filter out .git directory entries
@@ -90,7 +91,7 @@ verifyLocal cwd = do
     checkOne root (relPath, expectedHash, expectedSize) = do
       let actualPath = root </> relPath
       exists <- doesFileExist actualPath
-      if not exists
+      result <- if not exists
         then return [Missing relPath]
         else do
           actualHash <- hashFile actualPath
@@ -98,6 +99,9 @@ verifyLocal cwd = do
           if actualHash == expectedHash && actualSize == expectedSize
             then return []
             else return [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
+      -- Increment counter after checking file
+      maybe (return ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
+      return result
 
 -- | Extract metadata from a bundle's HEAD commit.
 -- First fetches the bundle into the repo, then reads metadata from refs/remotes/origin/main.
@@ -154,8 +158,9 @@ loadMetadataFromBundle bundleName = do
 
 -- | Verify remote files match remote metadata.
 -- Returns (number of files checked, list of issues).
-verifyRemote :: FilePath -> Bit.Remote.Remote -> IO (Int, [VerifyIssue])
-verifyRemote cwd remote = do
+-- If an IORef counter is provided, it will be incremented after each file is checked.
+verifyRemote :: FilePath -> Bit.Remote.Remote -> Maybe (IORef Int) -> IO (Int, [VerifyIssue])
+verifyRemote cwd remote mCounter = do
   -- 1. Fetch the remote bundle if needed
   let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
   bundleExists <- doesFileExist fetchedPath
@@ -208,13 +213,16 @@ verifyRemote cwd remote = do
     checkRemoteFile :: Map.Map FilePath (Hash 'MD5, EntryKind) -> (Path, Hash 'MD5, Integer) -> IO [VerifyIssue]
     checkRemoteFile remoteFileMap (relPath, expectedHash, expectedSize) = do
       let normalizedPath = normalise relPath
-      case Map.lookup normalizedPath remoteFileMap of
+      result <- case Map.lookup normalizedPath remoteFileMap of
         Nothing -> return [Missing relPath]
         Just (actualHash, File _ actualSize _) ->
           if actualHash == expectedHash && actualSize == expectedSize
             then return []
             else return [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
         Just _ -> return []
+      -- Increment counter after checking file
+      maybe (return ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
+      return result
 
 -- Helper to safely remove a file
 safeRemove :: FilePath -> IO ()

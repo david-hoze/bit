@@ -542,6 +542,8 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 
 Verifies local working tree matches local metadata. For each file in metadata, checks that the hash matches the actual file on disk.
 
+**Progress reporting**: On TTY with >5 files, displays live progress: `Checking files: N/Total (X%)...`
+
 ### `bit verify --remote`
 
 Verifies that remote files match what the remote Git bundle says they should be:
@@ -549,9 +551,15 @@ Verifies that remote files match what the remote Git bundle says they should be:
 2. Scan remote files via `rclone lsjson --hash`
 3. Compare: Do actual remote files match what remote metadata claims?
 
+**Progress reporting**: On TTY with >5 files, displays live progress during comparison phase.
+
 ### `bit fsck`
 
 Full integrity check combining local verify, remote verify, and `git fsck` on the internal repository.
+
+**Progress reporting**: On TTY with >5 files, displays step-by-step progress:
+- `[1/2] Checking working tree: N/Total (X%)...`
+- `[2/2] Checking metadata history...`
 
 ---
 

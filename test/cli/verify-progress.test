@@ -1,0 +1,112 @@
+# =============================================================================
+# Verify Progress Tests
+#
+# Tests that verify operations complete successfully with progress reporting
+# code enabled. Progress output itself won't appear in non-TTY test environment,
+# but these tests verify the operations work correctly with the new code.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work_verify_progress 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\work_verify_progress
+<<<
+>>>
+>>>= 0
+
+# Initialize repo with multiple files
+cd test\cli\work_verify_progress & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# TEST: Verify with no files (edge case)
+# ======================================================================
+
+cd test\cli\work_verify_progress & bit verify
+<<<
+>>> /\[OK\] All 0 files match|All.*files match/
+>>>= 0
+
+# ======================================================================
+# TEST: Verify with multiple files
+# ======================================================================
+
+# Add several files to trigger progress code path (need >5 files)
+cd test\cli\work_verify_progress & echo file1> f1.txt & echo file2> f2.txt & echo file3> f3.txt & echo file4> f4.txt & echo file5> f5.txt & echo file6> f6.txt & bit add . & bit commit -m "Add files"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# Verify should succeed with all files matching
+cd test\cli\work_verify_progress & bit verify
+<<<
+>>> /\[OK\] All.*files match/
+>>>= 0
+
+# ======================================================================
+# TEST: Verify detects hash mismatch
+# ======================================================================
+
+# Corrupt a file
+cd test\cli\work_verify_progress & echo corrupted> f1.txt
+<<<
+>>>
+>>>= 0
+
+# Verify should detect mismatch
+cd test\cli\work_verify_progress & bit verify
+<<<
+>>> /Checked.*files.*issues found|hash mismatch/
+>>>= 0
+
+# ======================================================================
+# TEST: Verify detects missing file
+# ======================================================================
+
+# Restore f1.txt and delete f2.txt
+cd test\cli\work_verify_progress & echo file1> f1.txt & del f2.txt
+<<<
+>>>
+>>>= 0
+
+# Verify should detect missing file
+cd test\cli\work_verify_progress & bit verify
+<<<
+>>> /Checked.*files.*issues found|Missing/
+>>>= 0
+
+# ======================================================================
+# TEST: Fsck with progress code
+# ======================================================================
+
+# Restore f2.txt (it was deleted earlier)
+cd test\cli\work_verify_progress & echo file2> f2.txt
+<<<
+>>>
+>>>= 0
+
+# Fsck with progress code - exits 1 if issues found, 0 if OK
+cd test\cli\work_verify_progress & bit fsck
+<<<
+>>>2 /\[1\/2\]|OK|Issues found/
+>>>=
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\work_verify_progress 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
