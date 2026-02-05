@@ -14,6 +14,7 @@ executable bit
                       Bit.Conflict,
                       Bit.ConcurrentIO,
                       Bit.ConcurrentFileIO,
+                      Bit.CopyProgress,
                       Bit.Device,
                       Bit.DevicePrompt,
                       Bit.Diff,

@@ -57,7 +57,7 @@ import Data.List (isPrefixOf)
 import qualified System.Directory as Dir
 import System.Directory (copyFile, removeFile, createDirectoryIfMissing, removeDirectory, listDirectory, doesDirectoryExist)
 import System.FilePath ((</>), normalise, takeDirectory)
-import Control.Monad (when, unless, void, forM_)
+import Control.Monad (when, unless, void, forM, forM_)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Data.Map as Map
 import qualified Internal.Git as Git
@@ -94,6 +94,9 @@ import qualified Bit.Conflict as Conflict
 import Bit.Remote (Remote, remoteName, displayRemote, resolveRemote, remoteUrl, RemoteState(..), FetchResult(..))
 import Prelude hiding (init, log)
 import Control.Exception (bracket)
+import qualified Bit.CopyProgress as CopyProgress
+import Bit.CopyProgress (SyncProgress)
+import Data.IORef (writeIORef)
 
 -- ============================================================================
 -- Types
@@ -877,25 +880,49 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
     case files of
         (ExitSuccess, out, _) -> do
             let paths = filter (not . null) (lines out)
-            forM_ paths $ \path -> do
-                -- Check if it's a text file (content in index) or binary (hash/size in index)
-                -- After git merge, ALL metadata files exist - we need to check content
+            
+            -- First pass: classify files and gather sizes for binary files
+            fileInfo <- forM paths $ \path -> do
                 let metaPath = remoteIndex </> path
                 isText <- isTextMetadataFile metaPath
                 if isText
-                    then do
-                        -- Text file: metadata IS the content, copy from remote index to working tree
-                        let workPath = remotePath </> path
-                        createDirectoryIfMissing True (takeDirectory workPath)
-                        copyFile metaPath workPath
+                    then return (path, True, 0)
                     else do
-                        -- Binary file: metadata is hash/size, copy actual file from local working tree
+                        -- Binary file: get size from local file
                         let srcPath = localRoot </> path
-                        let destPath = remotePath </> path
                         srcExists <- Dir.doesFileExist srcPath
-                        when srcExists $ do
-                            createDirectoryIfMissing True (takeDirectory destPath)
-                            copyFile srcPath destPath
+                        if srcExists
+                            then do
+                                size <- Dir.getFileSize srcPath
+                                return (path, False, fromIntegral size)
+                            else return (path, False, 0)
+            
+            let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
+                totalBytes = sum [s | (_, s) <- binaryFiles]
+            
+            -- Create progress tracker
+            progress <- CopyProgress.newSyncProgress (length binaryFiles)
+            writeIORef (CopyProgress.spBytesTotal progress) totalBytes
+            
+            -- Second pass: copy files with progress
+            CopyProgress.withSyncProgressReporter progress $ do
+                forM_ fileInfo $ \(path, isText, size) -> do
+                    let metaPath = remoteIndex </> path
+                    if isText
+                        then do
+                            -- Text file: metadata IS the content, copy from remote index to working tree
+                            let workPath = remotePath </> path
+                            createDirectoryIfMissing True (takeDirectory workPath)
+                            copyFile metaPath workPath
+                        else do
+                            -- Binary file: metadata is hash/size, copy actual file from local working tree
+                            let srcPath = localRoot </> path
+                            let destPath = remotePath </> path
+                            srcExists <- Dir.doesFileExist srcPath
+                            when srcExists $ do
+                                writeIORef (CopyProgress.spCurrentFile progress) path
+                                CopyProgress.copyFileWithProgress srcPath destPath size progress
+                                CopyProgress.incrementFilesComplete progress
         _ -> return ()
 
 -- | Check if a metadata file is a text file (content stored directly) or binary (hash/size stored).
@@ -920,21 +947,53 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
     case changes of
         (ExitSuccess, out, _) -> do
             let parsedChanges = parseFilesystemDiffOutput out
-            forM_ parsedChanges $ \(status, path, mNewPath) -> case status of
-                'A' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex path
-                'M' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex path
-                'D' -> filesystemDeleteFileAtRemote remotePath path
-                'R' -> case mNewPath of
-                    Just newPath -> do
-                        filesystemDeleteFileAtRemote remotePath path
-                        filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath
-                    Nothing -> return ()
-                _ -> return ()
+            
+            -- First pass: collect paths that will be copied and their sizes
+            filesToCopy <- fmap concat $ forM parsedChanges $ \(status, path, mNewPath) -> case status of
+                'A' -> return [path]
+                'M' -> return [path]
+                'R' -> return (maybe [] (\p -> [p]) mNewPath)
+                _ -> return []
+            
+            -- Gather file sizes for binary files
+            fileInfo <- forM filesToCopy $ \path -> do
+                let metaPath = remoteIndex </> path
+                isText <- isTextMetadataFile metaPath
+                if isText
+                    then return (path, True, 0)
+                    else do
+                        let srcPath = localRoot </> path
+                        srcExists <- Dir.doesFileExist srcPath
+                        if srcExists
+                            then do
+                                size <- Dir.getFileSize srcPath
+                                return (path, False, fromIntegral size)
+                            else return (path, False, 0)
+            
+            let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
+                totalBytes = sum [s | (_, s) <- binaryFiles]
+            
+            -- Create progress tracker
+            progress <- CopyProgress.newSyncProgress (length binaryFiles)
+            writeIORef (CopyProgress.spBytesTotal progress) totalBytes
+            
+            -- Second pass: apply changes with progress
+            CopyProgress.withSyncProgressReporter progress $ do
+                forM_ parsedChanges $ \(status, path, mNewPath) -> case status of
+                    'A' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex path progress
+                    'M' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex path progress
+                    'D' -> filesystemDeleteFileAtRemote remotePath path
+                    'R' -> case mNewPath of
+                        Just newPath -> do
+                            filesystemDeleteFileAtRemote remotePath path
+                            filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
+                        Nothing -> return ()
+                    _ -> return ()
         _ -> return ()
 
 -- | Copy a file from local to remote (handles both text and binary).
-filesystemCopyFileToRemote :: FilePath -> FilePath -> FilePath -> FilePath -> IO ()
-filesystemCopyFileToRemote localRoot remotePath remoteIndex path = do
+filesystemCopyFileToRemote :: FilePath -> FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
+filesystemCopyFileToRemote localRoot remotePath remoteIndex path progress = do
     -- Check if it's a text file (content in index) or binary (hash/size in index)
     let metaPath = remoteIndex </> path
     isText <- isTextMetadataFile metaPath
@@ -950,8 +1009,10 @@ filesystemCopyFileToRemote localRoot remotePath remoteIndex path = do
             let destPath = remotePath </> path
             srcExists <- Dir.doesFileExist srcPath
             when srcExists $ do
-                createDirectoryIfMissing True (takeDirectory destPath)
-                copyFile srcPath destPath
+                size <- Dir.getFileSize srcPath
+                writeIORef (CopyProgress.spCurrentFile progress) path
+                CopyProgress.copyFileWithProgress srcPath destPath (fromIntegral size) progress
+                CopyProgress.incrementFilesComplete progress
 
 -- | Delete a file at the remote working tree.
 filesystemDeleteFileAtRemote :: FilePath -> FilePath -> IO ()
@@ -1150,24 +1211,49 @@ filesystemSyncRemoteFilesToLocal localRoot remotePath commitHash = do
     (code, out, _) <- Git.runGitWithOutput ["ls-tree", "-r", "--name-only", commitHash]
     when (code == ExitSuccess) $ do
         let paths = filter (not . null) (lines out)
-        forM_ paths $ \path -> do
-            -- Check if it's a text file (content in index) or binary (hash/size in index)
+        
+        -- First pass: classify files and gather sizes for binary files
+        fileInfo <- forM paths $ \path -> do
             let metaPath = localIndex </> path
             isText <- isTextMetadataFile metaPath
             if isText
-                then do
-                    -- Text file: metadata IS the content, copy from local index to working tree
-                    let workPath = localRoot </> path
-                    createDirectoryIfMissing True (takeDirectory workPath)
-                    copyFile metaPath workPath
+                then return (path, True, 0)
                 else do
-                    -- Binary file: metadata is hash/size, copy actual file from remote working tree
+                    -- Binary file: get size from remote file
                     let srcPath = remotePath </> path
-                    let destPath = localRoot </> path
                     srcExists <- Dir.doesFileExist srcPath
-                    when srcExists $ do
-                        createDirectoryIfMissing True (takeDirectory destPath)
-                        copyFile srcPath destPath
+                    if srcExists
+                        then do
+                            size <- Dir.getFileSize srcPath
+                            return (path, False, fromIntegral size)
+                        else return (path, False, 0)
+        
+        let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
+            totalBytes = sum [s | (_, s) <- binaryFiles]
+        
+        -- Create progress tracker
+        progress <- CopyProgress.newSyncProgress (length binaryFiles)
+        writeIORef (CopyProgress.spBytesTotal progress) totalBytes
+        
+        -- Second pass: copy files with progress
+        CopyProgress.withSyncProgressReporter progress $ do
+            forM_ fileInfo $ \(path, isText, size) -> do
+                let metaPath = localIndex </> path
+                if isText
+                    then do
+                        -- Text file: metadata IS the content, copy from local index to working tree
+                        let workPath = localRoot </> path
+                        createDirectoryIfMissing True (takeDirectory workPath)
+                        copyFile metaPath workPath
+                    else do
+                        -- Binary file: metadata is hash/size, copy actual file from remote working tree
+                        let srcPath = remotePath </> path
+                        let destPath = localRoot </> path
+                        srcExists <- Dir.doesFileExist srcPath
+                        when srcExists $ do
+                            writeIORef (CopyProgress.spCurrentFile progress) path
+                            CopyProgress.copyFileWithProgress srcPath destPath size progress
+                            CopyProgress.incrementFilesComplete progress
 
 -- | Apply merge changes to working directory for filesystem pull.
 filesystemApplyMergeToWorkingDir :: FilePath -> FilePath -> String -> String -> IO ()
@@ -1177,20 +1263,50 @@ filesystemApplyMergeToWorkingDir localRoot remotePath oldHead newHead = do
     if null changes
         then putStrLn "Working tree already up to date with remote."
         else do
-            forM_ changes $ \(status, path, mNewPath) -> case status of
-                'A' -> filesystemDownloadOrCopyFromIndex localRoot remotePath path
-                'M' -> filesystemDownloadOrCopyFromIndex localRoot remotePath path
-                'D' -> safeDeleteWorkFile localRoot path
-                'R' -> case mNewPath of
-                    Just newPath -> do
-                        safeDeleteWorkFile localRoot path
-                        filesystemDownloadOrCopyFromIndex localRoot remotePath newPath
-                    Nothing -> return ()
-                _ -> return ()
+            -- First pass: collect paths that will be copied and their sizes
+            filesToCopy <- fmap concat $ forM changes $ \(status, path, mNewPath) -> case status of
+                'A' -> return [path]
+                'M' -> return [path]
+                'R' -> return (maybe [] (\p -> [p]) mNewPath)
+                _ -> return []
+            
+            -- Gather file sizes for binary files
+            fileInfo <- forM filesToCopy $ \path -> do
+                fromIndex <- isTextFileInIndex localRoot path
+                if fromIndex
+                    then return (path, True, 0)
+                    else do
+                        let srcPath = remotePath </> path
+                        srcExists <- Dir.doesFileExist srcPath
+                        if srcExists
+                            then do
+                                size <- Dir.getFileSize srcPath
+                                return (path, False, fromIntegral size)
+                            else return (path, False, 0)
+            
+            let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
+                totalBytes = sum [s | (_, s) <- binaryFiles]
+            
+            -- Create progress tracker
+            progress <- CopyProgress.newSyncProgress (length binaryFiles)
+            writeIORef (CopyProgress.spBytesTotal progress) totalBytes
+            
+            -- Second pass: apply changes with progress
+            CopyProgress.withSyncProgressReporter progress $ do
+                forM_ changes $ \(status, path, mNewPath) -> case status of
+                    'A' -> filesystemDownloadOrCopyFromIndex localRoot remotePath path progress
+                    'M' -> filesystemDownloadOrCopyFromIndex localRoot remotePath path progress
+                    'D' -> safeDeleteWorkFile localRoot path
+                    'R' -> case mNewPath of
+                        Just newPath -> do
+                            safeDeleteWorkFile localRoot path
+                            filesystemDownloadOrCopyFromIndex localRoot remotePath newPath progress
+                        Nothing -> return ()
+                    _ -> return ()
 
 -- | Download a file from remote or copy from index for filesystem pull.
-filesystemDownloadOrCopyFromIndex :: FilePath -> FilePath -> FilePath -> IO ()
-filesystemDownloadOrCopyFromIndex localRoot remotePath path = do
+filesystemDownloadOrCopyFromIndex :: FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
+filesystemDownloadOrCopyFromIndex localRoot remotePath path progress = do
     fromIndex <- isTextFileInIndex localRoot path
     if fromIndex
         then copyFromIndexToWorkTree localRoot path
@@ -1200,8 +1316,10 @@ filesystemDownloadOrCopyFromIndex localRoot remotePath path = do
             let destPath = localRoot </> path
             srcExists <- Dir.doesFileExist srcPath
             when srcExists $ do
-                createDirectoryIfMissing True (takeDirectory destPath)
-                copyFile srcPath destPath
+                size <- Dir.getFileSize srcPath
+                writeIORef (CopyProgress.spCurrentFile progress) path
+                CopyProgress.copyFileWithProgress srcPath destPath (fromIntegral size) progress
+                CopyProgress.incrementFilesComplete progress
 
 -- | Executes/Prints the command to be run in the shell (push: local -> remote).
 executeCommand :: FilePath -> Remote -> RcloneAction -> IO ()
@@ -1360,7 +1478,13 @@ syncRemoteFiles = withRemote $ \remote -> do
             liftIO $ putStrLn "--- Pushing Changes to Remote ---"
             if null actions
                 then liftIO $ putStrLn "Remote is already up to date."
-                else mapM_ (\a -> liftIO $ executeCommand cwd remote a) actions)
+                else do
+                    -- Create progress tracker for cloud operations (file-count only)
+                    progress <- liftIO $ CopyProgress.newSyncProgress (length actions)
+                    liftIO $ CopyProgress.withSyncProgressReporter progress $ do
+                        forM_ actions $ \a -> do
+                            executeCommand cwd remote a
+                            CopyProgress.incrementFilesComplete progress)
         remoteResult
 
 
@@ -1433,7 +1557,13 @@ syncRemoteFilesToLocal = withRemote $ \remote -> do
             lift $ tell "--- Pulling changes from remote ---"
             if null actions
                 then lift $ tell "Working tree already up to date with remote."
-                else mapM_ (\a -> lift $ executePullCommand cwd remote a) actions)
+                else do
+                    -- Create progress tracker for cloud operations (file-count only)
+                    progress <- lift $ CopyProgress.newSyncProgress (length actions)
+                    lift $ CopyProgress.withSyncProgressReporter progress $ do
+                        forM_ actions $ \a -> do
+                            executePullCommand cwd remote a
+                            CopyProgress.incrementFilesComplete progress)
         remoteResult
 
 -- | After a merge, mirror git's metadata changes onto the actual working directory.

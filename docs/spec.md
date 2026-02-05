@@ -502,6 +502,38 @@ The file scanner (`Bit/Scan.hs`) uses bounded parallelism for both scanning and 
 - Progress reporting shows files written, skipped count, and percentage
 - Atomic writes for binary metadata using temp-file-rename pattern
 
+### File Copy Progress Reporting
+
+File copy operations during push/pull now have progress reporting (`Bit/CopyProgress.hs`):
+
+**Implementation**:
+- Chunked binary copy with byte-level progress (64KB chunks, strict `ByteString`)
+- Small files (<1MB) use plain `copyFile` (no overhead), large files use chunked copy with progress
+- Progress state (`SyncProgress`) tracks: total files, bytes total/copied, current file name
+- Reporter thread updates at 100ms intervals via `IORef` (thread-safe, strict updates)
+- TTY detection: shows in-place progress on terminal, silent on non-TTY (for log capture)
+
+**Progress Display**:
+- **Aggregate**: `Syncing files: 3/12 files, 5.1 GB / 18.3 GB (28%)`
+- **Final summary**: `Synced 12 files (18.3 GB).`
+- Human-readable byte formatting: `formatBytes` (B, KB, MB, GB, TB with 1 decimal place)
+
+**Filesystem Remotes** (direct copy):
+- `filesystemSyncAllFiles`, `filesystemSyncChangedFiles` (push)
+- `filesystemSyncRemoteFilesToLocal`, `filesystemApplyMergeToWorkingDir` (pull)
+- Progress: counts binary files only (text files are small and fast via index copy)
+- Byte progress: sums file sizes from metadata before starting copy loop
+
+**Cloud Remotes** (rclone):
+- `syncRemoteFiles` (push), `syncRemoteFilesToLocal` (pull)
+- Progress: file-count only (number of rclone actions completed / total)
+- Simpler approach: tracks subprocess completion rather than byte-level progress
+
+**Design Notes**:
+- Complies with project's strict IO rules: no lazy `ByteString`, no lazy IO
+- Windows compatible: uses `withBinaryFile` for chunked reads/writes
+- Pattern matches existing scan progress in `Bit/Scan.hs`: `IORef` + reporter thread + TTY detection + `finally` cleanup
+
 ---
 
 ## Verification and Consistency
@@ -672,7 +704,6 @@ Interactive per-file conflict resolution:
 
 - **Text file handling**: Classification (`isText`) exists in the type system but text file sync (copy content to index, sync back on pull) needs completion.
 - **Transaction logging**: For resumable push/pull operations.
-- **Progress reporting**: File scanning and metadata writing have progress reporting implemented. Still needed for upload/download operations (rclone).
 - **Error messages**: Some need polish to match Git's style and include actionable hints.
 - **`isTextFileInIndex` fragility**: The current check (looking for `"hash: "` prefix) works but is indirect. A more robust approach might check whether the file parses as metadata vs. has arbitrary content. Low priority since current approach works correctly.
 
