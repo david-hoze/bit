@@ -15,6 +15,7 @@ import System.IO
     , hGetBuf, hPutBuf, hFileSize, hIsEOF
     , hIsTerminalDevice, hPutStr, hPutStrLn, hFlush, stderr
     )
+import Bit.Progress (reportProgress, clearProgress)
 import System.Directory (createDirectoryIfMissing, copyFile)
 import System.FilePath (takeDirectory)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef', writeIORef)
@@ -108,9 +109,8 @@ withSyncProgressReporter progress action = do
                 -- Final summary line
                 filesCompleted <- readIORef (spFilesComplete progress)
                 totalBytes <- readIORef (spBytesCopied progress)
-                hPutStr stderr "\r\ESC[K"  -- Clear line
+                clearProgress
                 hPutStrLn stderr $ "Synced " ++ show filesCompleted ++ " files (" ++ formatBytes totalBytes ++ ")."
-                hFlush stderr
         else do
             -- Non-TTY: print one line per file as it completes
             if spFilesTotal progress > 0
@@ -138,8 +138,7 @@ syncProgressLoop progress = go
                             then " / " ++ formatBytes totalBytes ++ " (" ++ show filesPct ++ "%)"
                             else ""
         
-        hPutStr stderr $ "\r\ESC[K" ++ progressLine
-        hFlush stderr
+        reportProgress progressLine
         
         threadDelay 100000  -- 100ms update interval
         

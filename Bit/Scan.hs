@@ -24,7 +24,7 @@ import System.Directory
       copyFileWithMetadata,
       getCurrentDirectory,
       getModificationTime )
-import System.IO (withFile, IOMode(ReadMode), hIsEOF, hIsTerminalDevice, hPutStr, hPutStrLn, hFlush, stderr)
+import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, stderr)
 import Data.List
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
@@ -45,6 +45,7 @@ import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent (getNumCapabilities, forkIO, threadDelay, killThread)
 import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
 import Control.Exception (bracket_, finally)
+import Bit.Progress (reportProgress, clearProgress)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 
@@ -227,8 +228,7 @@ progressLoop counter total = go
     go = do
         n <- readIORef counter
         let pct = (n * 100) `div` max 1 total
-        hPutStr stderr $ "\rScanning... " ++ show n ++ "/" ++ show total ++ " files (" ++ show pct ++ "%)"
-        hFlush stderr
+        reportProgress $ "Scanning... " ++ show n ++ "/" ++ show total ++ " files (" ++ show pct ++ "%)"
         threadDelay 50000  -- 50ms
         when (n < total) go
 
@@ -253,14 +253,7 @@ scanWorkingDir root = do
     
     -- Setup progress tracking
     let total = length filesToHash
-    isTTY <- hIsTerminalDevice stderr
     counter <- newIORef (0 :: Int)
-    
-    -- Start progress reporter thread if we're in a TTY and have enough files
-    let shouldShowProgress = isTTY && total > 50
-    reporterThread <- if shouldShowProgress
-        then Just <$> forkIO (progressLoop counter total)
-        else return Nothing
     
     -- Hash/classify files in parallel (bounded by numCapabilities * 4)
     caps <- getNumCapabilities
@@ -289,16 +282,20 @@ scanWorkingDir root = do
                     , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
                     }
     
-    fileEntries <- finally
-        (mapConcurrentlyBounded concurrency hashWithProgress filesToHash)
-        (do
-            -- Clean up: kill reporter thread and clear/finalize progress line
-            maybe (return ()) killThread reporterThread
-            when shouldShowProgress $ do
-                hPutStr stderr "\r\ESC[K"  -- Clear line with ANSI escape
-                hPutStr stderr $ "Scanned " ++ show total ++ " files.\n"
-                hFlush stderr
-        )
+    -- Wrap hashing with progress reporter
+    let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress filesToHash
+    
+    fileEntries <- if total > 50
+        then do
+            -- Show progress for large scans
+            reporterThread <- forkIO (progressLoop counter total)
+            finally hashingAction $ do
+                killThread reporterThread
+                clearProgress
+                hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
+        else
+            -- No progress for small scans
+            hashingAction
     
     return $ dirEntries ++ fileEntries
   where
@@ -387,12 +384,11 @@ writeMetadataFiles root entries = do
             when shouldShowProgress $ do
                 n <- readIORef counter
                 s <- readIORef skipped
-                hPutStr stderr "\r\ESC[K"  -- Clear line with ANSI escape
+                clearProgress
                 let written = n - s
                 hPutStr stderr $ "Wrote " ++ show written ++ " metadata files"
                 when (s > 0) $ hPutStr stderr $ " (skipped " ++ show s ++ " unchanged)"
                 hPutStrLn stderr "."
-                hFlush stderr
         )
   where
     partitionEntries :: [FileEntry] -> ([FilePath], [FileEntry])
@@ -409,9 +405,9 @@ writeMetadataFiles root entries = do
             s <- readIORef skipped
             let pct = (n * 100) `div` max 1 total
                 written = n - s
-            hPutStr stderr $ "\rWriting metadata... " ++ show written ++ "/" ++ show total ++ " files (" ++ show pct ++ "%)"
-            when (s > 0) $ hPutStr stderr $ ", skipped " ++ show s
-            hFlush stderr
+                msg = "Writing metadata... " ++ show written ++ "/" ++ show total ++ " files (" ++ show pct ++ "%)"
+                      ++ if s > 0 then ", skipped " ++ show s else ""
+            reportProgress msg
             threadDelay 50000  -- 50ms
             when (n < total) go
 

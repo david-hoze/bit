@@ -15,6 +15,7 @@ import System.IO (hPutStr, hPutStrLn, hFlush, hSetBuffering, BufferMode(..), std
 import Data.IORef (newIORef, readIORef, IORef)
 import Control.Concurrent (forkIO, threadDelay, killThread)
 import Control.Exception (finally)
+import Bit.Progress (reportProgress, clearProgress)
 
 -- | Run local-only integrity check in the spirit of git fsck: no network.
 -- [1/2] Local working tree vs local metadata (rgit equivalent of checking objects).
@@ -47,11 +48,9 @@ doFsck cwd = do
       result <- finally
         (Verify.verifyLocal cwd (Just counter))
         (do
-          -- Clean up: kill reporter thread and print final line
+          -- Clean up: kill reporter thread and clear line
           maybe (return ()) killThread reporterThread
-          when shouldShowProgress $ do
-            hPutStr stderr "\r\ESC[K"  -- Clear line
-            hFlush stderr
+          when shouldShowProgress clearProgress
         )
       return result
     else
@@ -94,7 +93,6 @@ doFsck cwd = do
         go = do
           n <- readIORef counter
           let pct = (n * 100) `div` max 1 total
-          hPutStr stderr $ "\r\ESC[K[1/2] Checking working tree: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
-          hFlush stderr
+          reportProgress $ "[1/2] Checking working tree: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
           threadDelay 100000  -- 100ms
           when (n < total) go

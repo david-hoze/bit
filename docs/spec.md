@@ -849,6 +849,8 @@ Interactive per-file conflict resolution:
 | `bit/ConcurrentIO.hs` | Type-safe concurrent IO newtype (no MonadIO) |
 | `bit/ConcurrentFileIO.hs` | Strict ByteString file operations |
 | `bit/Process.hs` | Strict process output capture (concurrent stdout/stderr reading) |
+| `bit/Progress.hs` | Centralized progress reporting for terminal operations |
+| `bit/CopyProgress.hs` | Progress tracking for file copy operations (push/pull sync) |
 
 ---
 

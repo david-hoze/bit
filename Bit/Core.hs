@@ -99,6 +99,7 @@ import Bit.CopyProgress (SyncProgress)
 import Data.IORef (writeIORef, newIORef, IORef, readIORef, atomicModifyIORef')
 import Control.Concurrent (forkIO, threadDelay, killThread)
 import Control.Exception (finally)
+import Bit.Progress (reportProgress, clearProgress)
 
 -- ============================================================================
 -- Types
@@ -499,11 +500,9 @@ verify isRemote
           (actualCount, issues) <- finally
             (Verify.verifyRemote cwd remote (Just counter))
             (do
-              -- Clean up: kill reporter thread and print final line
+              -- Clean up: kill reporter thread and clear line
               maybe (return ()) killThread reporterThread
-              when shouldShowProgress $ do
-                hPutStr stderr "\r\ESC[K"  -- Clear line
-                hFlush stderr
+              when shouldShowProgress clearProgress
             )
           
           -- Print final result
@@ -544,11 +543,9 @@ verify isRemote
           (actualCount, issues) <- finally
             (Verify.verifyLocal cwd (Just counter))
             (do
-              -- Clean up: kill reporter thread and print final line
+              -- Clean up: kill reporter thread and clear line
               maybe (return ()) killThread reporterThread
-              when shouldShowProgress $ do
-                hPutStr stderr "\r\ESC[K"  -- Clear line
-                hFlush stderr
+              when shouldShowProgress clearProgress
             )
           
           -- Print final result
@@ -573,8 +570,7 @@ verifyProgressLoop counter total = go
     go = do
       n <- readIORef counter
       let pct = (n * 100) `div` max 1 total
-      hPutStr stderr $ "\r\ESC[KChecking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
-      hFlush stderr
+      reportProgress $ "Checking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
       threadDelay 100000  -- 100ms
       when (n < total) go
 
@@ -585,8 +581,7 @@ checkProgressLoop counter total = go
     go = do
       n <- readIORef counter
       let pct = (n * 100) `div` max 1 total
-      hPutStr stderr $ "\r\ESC[KChecking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
-      hFlush stderr
+      reportProgress $ "Checking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
       threadDelay 100000  -- 100ms
       when (n < total) go
 
@@ -690,9 +685,7 @@ remoteCheck mName = do
                     
                     -- Clean up: kill reporter thread and clear line
                     maybe (return ()) killThread reporterThread
-                    when shouldShowProgress $ do
-                        hPutStr stderr "\r\ESC[K"  -- Clear line
-                        hFlush stderr
+                    when shouldShowProgress clearProgress
                     
                     case res of
                         Left _ -> do
