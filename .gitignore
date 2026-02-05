@@ -28,6 +28,9 @@ test/cli/work_norepo/
 test/cli/remote_mirror/
 test/cli/device_prompt_remote/
 
+# Test report
+test.txt
+
 # Windows
 Thumbs.db
 Desktop.ini
