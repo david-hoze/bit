@@ -39,7 +39,11 @@
   
   - name: System.IO.hGetContents
     within: []
-    message: "hGetContents uses lazy IO. Use BS.hGetContents or read in chunks instead."
+    message: "hGetContents uses lazy IO. For process output, use Bit.Process.readProcessStrict. For files, use BS.hGetContents."
+  
+  - name: System.IO.hGetLine
+    within: []
+    message: "Reading process output in a loop is error-prone. Use Bit.Process.readProcessStrict instead."
 
   # Lazy ByteString
   - name: Data.ByteString.Lazy.readFile
@@ -93,6 +97,13 @@
 # ============================================================================
 # Project-specific hints
 # ============================================================================
+
+# Process output capture
+- warn:
+    lhs: "createProcess (proc cmd args)"
+    rhs: "Bit.Process.readProcessStrict cmd args"
+    note: "For capturing output, use readProcessStrict instead of createProcess + hGetContents"
+    severity: Suggestion
 
 # Prefer atomic writes for important files
 - warn:

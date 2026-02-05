@@ -18,6 +18,7 @@ executable bit
                       Bit.Device,
                       Bit.DevicePrompt,
                       Bit.Diff,
+                      Bit.Process,
                       Bit.Utils,
                       Bit.Plan,
                       Bit.Pipeline,

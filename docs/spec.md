@@ -428,6 +428,16 @@ The correct approach: Have the remote **fetch** from local, then **merge --ff-on
 
 All operations use `ByteString.readFile` / `ByteString.writeFile` which read/write the entire file and close the handle before returning.
 
+**`Bit.Process`** — Strict process output capture:
+- `readProcessStrict` — runs a process, strictly captures stdout and stderr as `ByteString`, returns `(ExitCode, ByteString, ByteString)`
+- `readProcessStrictWithStderr` — runs a process with inherited stderr (for live progress), strictly captures stdout
+
+Both functions:
+- Use strict `Data.ByteString.hGetContents` (not lazy `System.IO.hGetContents`)
+- Read stdout and stderr concurrently using `async` to avoid deadlocks when buffers fill
+- Ensure all handles are closed and process is waited on in all code paths (using `bracket`)
+- Prevent "delayed read on closed handle" errors that occur when using lazy IO with `createProcess`
+
 **`Bit.ConcurrentIO`** — Type-safe concurrent IO newtype:
 - Constructor is **not exported** to prevent `liftIO` smuggling
 - Only whitelisted strict operations are exposed
@@ -453,10 +463,15 @@ All lazy IO replaced with strict operations:
 #### 3. HLint Enforcement
 
 **`.hlint.yaml`** bans lazy IO functions project-wide:
-- Banned: `Prelude.readFile`, `Prelude.writeFile`, `System.IO.hGetContents`
+- Banned: `Prelude.readFile`, `Prelude.writeFile`, `System.IO.hGetContents`, `System.IO.hGetLine`
 - Banned: `Data.ByteString.Lazy.readFile`, `Data.Text.IO.readFile`
 - Banned: Entire modules `Data.ByteString.Lazy`, `Data.Text.Lazy.IO`
 - Suggests: `BS.readFile` over `readFile`, `atomicWriteFile` over `writeFile`
+- Suggests: `Bit.Process.readProcessStrict` over `createProcess` for output capture
+
+Process-specific rules:
+- `System.IO.hGetContents` banned with message pointing to `Bit.Process.readProcessStrict`
+- `System.IO.hGetLine` banned (reading in a loop is error-prone)
 
 HLint errors appear in IDE and CI, preventing lazy IO from being reintroduced.
 
@@ -778,6 +793,7 @@ Interactive per-file conflict resolution:
 | `bit/AtomicWrite.hs` | Atomic file writes, directory locking, lock registry |
 | `bit/ConcurrentIO.hs` | Type-safe concurrent IO newtype (no MonadIO) |
 | `bit/ConcurrentFileIO.hs` | Strict ByteString file operations |
+| `bit/Process.hs` | Strict process output capture (concurrent stdout/stderr reading) |
 
 ---
 
@@ -885,6 +901,8 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
 - Use lazy IO (`Prelude.readFile`, `writeFile`, `hGetContents`, `Data.ByteString.Lazy`,
   `Data.Text.Lazy.IO`) — causes "file is locked" errors on Windows; use strict
   ByteString operations exclusively
+- Use `createProcess` with `System.IO.hGetContents` for capturing process output —
+  causes "delayed read on closed handle" errors; use `Bit.Process.readProcessStrict` instead
 - Use plain `writeFile` for important files — use `atomicWriteFile` for crash safety
   and Windows compatibility
 

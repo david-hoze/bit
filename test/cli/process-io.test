@@ -1,0 +1,92 @@
+# =============================================================================
+# Process IO Tests - Verify strict process output capture
+#
+# Tests that the bit command (which uses git processes internally) works
+# correctly without "delayed read on closed handle" errors or handle leaks.
+#
+# The Bit.Process module provides strict process IO that:
+# - Reads stdout and stderr concurrently to avoid deadlocks
+# - Closes all handles properly before waiting for process
+# - Uses strict ByteString (no lazy IO)
+#
+# Prerequisites: git must be available on PATH
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work_process 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP
+# ======================================================================
+
+mkdir test\cli\work_process
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_process & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: VERIFY NO HANDLE LEAKS OR DEADLOCKS
+# ======================================================================
+
+# ---- Run multiple git commands in sequence ----
+# If handles leak or aren't closed properly, subsequent commands will fail
+cd test\cli\work_process & bit status
+<<<
+>>> /On branch main/
+>>>= 0
+
+cd test\cli\work_process & bit status
+<<<
+>>> /On branch main/
+>>>= 0
+
+cd test\cli\work_process & bit status
+<<<
+>>> /On branch main/
+>>>= 0
+
+# ---- Create a file and check status multiple times ----
+cd test\cli\work_process & echo test > file.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_process & bit status
+<<<
+>>> /Untracked files/
+>>>= 0
+
+cd test\cli\work_process & bit status
+<<<
+>>> /Untracked files/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: ERROR HANDLING
+# ======================================================================
+
+# ---- Test that error output is properly captured ----
+# Commands that fail should have their stderr captured without hanging
+cd test\cli\work_process & bit add nonexistent_file.txt
+<<<
+>>>2 /fatal|pathspec|did not match/
+>>>= 128
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\work_process 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
