@@ -8,6 +8,7 @@ module Bit.Fsck
 import qualified Bit.Verify as Verify
 import qualified Bit.Utils as Utils
 import qualified Internal.Git as Git
+import Bit.Concurrency (Concurrency(..))
 import System.FilePath ((</>))
 import System.Exit (ExitCode(..), exitWith)
 import Control.Monad (unless, when)
@@ -22,14 +23,14 @@ import Bit.Progress (reportProgress, clearProgress)
 -- [2/2] git fsck on .rgit/index/.git (metadata history integrity).
 -- Prints one line per problem (git-style: "missing <path>", "hash mismatch <path>")
 -- and passes through git fsck output. Exits 1 if any check finds issues.
-doFsck :: FilePath -> IO ()
-doFsck cwd = do
+doFsck :: FilePath -> Concurrency -> IO ()
+doFsck cwd concurrency = do
   hSetBuffering stderr NoBuffering
   
   -- [1/2] Working tree vs local metadata
   -- Get file count first
   let indexDir = cwd </> ".bit/index"
-  meta <- Verify.loadMetadataIndex indexDir
+  meta <- Verify.loadMetadataIndex indexDir concurrency
   let fileCount = length meta
   
   -- Run verification with progress if enough files
@@ -46,7 +47,7 @@ doFsck cwd = do
       
       -- Run verification with progress
       result <- finally
-        (Verify.verifyLocal cwd (Just counter))
+        (Verify.verifyLocal cwd (Just counter) concurrency)
         (do
           -- Clean up: kill reporter thread and clear line
           maybe (return ()) killThread reporterThread
@@ -55,7 +56,7 @@ doFsck cwd = do
       return result
     else
       -- Few files, no progress needed
-      Verify.verifyLocal cwd Nothing
+      Verify.verifyLocal cwd Nothing concurrency
   
   let localOk = null localIssues
   if localOk

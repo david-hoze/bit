@@ -13,6 +13,7 @@ module Bit.Verify
 import Data.Traversable (traverse)
 import Bit.Types (Hash(..), HashAlgo(..), Path, FileEntry(..), EntryKind(..), syncHash, hashToText)
 import Bit.Utils (filterOutBitPaths)
+import Bit.Concurrency (Concurrency(..), runConcurrently, ioConcurrency)
 import System.FilePath ((</>), makeRelative, normalise)
 import System.Directory (doesFileExist, listDirectory, doesDirectoryExist, removeFile)
 import Data.List (isPrefixOf)
@@ -60,14 +61,21 @@ isGitPath path = ".git" `isPrefixOf` normalise path || normalise path == ".git"
 
 -- | Load all metadata from .rgit/index: list of (relative path, expected hash, expected size).
 -- Handles both text files (content stored directly) and binary files (metadata stored).
-loadMetadataIndex :: FilePath -> IO [(Path, Hash 'MD5, Integer)]
-loadMetadataIndex indexDir = do
+loadMetadataIndex :: FilePath -> Concurrency -> IO [(Path, Hash 'MD5, Integer)]
+loadMetadataIndex indexDir concurrency = do
   exists <- doesDirectoryExist indexDir
   if not exists
     then return []
     else do
       relPaths <- listFilesRecursive indexDir indexDir
-      pairs <- mapM (\relPath -> do
+      -- Determine concurrency level
+      bound <- case concurrency of
+        Sequential -> return 1
+        Parallel 0 -> ioConcurrency  -- 0 means auto-detect
+        Parallel n -> return n
+      
+      -- Parallelize metadata reading (IO-bound: reading and parsing files)
+      pairs <- runConcurrently (Parallel bound) (\relPath -> do
         let fullPath = indexDir </> relPath
         mc <- readMetadataOrComputeHash fullPath
         return $ case mc of
@@ -79,13 +87,21 @@ loadMetadataIndex indexDir = do
 -- | Verify local working tree against metadata in .rgit/index.
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
-verifyLocal :: FilePath -> Maybe (IORef Int) -> IO (Int, [VerifyIssue])
-verifyLocal cwd mCounter = do
+verifyLocal :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
+verifyLocal cwd mCounter concurrency = do
   let indexDir = cwd </> ".bit/index"
-  meta <- loadMetadataIndex indexDir
+  meta <- loadMetadataIndex indexDir concurrency
   -- Filter out .git directory entries
   let filteredMeta = filter (\(relPath, _, _) -> not (isGitPath relPath)) meta
-  issues <- mapM (checkOne cwd) filteredMeta
+  
+  -- Determine concurrency level
+  bound <- case concurrency of
+    Sequential -> return 1
+    Parallel 0 -> ioConcurrency  -- 0 means auto-detect
+    Parallel n -> return n
+  
+  -- Parallelize verification (IO-bound: file reads and hashing)
+  issues <- runConcurrently (Parallel bound) (checkOne cwd) filteredMeta
   return (length filteredMeta, concat issues)
   where
     checkOne root (relPath, expectedHash, expectedSize) = do
@@ -99,7 +115,7 @@ verifyLocal cwd mCounter = do
           if actualHash == expectedHash && actualSize == expectedSize
             then return []
             else return [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
-      -- Increment counter after checking file
+      -- Increment counter after checking file (atomicModifyIORef' is thread-safe)
       maybe (return ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
       return result
 
@@ -159,8 +175,8 @@ loadMetadataFromBundle bundleName = do
 -- | Verify remote files match remote metadata.
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
-verifyRemote :: FilePath -> Bit.Remote.Remote -> Maybe (IORef Int) -> IO (Int, [VerifyIssue])
-verifyRemote cwd remote mCounter = do
+verifyRemote :: FilePath -> Bit.Remote.Remote -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
+verifyRemote cwd remote mCounter concurrency = do
   -- 1. Fetch the remote bundle if needed
   let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
   bundleExists <- doesFileExist fetchedPath

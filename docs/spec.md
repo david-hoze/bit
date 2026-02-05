@@ -834,11 +834,12 @@ Interactive per-file conflict resolution:
 | `bit/Types.hs` | Core types: Hash, FileEntry, BitEnv, BitM |
 | `bit/Internal/Metadata.hs` | Canonical metadata parser/serializer |
 | `bit/Scan.hs` | Working directory scanning, hash computation, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO) |
+| `bit/Concurrency.hs` | Bounded parallelism helpers: concurrency level calculation, sequential/parallel mode switching |
 | `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
 | `bit/Plan.hs` | Pure plan: GitDiff → RcloneAction |
 | `bit/Pipeline.hs` | Composed pipeline: diffAndPlan, pushSyncFiles, pullSyncFiles |
-| `bit/Verify.hs` | Local and remote verification |
-| `bit/Fsck.hs` | Full integrity check |
+| `bit/Verify.hs` | Local and remote verification (parallelized) |
+| `bit/Fsck.hs` | Full integrity check (parallelized) |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
 | `bit/Remote/Scan.hs` | Remote file scanning via rclone |
 | `bit/Device.hs` | Device identity, volume detection, .bit-store (strict IO, atomic writes) |

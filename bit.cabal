@@ -5,12 +5,16 @@ version:            0.1.0.0
 executable bit
     main-is:          Bit.hs
     ghc-options:
+        -threaded
+        -rtsopts
+        -with-rtsopts=-N
         -- -Wall
         -- -Wunused-imports
         -- -Widentities
         -- -Wincomplete-patterns
     other-modules:    Bit.AtomicWrite,
                       Bit.Commands,
+                      Bit.Concurrency,
                       Bit.Conflict,
                       Bit.ConcurrentIO,
                       Bit.ConcurrentFileIO,

@@ -73,6 +73,8 @@ import qualified Bit.Pipeline as Pipeline
 import qualified Bit.Verify as Verify
 import qualified Bit.Fsck as Fsck
 import Bit.Plan (RcloneAction(..))
+import Bit.Concurrency (Concurrency(..), runConcurrently, runConcurrentlyBounded)
+import Control.Concurrent (getNumCapabilities)
 import Bit.Types
 import qualified Bit.Remote.Scan as Remote.Scan
 import Control.Monad.Trans.Reader (asks)
@@ -154,7 +156,7 @@ merge args = Git.runGitRaw ("merge" : args)
 init :: IO ()
 init = initializeRepo
 
-fsck :: FilePath -> IO ()
+fsck :: FilePath -> Concurrency -> IO ()
 fsck = Fsck.doFsck
 
 mergeAbort :: IO ()
@@ -473,8 +475,8 @@ cloudFetch remote = do
     mb <- liftIO $ fetchRemoteBundle remote
     liftIO $ saveFetchedBundle remote mb
 
-verify :: Bool -> BitM ()
-verify isRemote
+verify :: Bool -> Concurrency -> BitM ()
+verify isRemote concurrency
   | isRemote = withRemote $ \remote -> do
       cwd <- asks envCwd
       liftIO $ putStrLn "Fetching remote metadata..."
@@ -498,7 +500,7 @@ verify isRemote
           
           -- Run verification with progress
           (actualCount, issues) <- finally
-            (Verify.verifyRemote cwd remote (Just counter))
+            (Verify.verifyRemote cwd remote (Just counter) concurrency)
             (do
               -- Clean up: kill reporter thread and clear line
               maybe (return ()) killThread reporterThread
@@ -513,7 +515,7 @@ verify isRemote
               putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
         else liftIO $ do
           -- Few files, no progress needed
-          (actualCount, issues) <- Verify.verifyRemote cwd remote Nothing
+          (actualCount, issues) <- Verify.verifyRemote cwd remote Nothing concurrency
           if null issues
             then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
             else do
@@ -524,7 +526,7 @@ verify isRemote
       cwd <- asks envCwd
       -- Get file count first by loading metadata
       let indexDir = cwd </> ".bit/index"
-      meta <- liftIO $ Verify.loadMetadataIndex indexDir
+      meta <- liftIO $ Verify.loadMetadataIndex indexDir concurrency
       let fileCount = length meta
       
       -- Setup progress tracking if we have enough files
@@ -541,7 +543,7 @@ verify isRemote
           
           -- Run verification with progress
           (actualCount, issues) <- finally
-            (Verify.verifyLocal cwd (Just counter))
+            (Verify.verifyLocal cwd (Just counter) concurrency)
             (do
               -- Clean up: kill reporter thread and clear line
               maybe (return ()) killThread reporterThread
@@ -556,7 +558,7 @@ verify isRemote
               putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found. Run 'bit status' for details."
         else liftIO $ do
           -- Few files, no progress needed
-          (actualCount, issues) <- Verify.verifyLocal cwd Nothing
+          (actualCount, issues) <- Verify.verifyLocal cwd Nothing concurrency
           if null issues
             then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
             else do
@@ -1045,9 +1047,12 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
             progress <- CopyProgress.newSyncProgress (length binaryFiles)
             writeIORef (CopyProgress.spBytesTotal progress) totalBytes
             
-            -- Second pass: copy files with progress
+            -- Second pass: copy files with progress (parallelized)
             CopyProgress.withSyncProgressReporter progress $ do
-                forM_ fileInfo $ \(path, isText, size) -> do
+                -- Use lower concurrency for file copies to avoid disk thrashing
+                caps <- getNumCapabilities
+                let concurrency = max 2 (caps * 2)
+                void $ runConcurrentlyBounded concurrency (\(path, isText, size) -> do
                     let metaPath = remoteIndex </> path
                     if isText
                         then do
@@ -1064,6 +1069,7 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
                                 writeIORef (CopyProgress.spCurrentFile progress) path
                                 CopyProgress.copyFileWithProgress srcPath destPath size progress
                                 CopyProgress.incrementFilesComplete progress
+                    ) fileInfo
         _ -> return ()
 
 -- | Check if a metadata file is a text file (content stored directly) or binary (hash/size stored).
@@ -1118,9 +1124,12 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
             progress <- CopyProgress.newSyncProgress (length binaryFiles)
             writeIORef (CopyProgress.spBytesTotal progress) totalBytes
             
-            -- Second pass: apply changes with progress
+            -- Second pass: apply changes with progress (parallelized)
             CopyProgress.withSyncProgressReporter progress $ do
-                forM_ parsedChanges $ \(status, path, mNewPath) -> case status of
+                -- Use lower concurrency for file copies to avoid disk thrashing
+                caps <- getNumCapabilities
+                let concurrency = max 2 (caps * 2)
+                void $ runConcurrentlyBounded concurrency (\(status, path, mNewPath) -> case status of
                     'A' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex path progress
                     'M' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex path progress
                     'D' -> filesystemDeleteFileAtRemote remotePath path
@@ -1130,6 +1139,7 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
                             filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
                         Nothing -> return ()
                     _ -> return ()
+                    ) parsedChanges
         _ -> return ()
 
 -- | Copy a file from local to remote (handles both text and binary).
@@ -1376,9 +1386,12 @@ filesystemSyncRemoteFilesToLocal localRoot remotePath commitHash = do
         progress <- CopyProgress.newSyncProgress (length binaryFiles)
         writeIORef (CopyProgress.spBytesTotal progress) totalBytes
         
-        -- Second pass: copy files with progress
+        -- Second pass: copy files with progress (parallelized)
         CopyProgress.withSyncProgressReporter progress $ do
-            forM_ fileInfo $ \(path, isText, size) -> do
+            -- Use lower concurrency for file copies to avoid disk thrashing
+            caps <- getNumCapabilities
+            let concurrency = max 2 (caps * 2)
+            void $ runConcurrentlyBounded concurrency (\(path, isText, size) -> do
                 let metaPath = localIndex </> path
                 if isText
                     then do
@@ -1395,6 +1408,7 @@ filesystemSyncRemoteFilesToLocal localRoot remotePath commitHash = do
                             writeIORef (CopyProgress.spCurrentFile progress) path
                             CopyProgress.copyFileWithProgress srcPath destPath size progress
                             CopyProgress.incrementFilesComplete progress
+                ) fileInfo
 
 -- | Apply merge changes to working directory for filesystem pull.
 filesystemApplyMergeToWorkingDir :: FilePath -> FilePath -> String -> String -> IO ()
@@ -1432,9 +1446,12 @@ filesystemApplyMergeToWorkingDir localRoot remotePath oldHead newHead = do
             progress <- CopyProgress.newSyncProgress (length binaryFiles)
             writeIORef (CopyProgress.spBytesTotal progress) totalBytes
             
-            -- Second pass: apply changes with progress
+            -- Second pass: apply changes with progress (parallelized)
             CopyProgress.withSyncProgressReporter progress $ do
-                forM_ changes $ \(status, path, mNewPath) -> case status of
+                -- Use lower concurrency for file copies to avoid disk thrashing
+                caps <- getNumCapabilities
+                let concurrency = max 2 (caps * 2)
+                void $ runConcurrentlyBounded concurrency (\(status, path, mNewPath) -> case status of
                     'A' -> filesystemDownloadOrCopyFromIndex localRoot remotePath path progress
                     'M' -> filesystemDownloadOrCopyFromIndex localRoot remotePath path progress
                     'D' -> safeDeleteWorkFile localRoot path
@@ -1444,6 +1461,7 @@ filesystemApplyMergeToWorkingDir localRoot remotePath oldHead newHead = do
                             filesystemDownloadOrCopyFromIndex localRoot remotePath newPath progress
                         Nothing -> return ()
                     _ -> return ()
+                    ) changes
 
 -- | Download a file from remote or copy from index for filesystem pull.
 filesystemDownloadOrCopyFromIndex :: FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
@@ -1623,9 +1641,13 @@ syncRemoteFiles = withRemote $ \remote -> do
                     -- Create progress tracker for cloud operations (file-count only)
                     progress <- liftIO $ CopyProgress.newSyncProgress (length actions)
                     liftIO $ CopyProgress.withSyncProgressReporter progress $ do
-                        forM_ actions $ \a -> do
+                        -- Use lower concurrency for network/subprocess operations
+                        caps <- getNumCapabilities
+                        let concurrency = min 8 (max 2 (caps * 2))
+                        void $ runConcurrentlyBounded concurrency (\a -> do
                             executeCommand cwd remote a
-                            CopyProgress.incrementFilesComplete progress)
+                            CopyProgress.incrementFilesComplete progress
+                            ) actions)
         remoteResult
 
 
@@ -1702,9 +1724,13 @@ syncRemoteFilesToLocal = withRemote $ \remote -> do
                     -- Create progress tracker for cloud operations (file-count only)
                     progress <- lift $ CopyProgress.newSyncProgress (length actions)
                     lift $ CopyProgress.withSyncProgressReporter progress $ do
-                        forM_ actions $ \a -> do
+                        -- Use lower concurrency for network/subprocess operations
+                        caps <- getNumCapabilities
+                        let concurrency = min 8 (max 2 (caps * 2))
+                        void $ runConcurrentlyBounded concurrency (\a -> do
                             executePullCommand cwd remote a
-                            CopyProgress.incrementFilesComplete progress)
+                            CopyProgress.incrementFilesComplete progress
+                            ) actions)
         remoteResult
 
 -- | After a merge, mirror git's metadata changes onto the actual working directory.
@@ -1723,16 +1749,20 @@ applyMergeToWorkingDir remote oldHead = do
             if null changes
                 then liftIO $ putStrLn "Working tree already up to date with remote."
                 else do
-                    forM_ changes $ \(status, path, mNewPath) -> case status of
-                        'A' -> liftIO $ downloadOrCopyFromIndex cwd remote path
-                        'M' -> liftIO $ downloadOrCopyFromIndex cwd remote path
-                        'D' -> liftIO $ safeDeleteWorkFile cwd path
+                    -- Use lower concurrency for network/subprocess operations
+                    caps <- liftIO getNumCapabilities
+                    let concurrency = min 8 (max 2 (caps * 2))
+                    void $ liftIO $ runConcurrentlyBounded concurrency (\(status, path, mNewPath) -> case status of
+                        'A' -> downloadOrCopyFromIndex cwd remote path
+                        'M' -> downloadOrCopyFromIndex cwd remote path
+                        'D' -> safeDeleteWorkFile cwd path
                         'R' -> case mNewPath of
                             Just newPath -> do
-                                liftIO $ safeDeleteWorkFile cwd path
-                                liftIO $ downloadOrCopyFromIndex cwd remote newPath
+                                safeDeleteWorkFile cwd path
+                                downloadOrCopyFromIndex cwd remote newPath
                             Nothing -> return ()
                         _ -> return ()  -- ignore unknown statuses
+                        ) changes
 
 -- | Download a file from remote, or copy from index if it's a text file.
 downloadOrCopyFromIndex :: FilePath -> Remote -> FilePath -> IO ()
@@ -1913,7 +1943,7 @@ pullManualMergeImpl remote = do
                 Left _ -> lift $ tellErr "Error: Could not fetch remote file list."
                 Right remoteFiles -> do
                     let filteredRemoteFiles = filterOutBitPaths remoteFiles
-                    localMeta <- lift $ Verify.loadMetadataIndex (cwd </> bitIndexPath)
+                    localMeta <- lift $ Verify.loadMetadataIndex (cwd </> bitIndexPath) (Parallel 0)
 
                     let remoteFileMap = Map.fromList
                           [ (normalise e.path, (h, e.kind))

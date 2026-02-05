@@ -7,6 +7,7 @@ import Bit.Types (BitEnv(..), runBitM)
 import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
 import Bit.Remote (getDefaultRemote, resolveRemote)
 import Bit.Utils (atomicWriteFileStr)
+import Bit.Concurrency (Concurrency(..))
 import System.Environment (getArgs)
 import System.Exit (ExitCode(..), exitWith)
 import System.FilePath ((</>))
@@ -68,10 +69,11 @@ runCommand :: [String] -> IO ()
 runCommand args = do
     let isForce = "--force" `elem` args || "-f" `elem` args
     let isForceWithLease = "--force-with-lease" `elem` args
+    let isSequential = "--sequential" `elem` args
     when (isForce && isForceWithLease) $ do
         hPutStrLn stderr "fatal: Cannot use both --force and --force-with-lease"
         exitWith (ExitFailure 1)
-    let cmd = filter (`notElem` ["--force", "-f", "--force-with-lease"]) args
+    let cmd = filter (`notElem` ["--force", "-f", "--force-with-lease", "--sequential"]) args
 
     cwd <- Dir.getCurrentDirectory
 
@@ -135,9 +137,9 @@ runCommand args = do
             mNamedRemote <- resolveRemote cwd name
             let envWithRemote = env { envRemote = mNamedRemote }
             runBitM envWithRemote $ Bit.remoteCheck (Just name)
-        ["verify"]                      -> runBitM env $ Bit.verify False
-        ["verify", "--remote"]          -> runBitM env $ Bit.verify True
-        ["fsck"]                        -> Bit.fsck cwd
+        ["verify"]                      -> runBitM env $ Bit.verify False (if isSequential then Sequential else Parallel 0)
+        ["verify", "--remote"]          -> runBitM env $ Bit.verify True (if isSequential then Sequential else Parallel 0)
+        ["fsck"]                        -> Bit.fsck cwd (if isSequential then Sequential else Parallel 0)
         ("add":rest)                    -> Bit.add rest >>= exitWith
         ("commit":rest)                 -> Bit.commit rest >>= exitWith
         ("diff":rest)                   -> Bit.diff rest >>= exitWith
