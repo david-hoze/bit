@@ -23,7 +23,7 @@ import System.Directory
       createDirectoryIfMissing,
       copyFileWithMetadata,
       getCurrentDirectory )
-import System.IO (withFile, IOMode(ReadMode), hIsEOF)
+import System.IO (withFile, IOMode(ReadMode), hIsEOF, hIsTerminalDevice, hPutStr, hFlush, stderr)
 import Data.List
 import qualified Data.ByteString as BS
 import Data.Text (unpack)
@@ -40,9 +40,10 @@ import qualified Crypto.Hash.MD5 as MD5
 import Data.ByteString.Base16 (encode)
 import qualified Data.Text as T
 import Control.Concurrent.Async (mapConcurrently)
-import Control.Concurrent (getNumCapabilities)
+import Control.Concurrent (getNumCapabilities, forkIO, threadDelay, killThread)
 import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
-import Control.Exception (bracket_)
+import Control.Exception (bracket_, finally)
+import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]
@@ -138,6 +139,18 @@ mapConcurrentlyBounded bound f xs = do
     sem <- newQSem bound
     mapConcurrently (\x -> bracket_ (waitQSem sem) (signalQSem sem) (f x)) xs
 
+-- | Progress reporter thread that periodically displays scan progress
+progressLoop :: IORef Int -> Int -> IO ()
+progressLoop counter total = go
+  where
+    go = do
+        n <- readIORef counter
+        let pct = (n * 100) `div` max 1 total
+        hPutStr stderr $ "\rScanning... " ++ show n ++ "/" ++ show total ++ " files (" ++ show pct ++ "%)"
+        hFlush stderr
+        threadDelay 50000  -- 50ms
+        when (n < total) go
+
 -- Main scan function
 scanWorkingDir :: FilePath -> IO [FileEntry]
 scanWorkingDir root = do
@@ -157,18 +170,40 @@ scanWorkingDir root = do
         filesToHash = [(rel, root </> rel) | (rel, False) <- allPaths
                                            , not (Set.member (normalizePath rel) ignoredSet)]
     
+    -- Setup progress tracking
+    let total = length filesToHash
+    isTTY <- hIsTerminalDevice stderr
+    counter <- newIORef (0 :: Int)
+    
+    -- Start progress reporter thread if we're in a TTY and have enough files
+    let shouldShowProgress = isTTY && total > 50
+    reporterThread <- if shouldShowProgress
+        then Just <$> forkIO (progressLoop counter total)
+        else return Nothing
+    
     -- Hash/classify files in parallel (bounded by numCapabilities * 4)
     caps <- getNumCapabilities
     let concurrency = max 4 (caps * 4)
-    fileEntries <- mapConcurrentlyBounded concurrency
-        (\(rel, fullPath) -> do
+    
+    let hashWithProgress (rel, fullPath) = do
             size <- getFileSize fullPath
             (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
+            atomicModifyIORef' counter (\n -> (n + 1, ()))
             return $ FileEntry
                 { path = rel
                 , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
                 }
-        ) filesToHash
+    
+    fileEntries <- finally
+        (mapConcurrentlyBounded concurrency hashWithProgress filesToHash)
+        (do
+            -- Clean up: kill reporter thread and clear/finalize progress line
+            maybe (return ()) killThread reporterThread
+            when shouldShowProgress $ do
+                hPutStr stderr "\r\ESC[K"  -- Clear line with ANSI escape
+                hPutStr stderr $ "Scanned " ++ show total ++ " files.\n"
+                hFlush stderr
+        )
     
     return $ dirEntries ++ fileEntries
   where
