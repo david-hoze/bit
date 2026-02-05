@@ -21,9 +21,9 @@ module Internal.Transport
 import System.Process (readProcessWithExitCode, readProcess, readCreateProcess, CreateProcess(..), StdStream(..), proc, waitForProcess, createProcess)
 import System.Exit (ExitCode(..))
 import System.Directory (removeFile, doesFileExist)
-import System.IO (hPutStrLn, stderr)
+import System.IO (hPutStrLn, stderr, hGetLine, hIsEOF, Handle)
 import System.FilePath (normalise)
-import Control.Monad (when)
+import Control.Monad (when, unless)
 import Data.List (isInfixOf, isPrefixOf)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy.Char8 as LBS
@@ -31,6 +31,8 @@ import GHC.Generics (Generic)
 import Data.Maybe (fromMaybe)
 import Data.String (fromString)
 import Bit.Remote (Remote, remoteUrl)
+import Data.IORef (IORef, modifyIORef')
+import Control.Exception (bracket)
 
 -- | Build a full remote path from Remote + relative path.
 -- Handles trailing-slash normalization internally.
@@ -160,28 +162,89 @@ listRemoteJsonWithHash :: Remote -> IO (ExitCode, String, String)
 listRemoteJsonWithHash remote =
     readProcessWithExitCode "rclone" ["lsjson", remoteUrl remote, "--hash", "--recursive"] ""
 
--- | Check local against remote
-checkRemote :: FilePath -> Remote -> IO CheckResult
-checkRemote localPath remote = do
+-- | Check local against remote with optional progress tracking
+checkRemote :: FilePath -> Remote -> Maybe (IORef Int) -> IO CheckResult
+checkRemote localPath remote mCounter = do
     let args = [ "check"
                , localPath
                , remoteUrl remote
                , "--combined", "-"
                , "--exclude", ".bit/**"
                ]
-    (code, out, err) <- readProcessWithExitCode "rclone" args ""
-    let parsed = parseCombinedOutput out
-    return CheckResult
-        { checkMatches     = parsed '='
-        , checkDiffers     = parsed '*'
-        , checkMissingDest = parsed '+'
-        , checkMissingSrc  = parsed '-'
-        , checkErrors      = parsed '!'
-        , checkExitCode    = code
-        , checkRawOutput   = out
-        , checkStderr      = err
-        }
+    case mCounter of
+        Nothing -> do
+            -- No progress tracking - use simple blocking version
+            (code, out, err) <- readProcessWithExitCode "rclone" args ""
+            let parsed = parseCombinedOutput out
+            return CheckResult
+                { checkMatches     = parsed '='
+                , checkDiffers     = parsed '*'
+                , checkMissingDest = parsed '+'
+                , checkMissingSrc  = parsed '-'
+                , checkErrors      = parsed '!'
+                , checkExitCode    = code
+                , checkRawOutput   = out
+                , checkStderr      = err
+                }
+        Just counter -> do
+            -- Stream output and track progress
+            let cp = (proc "rclone" args)
+                    { std_out = CreatePipe
+                    , std_err = CreatePipe
+                    , std_in = Inherit
+                    }
+            bracket (createProcess cp) cleanup $ \(_, mStdout, mStderr, ph) -> do
+                case (mStdout, mStderr) of
+                    (Just hOut, Just hErr) -> do
+                        -- Read stdout line by line, accumulating and counting
+                        outLines <- readLinesWithProgress hOut counter
+                        -- Read all stderr
+                        errOutput <- hGetContents' hErr
+                        -- Wait for process to finish
+                        code <- waitForProcess ph
+                        let out = unlines outLines
+                            parsed = parseCombinedOutput out
+                        return CheckResult
+                            { checkMatches     = parsed '='
+                            , checkDiffers     = parsed '*'
+                            , checkMissingDest = parsed '+'
+                            , checkMissingSrc  = parsed '-'
+                            , checkErrors      = parsed '!'
+                            , checkExitCode    = code
+                            , checkRawOutput   = out
+                            , checkStderr      = errOutput
+                            }
+                    _ -> error "checkRemote: failed to create pipes"
   where
+    cleanup (_, mOut, mErr, _) = do
+        maybe (return ()) (\h -> hIsEOF h >> return ()) mOut
+        maybe (return ()) (\h -> hIsEOF h >> return ()) mErr
+    
+    -- Read lines from handle, incrementing counter for each line
+    readLinesWithProgress :: Handle -> IORef Int -> IO [String]
+    readLinesWithProgress h counter = go []
+      where
+        go acc = do
+            eof <- hIsEOF h
+            if eof
+                then return (reverse acc)
+                else do
+                    line <- hGetLine h
+                    unless (null line) $ modifyIORef' counter (+1)
+                    go (line : acc)
+    
+    -- Strict reading of handle contents to avoid lazy IO issues
+    hGetContents' :: Handle -> IO String
+    hGetContents' h = go []
+      where
+        go acc = do
+            eof <- hIsEOF h
+            if eof
+                then return (concat (reverse acc))
+                else do
+                    line <- hGetLine h
+                    go ((line ++ "\n") : acc)
+    
     -- Parse "<symbol> <path>" lines; path is everything after first space.
     parseCombinedOutput :: String -> (Char -> [FilePath])
     parseCombinedOutput raw =

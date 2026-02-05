@@ -578,6 +578,18 @@ verifyProgressLoop counter total = go
       threadDelay 100000  -- 100ms
       when (n < total) go
 
+-- | Progress reporter loop for remote check operations
+checkProgressLoop :: IORef Int -> Int -> IO ()
+checkProgressLoop counter total = go
+  where
+    go = do
+      n <- readIORef counter
+      let pct = (n * 100) `div` max 1 total
+      hPutStrLn stderr $ "\rChecking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)..."
+      hFlush stderr
+      threadDelay 100000  -- 100ms
+      when (n < total) go
+
 remoteShow :: Maybe String -> BitM ()
 remoteShow mRemoteName = do
     cwd <- asks envCwd
@@ -652,49 +664,87 @@ remoteCheck mName = do
         Just remote -> do
             liftIO $ putStrLn $ "Checking local against remote: " ++ displayRemote remote
             liftIO $ putStrLn ""
-            liftIO $ putStrLn "Running remote check..."
-            res <- liftIO $ try @IOException (Transport.checkRemote cwd remote)
-            case res of
-                Left _ -> do
-                    liftIO $ hPutStrLn stderr "fatal: rclone not found. Install rclone: https://rclone.org/install/"
-                    liftIO $ exitWith (ExitFailure 1)
-                Right cr -> do
-                    let reportPath = cwd </> bitDir </> "last-check.txt"
-                    liftIO $ createDirectoryIfMissing True (cwd </> bitDir)
-                    liftIO $ atomicWriteFileStr reportPath (Transport.checkRawOutput cr)
-                    let matches = Transport.checkMatches cr
-                        differs = Transport.checkDiffers cr
-                        missingDest = Transport.checkMissingDest cr
-                        missingSrc = Transport.checkMissingSrc cr
-                        errs = Transport.checkErrors cr
-                        nMatch = length matches
-                        hasDiff = not (null differs && null missingDest && null missingSrc && null errs)
-                    if not hasDiff && Transport.checkExitCode cr == ExitSuccess
+            
+            -- Get file count for progress tracking
+            (_, filesOutput, _) <- liftIO $ Git.runGitWithOutput ["ls-files"]
+            let fileCount = length . filter (not . null) . lines $ filesOutput
+            
+            -- Setup progress tracking if we have enough files and a TTY
+            if fileCount > 5
+                then liftIO $ do
+                    isTTY <- hIsTerminalDevice stderr
+                    counter <- newIORef (0 :: Int)
+                    let shouldShowProgress = isTTY
+                    
+                    -- Start progress reporter thread if in TTY
+                    reporterThread <- if shouldShowProgress
                         then do
-                            liftIO $ putStrLn $ show nMatch ++ " files match between local and remote."
-                            liftIO $ exitWith ExitSuccess
-                        else if Transport.checkExitCode cr /= ExitSuccess && Transport.checkExitCode cr /= ExitFailure 1
-                        then do
-                            liftIO $ hPutStrLn stderr "fatal: Could not read from remote."
-                            liftIO $ hPutStrLn stderr ""
-                            liftIO $ hPutStrLn stderr "Please make sure you have the correct access rights"
-                            liftIO $ hPutStrLn stderr "and the remote exists."
-                            unless (null (Transport.checkStderr cr)) $ liftIO $ hPutStrLn stderr (Transport.checkStderr cr)
-                            liftIO $ exitWith (ExitFailure 1)
+                            putStrLn "Running remote check..."
+                            Just <$> forkIO (checkProgressLoop counter fileCount)
                         else do
-                            liftIO $ putStrLn ""
-                            when (not (null differs)) $ forM_ ("  content differs:" : formatPathList differs) $ \s -> liftIO $ putStrLn s
-                            when (not (null missingDest)) $ forM_ ("  local only (not on remote):" : formatPathList missingDest) $ \s -> liftIO $ putStrLn s
-                            when (not (null missingSrc)) $ forM_ ("  remote only (not in local):" : formatPathList missingSrc) $ \s -> liftIO $ putStrLn s
-                            when (not (null errs)) $ forM_ ("  errors:" : formatPathList errs) $ \s -> liftIO $ putStrLn s
-                            let errWord = if length errs == 1 then "1 error" else show (length errs) ++ " errors"
-                            liftIO $ putStrLn $ show (length differs + length missingDest + length missingSrc) ++ " differences, "
-                                ++ errWord ++ ". " ++ show nMatch ++ " files matched."
-                            liftIO $ putStrLn ""
-                            liftIO $ hPutStrLn stderr "hint: Content differences may indicate an incomplete push or pull."
-                            liftIO $ hPutStrLn stderr "hint: Run 'bit verify' and 'bit verify --remote' to check metadata consistency."
-                            liftIO $ hPutStrLn stderr "hint: Full report saved to .bit/last-check.txt"
-                            liftIO $ exitWith (ExitFailure 1)
+                            putStrLn "Running remote check..."
+                            return Nothing
+                    
+                    -- Run check with progress
+                    res <- try @IOException (Transport.checkRemote cwd remote (Just counter))
+                    
+                    -- Clean up: kill reporter thread and clear line
+                    maybe (return ()) killThread reporterThread
+                    when shouldShowProgress $ do
+                        hPutStrLn stderr "\r\ESC[K"  -- Clear line
+                        hFlush stderr
+                    
+                    case res of
+                        Left _ -> do
+                            hPutStrLn stderr "fatal: rclone not found. Install rclone: https://rclone.org/install/"
+                            exitWith (ExitFailure 1)
+                        Right cr -> processCheckResult cwd cr
+                else liftIO $ do
+                    putStrLn "Running remote check..."
+                    res <- try @IOException (Transport.checkRemote cwd remote Nothing)
+                    case res of
+                        Left _ -> do
+                            hPutStrLn stderr "fatal: rclone not found. Install rclone: https://rclone.org/install/"
+                            exitWith (ExitFailure 1)
+                        Right cr -> processCheckResult cwd cr
+  where
+    processCheckResult cwd cr = do
+        let reportPath = cwd </> bitDir </> "last-check.txt"
+        createDirectoryIfMissing True (cwd </> bitDir)
+        atomicWriteFileStr reportPath (Transport.checkRawOutput cr)
+        let matches = Transport.checkMatches cr
+            differs = Transport.checkDiffers cr
+            missingDest = Transport.checkMissingDest cr
+            missingSrc = Transport.checkMissingSrc cr
+            errs = Transport.checkErrors cr
+            nMatch = length matches
+            hasDiff = not (null differs && null missingDest && null missingSrc && null errs)
+        if not hasDiff && Transport.checkExitCode cr == ExitSuccess
+            then do
+                putStrLn $ show nMatch ++ " files match between local and remote."
+                exitWith ExitSuccess
+            else if Transport.checkExitCode cr /= ExitSuccess && Transport.checkExitCode cr /= ExitFailure 1
+            then do
+                hPutStrLn stderr "fatal: Could not read from remote."
+                hPutStrLn stderr ""
+                hPutStrLn stderr "Please make sure you have the correct access rights"
+                hPutStrLn stderr "and the remote exists."
+                unless (null (Transport.checkStderr cr)) $ hPutStrLn stderr (Transport.checkStderr cr)
+                exitWith (ExitFailure 1)
+            else do
+                putStrLn ""
+                when (not (null differs)) $ mapM_ putStrLn ("  content differs:" : formatPathList differs)
+                when (not (null missingDest)) $ mapM_ putStrLn ("  local only (not on remote):" : formatPathList missingDest)
+                when (not (null missingSrc)) $ mapM_ putStrLn ("  remote only (not in local):" : formatPathList missingSrc)
+                when (not (null errs)) $ mapM_ putStrLn ("  errors:" : formatPathList errs)
+                let errWord = if length errs == 1 then "1 error" else show (length errs) ++ " errors"
+                putStrLn $ show (length differs + length missingDest + length missingSrc) ++ " differences, "
+                    ++ errWord ++ ". " ++ show nMatch ++ " files matched."
+                putStrLn ""
+                hPutStrLn stderr "hint: Content differences may indicate an incomplete push or pull."
+                hPutStrLn stderr "hint: Run 'bit verify' and 'bit verify --remote' to check metadata consistency."
+                hPutStrLn stderr "hint: Full report saved to .bit/last-check.txt"
+                exitWith (ExitFailure 1)
 
 mergeContinue :: BitM ()
 mergeContinue = do

@@ -617,6 +617,20 @@ Full integrity check combining local verify, remote verify, and `git fsck` on th
 - `[1/2] Checking working tree: N/Total (X%)...`
 - `[2/2] Checking metadata history...`
 
+### `bit remote check`
+
+Checks local working tree against remote using `rclone check --combined`. Reports files that match, differ, or are missing from either side. This is a lower-level check than verify — it compares actual file content between local and remote without involving metadata.
+
+**Implementation**: Uses `rclone check --combined -` which outputs one line per file as it processes. For repos with >5 files, streams this output line-by-line to enable progress tracking.
+
+**Progress reporting**: On TTY with >5 files, displays live progress: `Checking files: N/Total (X%)...`
+- Counts files using `git ls-files` to get total expected file count upfront
+- Streams rclone output using `createProcess` with pipes instead of blocking `readProcessWithExitCode`
+- Updates progress counter via `IORef` as each line is received from rclone
+- Progress reporter thread runs at 100ms intervals, cleared on completion
+
+**Output**: Full comparison report saved to `.bit/last-check.txt` for detailed analysis.
+
 ---
 
 ## Handling Remote Divergence

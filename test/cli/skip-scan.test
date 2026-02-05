@@ -84,7 +84,7 @@ cd test\cli\work_skipscan & bit remote show 2>&1 | findstr /C:"Scanned" >nul
 # ---- Test: remote show should display message when no remote configured ----
 cd test\cli\work_skipscan & bit remote show
 <<<
->>> /No remotes configured/
+>>> /No remotes? configured/
 >>>= 0
 
 # ---- Test: verify should not scan ----

@@ -46,8 +46,88 @@ cd test\cli\work & bit remote check
 >>> /content differs|differences,/
 >>>= 1
 
+# --- Restore local file for next test ---
+cd test\cli\work & echo hello> greet.txt
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# TEST: Progress reporting with multiple files (>5 files)
+# ======================================================================
+
+# --- Setup: Create repo with many files to trigger progress code path ---
+rmdir /s /q test\cli\work_check_progress 2>nul & rmdir /s /q test\cli\remote_check_progress 2>nul & mkdir test\cli\work_check_progress & mkdir test\cli\remote_check_progress & cd test\cli\work_check_progress & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# --- Create 10 files to ensure progress code is triggered (>5 files) ---
+cd test\cli\work_check_progress & echo f1> f1.txt & echo f2> f2.txt & echo f3> f3.txt & echo f4> f4.txt & echo f5> f5.txt & echo f6> f6.txt & echo f7> f7.txt & echo f8> f8.txt & echo f9> f9.txt & echo f10> f10.txt & bit add . & bit commit -m "Add many files"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\work_check_progress & bit remote add origin ..\remote_check_progress
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\work_check_progress & bit push
+<<<
+>>> /Push complete|Pushing to filesystem remote|Metadata push complete/
+>>>= 0
+
+# --- Remote check should succeed with all files matching ---
+cd test\cli\work_check_progress & bit remote check
+<<<
+>>> /files match|0 differences found/
+>>>= 0
+
+# --- Modify one file and check again ---
+cd test\cli\work_check_progress & echo modified> f5.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_check_progress & bit remote check
+<<<
+>>> /content differs|differences,/
+>>>= 1
+
+# ======================================================================
+# TEST: Progress with fewer files (<=5 files, no progress code path)
+# ======================================================================
+
+# --- Setup: Create repo with exactly 5 files (at threshold) ---
+rmdir /s /q test\cli\work_check_small 2>nul & rmdir /s /q test\cli\remote_check_small 2>nul & mkdir test\cli\work_check_small & mkdir test\cli\remote_check_small & cd test\cli\work_check_small & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\work_check_small & echo a> a.txt & echo b> b.txt & echo c> c.txt & echo d> d.txt & echo e> e.txt & bit add . & bit commit -m "Add 5 files"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\work_check_small & bit remote add origin ..\remote_check_small
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\work_check_small & bit push
+<<<
+>>> /Push complete|Pushing to filesystem remote|Metadata push complete/
+>>>= 0
+
+# --- Remote check should succeed (using simple code path) ---
+cd test\cli\work_check_small & bit remote check
+<<<
+>>> /files match|0 differences found/
+>>>= 0
+
 # --- Cleanup ---
-rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\remote_mirror 2>nul
+timeout /t 1 >nul & rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\remote_mirror 2>nul & rmdir /s /q test\cli\work_check_progress 2>nul & rmdir /s /q test\cli\remote_check_progress 2>nul & rmdir /s /q test\cli\work_check_small 2>nul & rmdir /s /q test\cli\remote_check_small 2>nul
 <<<
 >>>
 >>>= 0
