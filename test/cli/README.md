@@ -2,7 +2,24 @@
 
 CLI tests use **[shelltest](https://hackage.haskell.org/package/shelltestrunner)** (shelltestrunner). Test files use the `.test` extension and Format 3: command line, `<<<` (stdin), `>>>` expected stdout (literal or `/regex/`), `>>>=` expected exit code.
 
-**Run from the repository root** so paths like `test\cli\work_a` resolve correctly.
+**Run from the repository root** so paths like `test\cli\work_merge_a` resolve correctly.
+
+## Test Infrastructure
+
+### Directory Naming
+
+Each test file uses **unique directory names** to prevent interference:
+- `gdrive-remote.test`: `work_gdrive_a`, `work_gdrive_b`
+- `merge-local.test`: `work_merge_a`, `work_merge_b`, `shared_merge_remote`
+- `filesystem-remote-direct.test`: `work_direct`, `fs_remote_direct`
+
+### Global Cleanup
+
+`000-cleanup.test` runs first (alphabetically) and cleans up all known test directories. This ensures a clean state even if previous test runs were interrupted.
+
+### Windows File Handles
+
+Cleanup commands use `timeout /t 1 >nul &` before `rmdir` to give Windows time to release file handles.
 
 ## Running tests
 
@@ -24,7 +41,7 @@ Tests rclone Google Drive remote: push, pull, fetch, and corruption recovery.
 
 **What it does:**
 
-- **Two repos:** `work_a` (pusher) and `work_b` (puller), both use `gdrive-test:bit-test` as origin
+- **Two repos:** `work_gdrive_a` (pusher) and `work_gdrive_b` (puller), both use `gdrive-test:bit-test` as origin
 - **Push/pull/fetch:** Repo A adds a file, commits, pushes; Repo B fetches and pulls; verifies file content
 - **Corruption:** Uses `rclone deletefile` to remove a file on the remote (simulates partial/corrupt state)
 - **Verify --remote:** Repo B runs `bit verify --remote` and expects missing-file issues

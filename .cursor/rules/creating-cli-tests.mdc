@@ -1,0 +1,221 @@
+---
+description: Guidelines for creating new CLI tests for the bit project
+globs:
+  - "test/cli/**"
+alwaysApply: false
+---
+
+# Creating CLI Tests
+
+## Test File Basics
+
+CLI tests use **shelltest** (shelltestrunner) with Format 3 syntax:
+
+```
+# Comment describing the test
+command to run
+<<<
+optional stdin input
+>>>
+expected stdout (literal text or /regex/)
+>>>= expected_exit_code
+```
+
+## Directory Naming Convention
+
+**CRITICAL: Use unique directory names per test file** to prevent test interference.
+
+| Test File | Directory Pattern |
+|-----------|-------------------|
+| `gdrive-remote.test` | `work_gdrive_a`, `work_gdrive_b` |
+| `merge-local.test` | `work_merge_a`, `work_merge_b`, `shared_merge_remote` |
+| `filesystem-remote-direct.test` | `work_direct`, `fs_remote_direct` |
+| Generic single-repo tests | `work` (shared, but cleaned up properly) |
+
+**Pattern:** `work_<testname>_a`, `work_<testname>_b`, `<testname>_remote`
+
+## Required Cleanup Structure
+
+Every test file that creates directories MUST have:
+
+### 1. Initial Cleanup (at start of file)
+
+```batch
+# ---- CLEANUP: remove any leftover state from previous runs (timeout helps Windows release file handles) ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work_mytest_a 2>nul & rmdir /s /q test\cli\work_mytest_b 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+```
+
+### 2. Final Cleanup (at end of file)
+
+```batch
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\work_mytest_a 2>nul & rmdir /s /q test\cli\work_mytest_b 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+```
+
+### 3. Update Global Cleanup
+
+Add your new directories to `test/cli/000-cleanup.test` so they get cleaned up even if your test is interrupted.
+
+## Windows Considerations
+
+### File Handle Timing
+
+Always use `timeout /t 1 >nul &` before `rmdir` commands:
+
+```batch
+# Bad - may fail silently on Windows
+rmdir /s /q dir 2>nul
+
+# Good - gives Windows time to release handles
+timeout /t 1 >nul & rmdir /s /q dir 2>nul
+```
+
+### Path Separators
+
+Use backslashes for Windows paths in test commands:
+
+```batch
+cd test\cli\work & bit init    # Correct
+cd test/cli/work & bit init    # May work but inconsistent
+```
+
+### Error Suppression
+
+Use `2>nul` only for cleanup commands where failure is acceptable. For actual test commands, let errors show:
+
+```batch
+# Cleanup - suppress errors (directory may not exist)
+rmdir /s /q test\cli\work 2>nul
+
+# Test command - let errors show
+cd test\cli\work & bit init
+```
+
+## Output Matching
+
+### Use Flexible Regex Patterns
+
+```batch
+# Good - tolerates variations
+>>> /.*[Ii]nitialized.*/
+>>> /\[main|master|files? changed/
+>>> /Push complete|Pushing to filesystem remote/
+
+# Bad - too strict
+>>> Initialized empty bit repository in C:\Users\...
+```
+
+### Stderr vs Stdout
+
+- Use `>>>` for stdout expectations
+- Use `>>>2` for stderr expectations
+- Error messages should go to stderr, success to stdout
+
+```batch
+# Expect error on stderr
+cd test\cli\work & bit merge --abort
+<<<
+>>>2 /no merge in progress/
+>>>= 1
+```
+
+## Test Structure Template
+
+```batch
+# =============================================================================
+# <Test Name> - Brief description
+#
+# Longer description of what this test covers.
+# Prerequisites: list any requirements (rclone, specific remotes, etc.)
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work_mytest 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP
+# ======================================================================
+
+mkdir test\cli\work_mytest
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_mytest & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: MAIN TEST CASES
+# ======================================================================
+
+# ---- Test case description ----
+cd test\cli\work_mytest & bit <command>
+<<<
+>>> /expected output/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\work_mytest 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+```
+
+## Interactive Tests
+
+For commands that prompt for input, provide stdin:
+
+```batch
+cd test\cli\work & bit pull
+<<<
+l
+>>> /CONFLICT|Resolving conflicts/
+>>>= 0
+```
+
+Or use non-interactive flags when available:
+
+```batch
+cd test\cli\work & bit pull --accept-remote
+<<<
+>>> /Accepting remote file state/
+>>>= 0
+```
+
+## Test Execution Order
+
+Tests run alphabetically by filename. Consider this when:
+- Naming files that depend on shared state (avoid this pattern)
+- Understanding why `000-cleanup.test` runs first
+
+## Checklist for New Tests
+
+- [ ] Unique directory names (not `work_a`, `work_b` unless no conflicts)
+- [ ] Initial cleanup with `timeout /t 1 >nul &`
+- [ ] Final cleanup with `timeout /t 1 >nul &`
+- [ ] Added directories to `000-cleanup.test`
+- [ ] Flexible regex patterns for output matching
+- [ ] Errors expected on stderr use `>>>2`
+- [ ] Section comments for readability
+- [ ] Documented prerequisites in file header
