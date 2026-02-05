@@ -3,7 +3,7 @@
 module Bit.Commands (run) where
 
 import qualified Bit.Core as Bit
-import Bit.Types (BitEnv(..), runBitM)
+import Bit.Types (BitEnv(..), BitM, runBitM)
 import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
 import Bit.Remote (getDefaultRemote, resolveRemote)
 import Bit.Utils (atomicWriteFileStr)
@@ -65,6 +65,41 @@ pushWithUpstream env cwd name = do
     void $ Git.setupBranchTrackingFor name
     putStrLn $ "branch 'main' set up to track '" ++ name ++ "/main'."
 
+-- | Sync .bitignore to .bit/index/.gitignore with normalization
+syncBitignoreToIndex :: FilePath -> IO ()
+syncBitignoreToIndex cwd = do
+    let bitignoreSrc = cwd </> ".bitignore"
+        bitignoreDest = cwd </> ".bit" </> "index" </> ".gitignore"
+    bitignoreExists <- Dir.doesFileExist bitignoreSrc
+    if bitignoreExists
+        then writeBitignore bitignoreSrc bitignoreDest
+        else removeStaleGitignore bitignoreDest
+  where
+    writeBitignore :: FilePath -> FilePath -> IO ()
+    writeBitignore src dest = do
+        bs <- BS.readFile src
+        let content = case decodeUtf8' bs of
+              Left _ -> ""
+              Right txt -> T.unpack txt
+            normalizedLines = filter (not . null) $
+              map (trim . filter (/= '\r')) (lines content)
+        atomicWriteFileStr dest (unlines normalizedLines)
+    
+    removeStaleGitignore :: FilePath -> IO ()
+    removeStaleGitignore dest = do
+        destExists <- Dir.doesFileExist dest
+        when destExists $ Dir.removeFile dest
+    
+    trim :: String -> String
+    trim = dropWhile (== ' ') . reverse . dropWhile (== ' ') . reverse
+
+-- | Run a BitM action with a resolved remote
+runWithRemote :: BitEnv -> FilePath -> String -> BitM a -> IO a
+runWithRemote env cwd name action = do
+    mNamedRemote <- resolveRemote cwd name
+    let envWithRemote = env { envRemote = mNamedRemote }
+    runBitM envWithRemote action
+
 runCommand :: [String] -> IO ()
 runCommand args = do
     let isForce = "--force" `elem` args || "-f" `elem` args
@@ -93,24 +128,8 @@ runCommand args = do
     -- Copy .bitignore to .bit/index/.gitignore before scan (if repo exists)
     -- Using .gitignore directly since git check-ignore reads it automatically
     -- Read and re-write to normalize line endings and remove trailing spaces
-    when (bitExists && not skipScan) $ do
-        let bitignoreSrc = cwd </> ".bitignore"
-        let bitignoreDest = cwd </> ".bit" </> "index" </> ".gitignore"
-        bitignoreExists <- Dir.doesFileExist bitignoreSrc
-        if bitignoreExists
-            then do
-                -- Use strict ByteString reading to avoid Windows file locking issues
-                bs <- BS.readFile bitignoreSrc
-                let content = case decodeUtf8' bs of
-                      Left _ -> ""
-                      Right txt -> T.unpack txt
-                -- Normalize: trim each line, remove empty lines, use LF endings
-                let normalizedLines = filter (not . null) $ map (dropWhile (== ' ') . reverse . dropWhile (== ' ') . reverse . filter (/= '\r')) (lines content)
-                atomicWriteFileStr bitignoreDest (unlines normalizedLines)
-            else do
-                -- Remove stale .gitignore if root .bitignore doesn't exist
-                destExists <- Dir.doesFileExist bitignoreDest
-                when destExists $ Dir.removeFile bitignoreDest
+    when (bitExists && not skipScan) $
+        syncBitignoreToIndex cwd
     
     localFiles <- if skipScan || not bitExists then return [] else Scan.scanWorkingDir cwd
     unless (skipScan || not bitExists) $ Scan.writeMetadataFiles cwd localFiles
@@ -128,15 +147,9 @@ runCommand args = do
         ["init"]                        -> Bit.init
         ["remote", "add", name, url]    -> Bit.remoteAdd name url
         ["remote", "show"]              -> runBitM env $ Bit.remoteShow Nothing
-        ["remote", "show", name]        -> do
-            mNamedRemote <- resolveRemote cwd name
-            let envWithRemote = env { envRemote = mNamedRemote }
-            runBitM envWithRemote $ Bit.remoteShow (Just name)
+        ["remote", "show", name]        -> runWithRemote env cwd name $ Bit.remoteShow (Just name)
         ["remote", "check"]             -> runBitM env $ Bit.remoteCheck Nothing
-        ["remote", "check", name]       -> do
-            mNamedRemote <- resolveRemote cwd name
-            let envWithRemote = env { envRemote = mNamedRemote }
-            runBitM envWithRemote $ Bit.remoteCheck (Just name)
+        ["remote", "check", name]       -> runWithRemote env cwd name $ Bit.remoteCheck (Just name)
         ["verify"]                      -> runBitM env $ Bit.verify False (if isSequential then Sequential else Parallel 0)
         ["verify", "--remote"]          -> runBitM env $ Bit.verify True (if isSequential then Sequential else Parallel 0)
         ["fsck"]                        -> Bit.fsck cwd (if isSequential then Sequential else Parallel 0)
@@ -153,42 +166,21 @@ runCommand args = do
         ["push"]                        -> runBitM env Bit.push
         ["push", "-u", name]            -> pushWithUpstream env cwd name
         ["push", "--set-upstream", name] -> pushWithUpstream env cwd name
-        ["push", name]                  -> do
-            mNamedRemote <- resolveRemote cwd name
-            let envWithRemote = env { envRemote = mNamedRemote }
-            runBitM envWithRemote Bit.push
+        ["push", name]                  -> runWithRemote env cwd name Bit.push
         
         -- pull
         ["pull"]                        -> runBitM env $ Bit.pull Bit.defaultPullOptions
-        ["pull", name]                  -> do
-            mNamedRemote <- resolveRemote cwd name
-            let envWithRemote = env { envRemote = mNamedRemote }
-            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions
+        ["pull", name]                  -> runWithRemote env cwd name $ Bit.pull Bit.defaultPullOptions
         ["pull", "--accept-remote"]     -> runBitM env $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
         ["pull", "--manual-merge"]      -> runBitM env $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
-        ["pull", name, "--accept-remote"] -> do
-            mNamedRemote <- resolveRemote cwd name
-            let envWithRemote = env { envRemote = mNamedRemote }
-            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
-        ["pull", "--accept-remote", name] -> do
-            mNamedRemote <- resolveRemote cwd name
-            let envWithRemote = env { envRemote = mNamedRemote }
-            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
-        ["pull", name, "--manual-merge"] -> do
-            mNamedRemote <- resolveRemote cwd name
-            let envWithRemote = env { envRemote = mNamedRemote }
-            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
-        ["pull", "--manual-merge", name] -> do
-            mNamedRemote <- resolveRemote cwd name
-            let envWithRemote = env { envRemote = mNamedRemote }
-            runBitM envWithRemote $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
+        ["pull", name, "--accept-remote"] -> runWithRemote env cwd name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
+        ["pull", "--accept-remote", name] -> runWithRemote env cwd name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
+        ["pull", name, "--manual-merge"] -> runWithRemote env cwd name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
+        ["pull", "--manual-merge", name] -> runWithRemote env cwd name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
         
         -- fetch
         ["fetch"]                       -> runBitM env Bit.fetch
-        ["fetch", name]                 -> do
-            mNamedRemote <- resolveRemote cwd name
-            let envWithRemote = env { envRemote = mNamedRemote }
-            runBitM envWithRemote Bit.fetch
+        ["fetch", name]                 -> runWithRemote env cwd name Bit.fetch
         
         ["merge", "--continue"]         -> runBitM env Bit.mergeContinue
         ["merge", "--abort"]            -> Bit.mergeAbort

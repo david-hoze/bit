@@ -760,15 +760,9 @@ mergeContinue = do
                         oldHead <- liftIO getLocalHeadE
                         liftIO $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
                         liftIO $ putStrLn "Merge complete."
-                        maybe (return ()) (\remote -> do
-                            liftIO $ putStrLn "Syncing binaries... done."
-                            case oldHead of
-                                Just oh -> applyMergeToWorkingDir remote oh
-                                Nothing -> syncRemoteFilesToLocal  -- fallback
-                            maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
-                            case maybeRemoteHash of
-                                Just rHash -> liftIO $ void $ Git.updateRemoteTrackingBranchToHash rHash
-                                Nothing    -> return ()) mRemote
+                        case mRemote of
+                            Nothing -> return ()
+                            Just remote -> syncBinariesAfterMerge remote oldHead
                     else do
                         liftIO $ hPutStrLn stderr "error: no merge in progress."
                         liftIO $ exitWith (ExitFailure 1)
@@ -791,15 +785,9 @@ mergeContinue = do
                 liftIO $ removeDirectoryRecursive conflictsDir
                 liftIO $ putStrLn "Conflict directories cleaned up."
 
-                maybe (return ()) (\remote -> do
-                    liftIO $ putStrLn "Syncing binaries... done."
-                    case oldHead of
-                        Just oh -> applyMergeToWorkingDir remote oh
-                        Nothing -> syncRemoteFilesToLocal  -- fallback
-                    maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
-                    case maybeRemoteHash of
-                        Just rHash -> liftIO $ void $ Git.updateRemoteTrackingBranchToHash rHash
-                        Nothing    -> return ()) mRemote
+                case mRemote of
+                    Nothing -> return ()
+                    Just remote -> syncBinariesAfterMerge remote oldHead
 
 -- ============================================================================
 -- Internal helpers (not exported, moved from Commands.hs)
@@ -1713,9 +1701,9 @@ syncRemoteFilesToLocal = withRemote $ \remote -> do
     cwd <- asks envCwd
     localFiles <- asks envLocalFiles
     remoteResult <- lift $ Remote.Scan.fetchRemoteFiles remote
-    either
-        (\_ -> lift $ tellErr "Error: Failed to fetch remote file list.")
-        (\remoteFiles -> do
+    case remoteResult of
+        Left _ -> lift $ tellErr "Error: Failed to fetch remote file list."
+        Right remoteFiles -> do
             let actions = Pipeline.pullSyncFiles localFiles remoteFiles
             lift $ tell "--- Pulling changes from remote ---"
             if null actions
@@ -1730,8 +1718,19 @@ syncRemoteFilesToLocal = withRemote $ \remote -> do
                         void $ runConcurrentlyBounded concurrency (\a -> do
                             executePullCommand cwd remote a
                             CopyProgress.incrementFilesComplete progress
-                            ) actions)
-        remoteResult
+                            ) actions
+
+-- | Sync binaries after a successful merge commit
+syncBinariesAfterMerge :: Remote -> Maybe String -> BitM ()
+syncBinariesAfterMerge remote oldHead = do
+    liftIO $ putStrLn "Syncing binaries... done."
+    case oldHead of
+        Just oh -> applyMergeToWorkingDir remote oh
+        Nothing -> syncRemoteFilesToLocal  -- fallback
+    maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
+    case maybeRemoteHash of
+        Just rHash -> liftIO $ void $ Git.updateRemoteTrackingBranchToHash rHash
+        Nothing    -> return ()
 
 -- | After a merge, mirror git's metadata changes onto the actual working directory.
 -- Uses `git diff --name-status oldHead newHead` to determine what changed,
