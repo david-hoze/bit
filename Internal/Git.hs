@@ -231,7 +231,10 @@ getRemoteUrl name = do
     if code /= ExitSuccess then return Nothing
     else return (Just (filter (/= '\n') out))
 
--- | Get the remote name that the current branch tracks (branch.main.remote). Defaults to "origin".
+-- | Get the remote name that the current branch tracks (branch.main.remote).
+-- Falls back to "origin" if not configured — this means commands work with
+-- a reasonable default even without explicit -u, but callers should be aware
+-- that "origin" fallback doesn't mean tracking IS configured.
 getTrackedRemoteName :: IO String
 getTrackedRemoteName = do
     (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["config", "--get", "branch.main.remote"]) ""
@@ -344,8 +347,12 @@ isMergeInProgress = do
 -- | Checkout refs/remotes/origin/main as the local main branch.
 -- Used on first pull when there are no local commits (unborn branch).
 -- This avoids the need for merge and gives us the remote's history directly.
+--
+-- TRACKING CONTRACT: This function NEVER modifies branch tracking config.
+-- Uses --no-track to prevent git from auto-setting branch.main.remote.
+-- Callers who need tracking must call setupBranchTrackingFor explicitly.
+--
 -- Uses -f (force) to overwrite any local files created during init.
--- Uses --no-track to prevent auto-setting upstream (user must use -u explicitly).
 checkoutRemoteAsMain :: IO ExitCode
 checkoutRemoteAsMain = do
   -- Use checkout -B to create/reset branch and checkout in one step

@@ -1549,8 +1549,15 @@ saveFetchedBundle remote (Just bPath) = do
     safeRemove bPath
     maybeNewHash <- Git.getHashFromBundle fetchedBundle
 
+    -- Ensure the internal git remote "origin" points to the right URL.
+    -- This is the git-internal remote used for fetching refs from bundles,
+    -- NOT upstream tracking config (branch.main.remote).
+    -- 
+    -- REMOVED: Git.setupBranchTracking
+    -- That line was silently configuring upstream tracking (branch.main.remote=origin)
+    -- as a side effect of every fetch/pull. Per bit's spec, upstream tracking should
+    -- only be set via explicit `bit push -u` (git-standard behavior).
     _ <- Git.setupRemote (remoteUrl remote)
-    _ <- Git.setupBranchTracking
 
     case maybeNewHash of
         Just _ -> void $ Git.fetchFromBundle fetchedBundle
