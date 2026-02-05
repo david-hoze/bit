@@ -406,6 +406,91 @@ The correct approach: Have the remote **fetch** from local, then **merge --ff-on
 
 ---
 
+## IO Safety and Concurrency
+
+### Strict IO for Windows Compatibility
+
+**Problem**: Lazy IO on Windows causes "permission denied" and "file is locked" errors due to file handles remaining open until garbage collection. When scanning hundreds of files concurrently, this manifests as random failures.
+
+**Solution**: Eliminate all lazy IO operations and use strict `ByteString` operations exclusively.
+
+### Implementation
+
+#### 1. Strict IO Modules
+
+**`Bit.ConcurrentFileIO`** — Drop-in replacements for `Prelude` file operations:
+- `readFileBinaryStrict` — strict `ByteString.readFile` wrapper
+- `readFileUtf8Strict` — strict UTF-8 text reading
+- `readFileMaybe` / `readFileUtf8Maybe` — safe reading with `Maybe` return
+- `writeFileBinaryStrict` / `writeFileUtf8Strict` — strict writing
+
+All operations use `ByteString.readFile` / `ByteString.writeFile` which read/write the entire file and close the handle before returning.
+
+**`Bit.ConcurrentIO`** — Type-safe concurrent IO newtype:
+- Constructor is **not exported** to prevent `liftIO` smuggling
+- Only whitelisted strict operations are exposed
+- No `MonadIO` instance (intentional restriction)
+- Provides `MonadUnliftIO` for `async` integration
+- Includes concurrency primitives: `mapConcurrentlyBoundedC`, `QSem` operations
+
+**`Bit.AtomicWrite`** — Atomic file writes with Windows retry logic:
+- `atomicWriteFile` — temp file + rename pattern
+- `DirWriteLock` — directory-level locking (MVar-based thread coordination)
+- `LockRegistry` — process-wide lock registry for multiple workers
+- Retry logic for Windows transient "permission denied" errors (up to 5 retries with exponential backoff)
+
+#### 2. Module Updates
+
+All lazy IO replaced with strict operations:
+- `Bit/Scan.hs` — `.gitignore` reading uses strict ByteString
+- `Bit/Device.hs` — `.bit-store`, device files, remote files use strict ByteString + atomic writes
+- `Bit/Core.hs` — `readFileMaybe`, `writeFileAtomicE` (now truly atomic), metadata reading
+- `Bit/Commands.hs` — `.bitignore` reading/writing uses strict ByteString + atomic writes
+- `Internal/ConfigFile.hs` — Config reading uses strict ByteString instead of lazy Text IO
+
+#### 3. HLint Enforcement
+
+**`.hlint.yaml`** bans lazy IO functions project-wide:
+- Banned: `Prelude.readFile`, `Prelude.writeFile`, `System.IO.hGetContents`
+- Banned: `Data.ByteString.Lazy.readFile`, `Data.Text.IO.readFile`
+- Banned: Entire modules `Data.ByteString.Lazy`, `Data.Text.Lazy.IO`
+- Suggests: `BS.readFile` over `readFile`, `atomicWriteFile` over `writeFile`
+
+HLint errors appear in IDE and CI, preventing lazy IO from being reintroduced.
+
+### Rationale
+
+**Why strict ByteString?**
+- Reads entire file into memory and closes handle immediately
+- No lazy thunks keeping file handles open
+- Predictable memory usage (acceptable for metadata files < 1MB)
+- Cross-platform consistent behavior
+
+**Why not lazy ByteString?**
+- Lazy ByteString uses chunked IO, keeping handles open
+- Garbage collection timing is unpredictable
+- On Windows, this causes "file is locked" errors in concurrent scenarios
+
+**Why atomic writes?**
+- Crash safety — partial writes leave temp file, not corrupt destination
+- Windows retry logic handles transient locking from antivirus/indexing
+- Directory-level locking coordinates concurrent writes within process
+
+**Why HLint rules?**
+- Enforcement at development time (IDE warnings)
+- Prevents lazy IO from being reintroduced during refactoring
+- Documents the policy explicitly
+
+### Concurrent File Scanning
+
+The file scanner (`Bit/Scan.hs`) uses bounded parallelism:
+- `QSem` limits concurrent file reads (default: `numCapabilities * 4`)
+- Each file is fully read, hashed, and closed before moving to next
+- Progress reporting uses `IORef` with `atomicModifyIORef'` for thread-safe updates
+- Cache entries use strict ByteString read/write
+
+---
+
 ## Verification and Consistency
 
 ### `bit verify`
@@ -531,6 +616,28 @@ Interactive per-file conflict resolution:
     - `bit pull` and `bit fetch` require explicit remote if no upstream is set
     This makes bit's remote behavior predictable for git users.
 
+14. **Strict ByteString IO exclusively**: All file operations use strict
+    `ByteString` (`Data.ByteString.readFile` / `writeFile`), never lazy IO
+    (`Prelude.readFile`, `Data.ByteString.Lazy`, `Data.Text.Lazy.IO`). Lazy IO
+    on Windows keeps file handles open until garbage collection, causing
+    "permission denied" and "file is locked" errors in concurrent scenarios.
+    Strict IO reads/writes the entire file and closes the handle immediately.
+    HLint rules enforce this project-wide.
+
+15. **Atomic writes with retry logic**: All important writes use the temp-file +
+    rename pattern (`Bit.AtomicWrite.atomicWriteFile`). On Windows, includes
+    retry logic (5 attempts with exponential backoff) to handle transient
+    "permission denied" errors from antivirus and file indexing. Directory-level
+    locking coordinates concurrent writers within the process.
+
+16. **ConcurrentIO newtype without MonadIO**: For modules that need type-level
+    IO restrictions, `Bit.ConcurrentIO` provides a newtype wrapper where the
+    constructor is not exported. This prevents smuggling arbitrary lazy IO via
+    `liftIO`. Only whitelisted strict operations are exposed. Used where the
+    type system should enforce IO discipline (currently available but not widely
+    adopted; `Bit.ConcurrentFileIO` with plain `MonadIO` is used in most places
+    for simplicity).
+
 ### What We Deliberately Do NOT Do
 
 - **`RemoteState` does not need a typed state machine.** The pattern match in push logic is clear and total.
@@ -550,10 +657,9 @@ Interactive per-file conflict resolution:
 
 ### Remaining Work
 
-- **Atomic file writes**: Plain `writeFile` is used in several places. Should use temp file + rename for metadata and init files.
 - **Text file handling**: Classification (`isText`) exists in the type system but text file sync (copy content to index, sync back on pull) needs completion.
 - **Transaction logging**: For resumable push/pull operations.
-- **Progress reporting**: For long operations (scanning, uploading).
+- **Progress reporting**: For long operations (scanning, uploading). Note: File scanning has progress reporting implemented.
 - **Error messages**: Some need polish to match Git's style and include actionable hints.
 - **`isTextFileInIndex` fragility**: The current check (looking for `"hash: "` prefix) works but is indirect. A more robust approach might check whether the file parses as metadata vs. has arbitrary content. Low priority since current approach works correctly.
 
@@ -588,6 +694,10 @@ Interactive per-file conflict resolution:
 - Conflict resolution module with structured fold (always commits when MERGE_HEAD exists)
 - Unified metadata parsing/serialization
 - `oldHead` pattern for diff-based working-tree sync across all pull/merge paths
+- Strict ByteString IO throughout — no lazy IO, eliminates Windows file locking issues
+- Atomic file writes with Windows retry logic — crash-safe, handles antivirus/indexing conflicts
+- Concurrent file scanning with bounded parallelism and progress reporting
+- HLint enforcement of IO safety rules
 
 ### Module Map
 
@@ -598,9 +708,10 @@ Interactive per-file conflict resolution:
 | `Internal/Git.hs` | Git command wrapper (`runGitAt` for arbitrary paths) |
 | `Internal/Transport.hs` | Rclone command wrapper |
 | `Internal/Config.hs` | Path constants |
+| `Internal/ConfigFile.hs` | Config file parsing (strict ByteString) |
 | `bit/Types.hs` | Core types: Hash, FileEntry, BitEnv, BitM |
 | `bit/Internal/Metadata.hs` | Canonical metadata parser/serializer |
-| `bit/Scan.hs` | Working directory scanning, hash computation |
+| `bit/Scan.hs` | Working directory scanning, hash computation (concurrent, strict IO) |
 | `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
 | `bit/Plan.hs` | Pure plan: GitDiff → RcloneAction |
 | `bit/Pipeline.hs` | Composed pipeline: diffAndPlan, pushSyncFiles, pullSyncFiles |
@@ -608,10 +719,13 @@ Interactive per-file conflict resolution:
 | `bit/Fsck.hs` | Full integrity check |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
 | `bit/Remote/Scan.hs` | Remote file scanning via rclone |
-| `bit/Device.hs` | Device identity, volume detection, .bit-store |
+| `bit/Device.hs` | Device identity, volume detection, .bit-store (strict IO, atomic writes) |
 | `bit/DevicePrompt.hs` | Interactive device setup prompts |
 | `bit/Conflict.hs` | Conflict resolution: Resolution, resolveAll |
-| `bit/Utils.hs` | Path utilities, filtering |
+| `bit/Utils.hs` | Path utilities, filtering, atomic write re-exports |
+| `bit/AtomicWrite.hs` | Atomic file writes, directory locking, lock registry |
+| `bit/ConcurrentIO.hs` | Type-safe concurrent IO newtype (no MonadIO) |
+| `bit/ConcurrentFileIO.hs` | Strict ByteString file operations |
 
 ---
 
@@ -638,12 +752,19 @@ Interactive per-file conflict resolution:
   branches; use fetch+merge at the remote instead)
 - Auto-set upstream tracking (`branch.main.remote`) on pull, fetch, or remote
   add operations — this must only be done via explicit `bit push -u <remote>`
+- Use lazy IO (`Prelude.readFile`, `writeFile`, `hGetContents`, `Data.ByteString.Lazy`,
+  `Data.Text.Lazy.IO`) — causes "file is locked" errors on Windows; use strict
+  ByteString operations exclusively
+- Use plain `writeFile` for important files — use `atomicWriteFile` for crash safety
+  and Windows compatibility
 
 **ALWAYS:**
 - Prefer `rclone moveto` over delete+upload when hash matches
 - Push files before metadata, pull metadata before files (cloud remotes)
 - For filesystem remotes, use fetch+merge (not `git push` to non-bare repos)
-- Use temp file + rename for atomic writes (aspiration — not yet everywhere)
+- Use `Bit.AtomicWrite.atomicWriteFile` for all important file writes (temp file + rename pattern)
+- Use strict `ByteString` operations for all file IO — never `Prelude.readFile`, `writeFile`, or lazy ByteString/Text
+- Use `Bit.ConcurrentFileIO.readFileBinaryStrict` / `readFileUtf8Strict` for reading
 - Match Git's CLI conventions and output format
 - Keep Transport dumb — no domain knowledge in Transport
 - Keep Git.hs dumb — no domain interpretation
