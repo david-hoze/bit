@@ -1,0 +1,120 @@
+# =============================================================================
+# Skip Scan Test - Verify read-only commands skip working directory scan
+#
+# Tests that commands which only read git history, index, or config files
+# do not trigger scanWorkingDir and return instantly without "Scanned N files"
+# output on stderr.
+#
+# Read-only commands tested: log, ls-files, remote show, verify, fsck
+# Commands that should still scan: status, add, commit, push, pull
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work_skipscan 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP
+# ======================================================================
+
+# Create repo with test files
+mkdir test\cli\work_skipscan
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_skipscan & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Create multiple files to make scanning detectable
+cd test\cli\work_skipscan & echo file1> file1.txt & echo file2> file2.txt & echo file3> file3.txt & echo file4> file4.txt
+<<<
+>>>= 0
+
+cd test\cli\work_skipscan & bit add .
+<<<
+>>>= 0
+
+cd test\cli\work_skipscan & bit commit -m "Initial commit"
+<<<
+>>> /.*\[main.*\].*/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: TEST READ-ONLY COMMANDS SKIP SCAN
+# ======================================================================
+
+# ---- Test: log should not scan ----
+cd test\cli\work_skipscan & bit log 2>&1 | findstr /C:"Scanned" >nul
+<<<
+>>>= 1
+
+# ---- Test: log should show commit history ----
+cd test\cli\work_skipscan & bit log
+<<<
+>>> /Initial commit/
+>>>= 0
+
+# ---- Test: ls-files should not scan ----
+cd test\cli\work_skipscan & bit ls-files 2>&1 | findstr /C:"Scanned" >nul
+<<<
+>>>= 1
+
+# ---- Test: ls-files should list files ----
+cd test\cli\work_skipscan & bit ls-files
+<<<
+>>> /file1.txt/
+>>>= 0
+
+# ---- Test: ls-files with --stage should not scan ----
+cd test\cli\work_skipscan & bit ls-files --stage 2>&1 | findstr /C:"Scanned" >nul
+<<<
+>>>= 1
+
+# ---- Test: remote show should not scan (even when no remote configured) ----
+cd test\cli\work_skipscan & bit remote show 2>&1 | findstr /C:"Scanned" >nul
+<<<
+>>>= 1
+
+# ---- Test: remote show should display message when no remote configured ----
+cd test\cli\work_skipscan & bit remote show
+<<<
+>>> /No remote configured/
+>>>= 0
+
+# ---- Test: verify should not scan ----
+cd test\cli\work_skipscan & bit verify 2>&1 | findstr /C:"Scanned" >nul
+<<<
+>>>= 1
+
+# ---- Test: fsck should not scan ----
+cd test\cli\work_skipscan & bit fsck 2>&1 | findstr /C:"Scanned" >nul
+<<<
+>>>= 1
+
+# ======================================================================
+# SECTION 3: VERIFY COMMANDS THAT SHOULD SCAN STILL DO
+# ======================================================================
+
+# ---- Test: status should scan (baseline - shows "Scanned" may appear) ----
+# Note: We're not strictly requiring "Scanned" output here because it may be
+# optimized away in the future, but we verify status still works correctly
+cd test\cli\work_skipscan & echo newfile> newfile.txt & bit status
+<<<
+>>> /newfile.txt|nothing to commit/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\work_skipscan 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

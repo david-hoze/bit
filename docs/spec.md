@@ -551,6 +551,47 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 
 ---
 
+## Performance Optimizations
+
+### Skip Scan for Read-Only Commands
+
+**Problem**: By default, `bit/Commands.hs` performs a full working directory scan (`scanWorkingDir`) followed by metadata file writes (`writeMetadataFiles`) before executing any command. For read-only commands that never modify the working directory or metadata (e.g., `log`, `ls-files`, `remote show`), this scan is unnecessary overhead.
+
+**Solution**: Commands are classified into two categories:
+
+1. **Read-only commands** (skip scan):
+   - `init` — no repo exists yet
+   - `log` — reads git history only
+   - `ls-files` — reads git index only
+   - `remote show` — reads remote config only
+   - `remote check` — checks remote connectivity only
+   - `verify` — compares files against existing metadata
+   - `fsck` — verifies integrity without modifying state
+
+2. **Write commands** (require scan):
+   - `status`, `add`, `commit` — need current working directory state
+   - `push`, `pull`, `fetch` — sync operations that may need file comparison
+   - `diff` — compares working directory changes against index (needs scan)
+
+**Implementation** (`bit/Commands.hs`):
+
+```haskell
+let skipScan = cmd == ["init"]
+            || cmd `elem` [["verify"], ["verify", "--remote"], ["fsck"]]
+            || (not (null cmd) && head cmd == "log")
+            || (not (null cmd) && head cmd == "ls-files")
+            || (length cmd >= 2 && take 2 cmd == ["remote", "check"])
+            || (length cmd >= 2 && take 2 cmd == ["remote", "show"])
+```
+
+The pattern matches the command prefix, allowing flags and arguments to pass through (e.g., `bit log --oneline`, `bit ls-files --stage`, `bit remote show origin`).
+
+**Key Invariant**: Commands that only read git history, the git index, or config files must not trigger a scan. Commands that compare working-directory state against the index (`status`, `add`, `commit`, `diff`, `push`, `pull`) must perform the scan to detect changes.
+
+**Performance Impact**: In large repositories, skipping the scan for read-only commands provides instant response times instead of waiting for a full directory traversal and metadata write pass.
+
+---
+
 ## Verification and Consistency
 
 ### `bit verify`

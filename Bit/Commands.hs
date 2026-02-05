@@ -77,9 +77,13 @@ runCommand args = do
 
     -- Pre-scan (skip for commands that don't need it)
     -- TODO: Move this scan into Bit.hs later - it builds the env, so keeping it here for now
+    -- Skip scanning for read-only commands that only read git history, index, or config
     let skipScan = cmd == ["init"]
-                || cmd `elem` [["verify"], ["verify", "--remote"], ["fsck"], ["remote", "check"]]
-                || (length cmd == 3 && take 2 cmd == ["remote", "check"])
+                || cmd `elem` [["verify"], ["verify", "--remote"], ["fsck"]]
+                || (not (null cmd) && head cmd == "log")
+                || (not (null cmd) && head cmd == "ls-files")
+                || (length cmd >= 2 && take 2 cmd == ["remote", "check"])
+                || (length cmd >= 2 && take 2 cmd == ["remote", "show"])
     
     -- Only scan and write metadata if .bit directory exists (repo is initialized)
     bitExists <- Dir.doesDirectoryExist (cwd </> ".bit")
