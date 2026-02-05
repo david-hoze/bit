@@ -24,12 +24,12 @@ import System.Directory
       copyFileWithMetadata,
       getCurrentDirectory,
       getModificationTime )
-import System.IO (withFile, IOMode(ReadMode), hIsEOF, hIsTerminalDevice, hPutStr, hFlush, stderr)
+import System.IO (withFile, IOMode(ReadMode), hIsEOF, hIsTerminalDevice, hPutStr, hPutStrLn, hFlush, stderr)
 import Data.List
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
 import Data.Text (unpack)
-import Control.Monad
+import Control.Monad (void, when, forM_)
 import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
 import qualified Internal.ConfigFile as ConfigFile
@@ -326,25 +326,119 @@ writeMetadataFiles root entries = do
     let metaRoot = root </> ".bit/index"
     createDirectoryIfMissing True metaRoot
 
-    forM_ entries $ \entry ->
-      case kind entry of
-        Directory -> do
-          let dirPath = metaRoot </> path entry
-          createDirectoryIfMissing True dirPath
+    -- Separate directories from files
+    let (dirs, files) = partitionEntries entries
+    
+    -- First pass: create all directories sequentially (avoid race conditions)
+    forM_ dirs $ \dirPath -> do
+      let fullPath = metaRoot </> dirPath
+      createDirectoryIfMissing True fullPath
+    
+    -- Second pass: create parent directories for files
+    let parentDirs = Set.fromList [takeDirectory (path e) | e <- files]
+    forM_ parentDirs $ \dirPath -> do
+      let fullPath = metaRoot </> dirPath
+      createDirectoryIfMissing True fullPath
+    
+    -- Setup progress tracking
+    let total = length files
+    isTTY <- hIsTerminalDevice stderr
+    counter <- newIORef (0 :: Int)
+    skipped <- newIORef (0 :: Int)
+    
+    -- Start progress reporter thread if we're in a TTY and have enough files
+    let shouldShowProgress = isTTY && total > 10
+    reporterThread <- if shouldShowProgress
+        then Just <$> forkIO (writeProgressLoop counter skipped total)
+        else return Nothing
+    
+    -- Third pass: write files in parallel (bounded concurrency)
+    caps <- getNumCapabilities
+    let concurrency = max 4 (caps * 4)
+    
+    let writeWithProgress entry = do
+            let metaPath = metaRoot </> path entry
+            case kind entry of
+              File { fHash, fSize, fIsText } -> do
+                -- Check if file is unchanged before writing
+                needsWrite <- shouldWriteFile root metaPath entry fHash fSize fIsText
+                if needsWrite
+                  then do
+                    if fIsText
+                      then do
+                        -- For text files, copy the actual content directly
+                        let actualPath = root </> path entry
+                        copyFileWithMetadata actualPath metaPath
+                      else do
+                        -- For binary files, write metadata (hash + size). Spec: raw hash value; atomic write.
+                        atomicWriteFileStr metaPath $
+                          serializeMetadata (MetaContent fHash fSize)
+                    atomicModifyIORef' counter (\n -> (n + 1, ()))
+                  else do
+                    atomicModifyIORef' skipped (\n -> (n + 1, ()))
+                    atomicModifyIORef' counter (\n -> (n + 1, ()))
+              Directory -> return ()  -- Already handled in first pass
+    
+    finally
+        (void $ mapConcurrentlyBounded concurrency writeWithProgress files)
+        (do
+            -- Clean up: kill reporter thread and finalize progress line
+            maybe (return ()) killThread reporterThread
+            when shouldShowProgress $ do
+                n <- readIORef counter
+                s <- readIORef skipped
+                hPutStr stderr "\r\ESC[K"  -- Clear line with ANSI escape
+                let written = n - s
+                hPutStr stderr $ "Wrote " ++ show written ++ " metadata files"
+                when (s > 0) $ hPutStr stderr $ " (skipped " ++ show s ++ " unchanged)"
+                hPutStrLn stderr "."
+                hFlush stderr
+        )
+  where
+    partitionEntries :: [FileEntry] -> ([FilePath], [FileEntry])
+    partitionEntries es =
+      let dirs = [path e | e <- es, case kind e of Directory -> True; _ -> False]
+          files = [e | e <- es, case kind e of File{} -> True; _ -> False]
+      in (dirs, files)
+    
+    writeProgressLoop :: IORef Int -> IORef Int -> Int -> IO ()
+    writeProgressLoop counter skipped total = go
+      where
+        go = do
+            n <- readIORef counter
+            s <- readIORef skipped
+            let pct = (n * 100) `div` max 1 total
+                written = n - s
+            hPutStr stderr $ "\rWriting metadata... " ++ show written ++ "/" ++ show total ++ " files (" ++ show pct ++ "%)"
+            when (s > 0) $ hPutStr stderr $ ", skipped " ++ show s
+            hFlush stderr
+            threadDelay 50000  -- 50ms
+            when (n < total) go
 
-        File { fHash, fSize, fIsText } -> do
-          let metaPath = metaRoot </> path entry
-          createDirectoryIfMissing True (takeDirectory metaPath)
-          
-          if fIsText
-            then do
-              -- For text files, copy the actual content directly
-              let actualPath = root </> path entry
-              copyFileWithMetadata actualPath metaPath
-            else do
-              -- For binary files, write metadata (hash + size). Spec: raw hash value; atomic write.
-              atomicWriteFileStr metaPath $
-                serializeMetadata (MetaContent fHash fSize)
+-- | Check if a metadata file needs to be written (returns True if write needed)
+shouldWriteFile :: FilePath -> FilePath -> FileEntry -> Hash 'MD5 -> Integer -> Bool -> IO Bool
+shouldWriteFile root metaPath entry fHash fSize fIsText = do
+  exists <- doesFileExist metaPath
+  if not exists
+    then return True  -- File doesn't exist, must write
+    else if fIsText
+      then do
+        -- For text files: compare mtime and size of source vs destination
+        let sourcePath = root </> path entry
+        sourceMtime <- getModificationTime sourcePath
+        sourceSize <- getFileSize sourcePath
+        destMtime <- getModificationTime metaPath
+        destSize <- getFileSize metaPath
+        -- Write if mtime or size differs
+        return (sourceMtime /= destMtime || sourceSize /= destSize)
+      else do
+        -- For binary files: read existing metadata and compare hash/size
+        existing <- readMetadataOrComputeHash metaPath
+        case existing of
+          Nothing -> return True  -- Failed to read, must write
+          Just (MetaContent existingHash existingSize) ->
+            -- Write if hash or size differs
+            return (existingHash /= fHash || existingSize /= fSize)
 
 -- | Parse a metadata file (hash/size lines) or read a text file and compute hash/size.
 -- Returns Nothing if file is missing or invalid.

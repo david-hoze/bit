@@ -18,6 +18,9 @@ import System.Exit (ExitCode(..))
 import System.FilePath (takeDirectory, takeExtension, (</>))
 import System.IO (IOMode (WriteMode), hPutStr, hPutStrLn, hSetEncoding, utf8, withFile)
 import System.Process (callProcess, readProcessWithExitCode)
+import qualified Data.ByteString as BS
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 
 -- | Directories to skip.
 excludedDirs :: [String]
@@ -232,13 +235,19 @@ writeDocument outputPath title description root files =
       write ""
       write $ "```" ++ lang
 
-      result <- try (readFile full) :: IO (Either SomeException String)
+      -- Use strict ByteString reading to avoid lazy IO on Windows
+      result <- try (BS.readFile full) :: IO (Either SomeException BS.ByteString)
       case result of
-        Right content -> do
-          hPutStr h content
-          if not (null content) && last content /= '\n'
-            then hPutStrLn h ""
-            else return ()
+        Right bs ->
+          case T.decodeUtf8' bs of
+            Right content -> do
+              let contentStr = T.unpack content
+              hPutStr h contentStr
+              if not (T.null content) && T.last content /= '\n'
+                then hPutStrLn h ""
+                else return ()
+            Left err ->
+              hPutStrLn h $ "-- Error decoding UTF-8: " ++ show err
         Left err ->
           hPutStrLn h $ "-- Error reading file: " ++ show err
 
