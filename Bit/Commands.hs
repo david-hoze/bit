@@ -37,11 +37,12 @@ run = do
             , "  restore [options] [--] <path>  Restore working tree files"
             , "  checkout [options] -- <path>   Checkout files from index"
             , ""
-            , "  push [-u|--set-upstream] [<remote>]"
+            , "  push [-u|--set-upstream] [<remote>] [--skip-verify]"
             , "                                 Push to remote"
             , "  pull [<remote>] [options]      Pull from remote"
             , "      --accept-remote            Accept remote state as truth"
             , "      --manual-merge             Manual conflict resolution"
+            , "      --skip-verify              Skip proof of possession check"
             , "  fetch [<remote>]               Fetch metadata from remote"
             , ""
             , "  remote add <name> <url>        Add a remote"
@@ -98,10 +99,11 @@ runCommand args = do
     let isForce = "--force" `elem` args || "-f" `elem` args
     let isForceWithLease = "--force-with-lease" `elem` args
     let isSequential = "--sequential" `elem` args
+    let isSkipVerify = "--skip-verify" `elem` args
     when (isForce && isForceWithLease) $ do
         hPutStrLn stderr "fatal: Cannot use both --force and --force-with-lease"
         exitWith (ExitFailure 1)
-    let cmd = filter (`notElem` ["--force", "-f", "--force-with-lease", "--sequential"]) args
+    let cmd = filter (`notElem` ["--force", "-f", "--force-with-lease", "--sequential", "--skip-verify"]) args
 
     cwd <- Dir.getCurrentDirectory
     bitExists <- Dir.doesDirectoryExist (cwd </> ".bit")
@@ -109,7 +111,7 @@ runCommand args = do
     -- Lightweight env (no scan) — for read-only commands
     let baseEnv = do
             mRemote <- getDefaultRemote cwd
-            return $ BitEnv cwd [] mRemote isForce isForceWithLease
+            return $ BitEnv cwd [] mRemote isForce isForceWithLease isSkipVerify
 
     -- Full env (scan + bitignore sync + metadata write) — for write commands
     let scannedEnv = do
@@ -117,7 +119,7 @@ runCommand args = do
             localFiles <- Scan.scanWorkingDir cwd
             Scan.writeMetadataFiles cwd localFiles
             mRemote <- getDefaultRemote cwd
-            return $ BitEnv cwd localFiles mRemote isForce isForceWithLease
+            return $ BitEnv cwd localFiles mRemote isForce isForceWithLease isSkipVerify
 
     -- Repo existence check (skip for init)
     let needsRepo = cmd /= ["init"]
@@ -176,14 +178,14 @@ runCommand args = do
         ["push", name]                  -> runScannedWithRemote name Bit.push
         
         -- pull
-        ["pull"]                        -> runScanned $ Bit.pull Bit.defaultPullOptions
-        ["pull", name]                  -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions
-        ["pull", "--accept-remote"]     -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
-        ["pull", "--manual-merge"]      -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
-        ["pull", name, "--accept-remote"] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
-        ["pull", "--accept-remote", name] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True }
-        ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
-        ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True }
+        ["pull"]                        -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullSkipVerify = isSkipVerify }
+        ["pull", name]                  -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullSkipVerify = isSkipVerify }
+        ["pull", "--accept-remote"]     -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True, Bit.pullSkipVerify = isSkipVerify }
+        ["pull", "--manual-merge"]      -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True, Bit.pullSkipVerify = isSkipVerify }
+        ["pull", name, "--accept-remote"] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True, Bit.pullSkipVerify = isSkipVerify }
+        ["pull", "--accept-remote", name] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True, Bit.pullSkipVerify = isSkipVerify }
+        ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True, Bit.pullSkipVerify = isSkipVerify }
+        ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True, Bit.pullSkipVerify = isSkipVerify }
         
         -- fetch
         ["fetch"]                       -> runScanned Bit.fetch

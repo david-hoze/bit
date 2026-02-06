@@ -4,6 +4,7 @@
 
 module Bit.Verify
   ( verifyLocal
+  , verifyLocalAt
   , verifyRemote
   , VerifyIssue(..)
   , loadMetadataIndex
@@ -84,12 +85,13 @@ loadMetadataIndex indexDir concurrency = do
         ) relPaths
       return (concat pairs)
 
--- | Verify local working tree against metadata in .rgit/index.
+-- | Verify working tree at an arbitrary root path against metadata at that path.
+-- This is the core verification function used for both local and filesystem remote verification.
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
-verifyLocal :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
-verifyLocal cwd mCounter concurrency = do
-  let indexDir = cwd </> ".bit/index"
+verifyLocalAt :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
+verifyLocalAt root mCounter concurrency = do
+  let indexDir = root </> ".bit/index"
   meta <- loadMetadataIndex indexDir concurrency
   -- Filter out .git directory entries
   let filteredMeta = filter (\(relPath, _, _) -> not (isGitPath relPath)) meta
@@ -101,11 +103,11 @@ verifyLocal cwd mCounter concurrency = do
     Parallel n -> return n
   
   -- Parallelize verification (IO-bound: file reads and hashing)
-  issues <- runConcurrently (Parallel bound) (checkOne cwd) filteredMeta
+  issues <- runConcurrently (Parallel bound) (checkOne root) filteredMeta
   return (length filteredMeta, concat issues)
   where
-    checkOne root (relPath, expectedHash, expectedSize) = do
-      let actualPath = root </> relPath
+    checkOne rootPath (relPath, expectedHash, expectedSize) = do
+      let actualPath = rootPath </> relPath
       exists <- doesFileExist actualPath
       result <- if not exists
         then return [Missing relPath]
@@ -118,6 +120,12 @@ verifyLocal cwd mCounter concurrency = do
       -- Increment counter after checking file (atomicModifyIORef' is thread-safe)
       maybe (return ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
       return result
+
+-- | Verify local working tree against metadata in .rgit/index.
+-- Returns (number of files checked, list of issues).
+-- If an IORef counter is provided, it will be incremented after each file is checked.
+verifyLocal :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
+verifyLocal cwd = verifyLocalAt cwd
 
 -- | Extract metadata from a bundle's HEAD commit.
 -- First fetches the bundle into the repo, then reads metadata from refs/remotes/origin/main.

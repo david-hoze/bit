@@ -143,6 +143,15 @@ The existing divergence resolution mechanisms (`--accept-remote`, `--force`, `--
 - **Cloud remotes (other backends):** Some backends provide native hashes, some don't. Where hashes aren't free, rclone may need to download file content to hash it. Check per-backend.
 - **Filesystem remotes:** Requires reading and hashing every binary file on the remote. Same cost as local verification.
 
+**Implementation status:** The proof of possession rule is fully implemented as of this version:
+
+- `bit push` verifies local working tree before pushing (unless `--force` or `--skip-verify`)
+- `bit pull` verifies remote before pulling (unless `--accept-remote`, `--manual-merge`, or `--skip-verify`)
+- `bit fetch` does NOT verify (fetch only transfers metadata, no file sync happens)
+- Cloud remotes: verified via `Verify.verifyRemote` using `rclone lsjson --hash`
+- Filesystem remotes: verified via `Verify.verifyLocalAt` which hashes the remote's working tree
+- Verification runs in parallel using bounded concurrency (`Parallel 0` = auto-detect based on CPU cores)
+
 ### Metadata File Format
 
 Each metadata file under `.bit/index/` mirrors the path of its corresponding real file and contains **ONLY**:
@@ -899,10 +908,10 @@ Interactive per-file conflict resolution:
 
 ### Remaining Work
 
-- **Text file handling**: Classification (`isText`) exists in the type system but text file sync (copy content to index, sync back on pull) needs completion.
 - **Transaction logging**: For resumable push/pull operations.
 - **Error messages**: Some need polish to match Git's style and include actionable hints.
 - **`isTextFileInIndex` fragility**: The current check (looking for `"hash: "` prefix) works but is indirect. A more robust approach might check whether the file parses as metadata vs. has arbitrary content. Low priority since current approach works correctly.
+- **Verification caching**: Cache verification results keyed on (path, mtime, size) to skip re-hashing unchanged files on subsequent push/pull operations. Would significantly speed up verification for large repos where most files haven't changed.
 
 ### Future (bit-solid)
 
@@ -939,6 +948,10 @@ Interactive per-file conflict resolution:
 - Atomic file writes with Windows retry logic — crash-safe, handles antivirus/indexing conflicts
 - Concurrent file scanning with bounded parallelism and progress reporting
 - HLint enforcement of IO safety rules
+- Proof of possession verification for push and pull operations
+  - `verifyLocalAt` function for verifying arbitrary repo paths (used for filesystem remotes)
+  - `--skip-verify` flag to bypass verification when needed
+  - Integration with existing escape hatches (`--force`, `--accept-remote`, `--manual-merge`)
 
 ### Module Map
 
@@ -957,7 +970,7 @@ Interactive per-file conflict resolution:
 | `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
 | `bit/Plan.hs` | Pure plan: GitDiff → RcloneAction |
 | `bit/Pipeline.hs` | Composed pipeline: diffAndPlan, pushSyncFiles, pullSyncFiles |
-| `bit/Verify.hs` | Local and remote verification (parallelized) |
+| `bit/Verify.hs` | Local and remote verification (parallelized); `verifyLocalAt` for filesystem remotes |
 | `bit/Fsck.hs` | Full integrity check (parallelized) |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
 | `bit/Remote/Scan.hs` | Remote file scanning via rclone |

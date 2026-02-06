@@ -1,0 +1,125 @@
+# =============================================================================
+# Proof of Possession Tests
+#
+# Tests the proof of possession rule: push/pull must verify that working tree
+# matches metadata before transferring metadata.
+#
+# Covers:
+# - Push verification blocks when local files don't match metadata
+# - Pull verification blocks when remote files don't match remote metadata (filesystem remote)
+# - --skip-verify bypasses verification
+# - --force bypasses verification on push
+# - --accept-remote bypasses verification on pull
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work_pop_local 2>nul & rmdir /s /q test\cli\work_pop_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: PUSH VERIFICATION - Local files must match metadata
+# ======================================================================
+
+mkdir test\cli\work_pop_local
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_pop_local & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Create a test file and commit it ----
+cd test\cli\work_pop_local & echo original content > file.txt & bit add file.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_pop_local & bit commit -m "Initial commit"
+<<<
+>>> /.*1 file changed.*/
+>>>= 0
+
+# ---- Set up filesystem remote ----
+mkdir test\cli\work_pop_remote
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_pop_local & bit remote add origin ..\work_pop_remote
+<<<
+>>>
+>>>= 0
+
+# ---- Modify file without updating metadata - push should fail ----
+cd test\cli\work_pop_local & echo modified content > file.txt & bit push -u origin
+<<<
+>>> /Verifying local files/
+>>>2 /error: Working tree does not match metadata/
+>>>2 /Hash mismatch: file.txt/
+>>>2 /hint: Run 'bit verify'/
+>>>2 /hint: Run 'bit add'/
+>>>2 /hint: Run 'bit push --force'/
+>>>= 1
+
+# ---- Verify --skip-verify bypasses verification on push ----
+cd test\cli\work_pop_local & bit push -u origin --skip-verify
+<<<
+>>> /Push|Pushing to filesystem remote/
+>>>= 0
+
+# ---- Restore original content for next tests ----
+cd test\cli\work_pop_local & echo original content > file.txt & echo restored
+<<<
+>>> /restored/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: PULL VERIFICATION - Remote files must match remote metadata
+# ======================================================================
+
+# ---- Create modified file in remote that doesn't match its metadata, then pull should fail ----
+cd test\cli\work_pop_remote & echo corrupted content > file.txt & cd ..\work_pop_local & bit pull
+<<<
+>>> /Verifying remote repository/
+>>>2 /error: Remote working tree does not match remote metadata/
+>>>2 /Hash mismatch: file.txt/
+>>>2 /hint: Run 'bit verify'/
+>>>2 /hint: Run 'bit pull --accept-remote'/
+>>>= 1
+
+# ---- Verify --skip-verify bypasses verification on pull ----
+cd test\cli\work_pop_local & bit pull --skip-verify
+<<<
+>>> /Pull|Fetching remote commits/
+>>>= 0
+
+# ---- Verify --accept-remote bypasses verification (after resetting remote to corrupted state) ----
+cd test\cli\work_pop_remote & echo corrupted again > file.txt & cd ..\work_pop_local & bit pull --accept-remote
+<<<
+>>> /Accepting remote file state as truth/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: FORCE BYPASSES VERIFICATION
+# ======================================================================
+
+# ---- Modify local file without updating metadata, then push with --force should bypass verification ----
+cd test\cli\work_pop_local & echo force test content > file.txt & bit push --force
+<<<
+>>> /Push|Pushing to filesystem remote/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\work_pop_local 2>nul & rmdir /s /q test\cli\work_pop_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

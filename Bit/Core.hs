@@ -73,7 +73,7 @@ import qualified Bit.Pipeline as Pipeline
 import qualified Bit.Verify as Verify
 import qualified Bit.Fsck as Fsck
 import Bit.Plan (RcloneAction(..))
-import Bit.Concurrency (Concurrency(..), runConcurrently, runConcurrentlyBounded)
+import Bit.Concurrency (Concurrency(..), runConcurrently, runConcurrentlyBounded, ioConcurrency)
 import Control.Concurrent (getNumCapabilities)
 import Bit.Types
 import qualified Bit.Remote.Scan as Remote.Scan
@@ -110,10 +110,11 @@ import Bit.Progress (reportProgress, clearProgress)
 data PullOptions = PullOptions
     { pullAcceptRemote :: Bool
     , pullManualMerge :: Bool
+    , pullSkipVerify :: Bool
     } deriving (Show)
 
 defaultPullOptions :: PullOptions
-defaultPullOptions = PullOptions False False
+defaultPullOptions = PullOptions False False False
 
 -- ============================================================================
 -- Git passthrough (thin wrappers)
@@ -385,6 +386,21 @@ push :: BitM ()
 push = withRemote $ \remote -> do
     cwd <- asks envCwd
     force <- asks envForce
+    skipVerify <- asks envSkipVerify
+    
+    -- NEW: Proof of possession — verify local before pushing
+    unless (force || skipVerify) $ do
+        liftIO $ putStrLn "Verifying local files..."
+        (fileCount, issues) <- liftIO $ Verify.verifyLocal cwd Nothing (Parallel 0)
+        if null issues
+            then liftIO $ putStrLn $ "Verified " ++ show fileCount ++ " files. All match metadata."
+            else do
+                liftIO $ hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length issues) ++ " issues)."
+                liftIO $ mapM_ (printVerifyIssue (\s -> s)) issues  -- full hash, no truncation
+                liftIO $ hPutStrLn stderr "hint: Run 'bit verify' to see all mismatches."
+                liftIO $ hPutStrLn stderr "hint: Run 'bit add' to update metadata, or 'bit restore' to restore files."
+                liftIO $ hPutStrLn stderr "hint: Run 'bit push --force' to push anyway (unsafe)."
+                liftIO $ exitWith (ExitFailure 1)
     
     -- Determine if this is a filesystem or cloud remote
     mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
@@ -456,7 +472,7 @@ cloudPull remote opts =
         then pullAcceptRemoteImpl remote
         else if pullManualMerge opts
             then pullManualMergeImpl remote
-            else pullWithCleanup remote
+            else pullWithCleanup remote opts
 
 fetch :: BitM ()
 fetch = withRemote $ \remote -> do
@@ -1245,6 +1261,20 @@ filesystemPull cwd remote opts = do
     
     let remoteHash = filter (not . isSpace) remoteHeadOut
     
+    -- NEW: Proof of possession — verify filesystem remote before pulling
+    unless (pullAcceptRemote opts || pullSkipVerify opts) $ do
+        putStrLn "Verifying remote repository..."
+        (remoteCount, remoteIssues) <- Verify.verifyLocalAt remotePath Nothing (Parallel 0)
+        if null remoteIssues
+            then putStrLn $ "Verified " ++ show remoteCount ++ " remote files."
+            else do
+                hPutStrLn stderr $ "error: Remote working tree does not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
+                mapM_ (printVerifyIssue (\s -> s)) remoteIssues
+                hPutStrLn stderr "hint: Run 'bit verify' in the remote repo to see all mismatches."
+                hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
+                hPutStrLn stderr "hint: Run 'bit push --force' to overwrite remote with local state."
+                exitWith (ExitFailure 1)
+    
     -- 4. Merge locally using existing logic
     if pullAcceptRemote opts
         then filesystemPullAcceptRemote cwd remotePath remoteHash
@@ -1958,7 +1988,7 @@ pullManualMergeImpl remote = do
                     if null divergentFiles
                         then do
                             lift $ tell "No remote divergence detected. Proceeding with normal pull..."
-                            pullWithCleanup remote
+                            pullWithCleanup remote defaultPullOptions
                         else do
                             oldHash <- lift getLocalHeadE
                             (remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
@@ -2051,10 +2081,10 @@ printConflictList divergentFiles remoteFileMap remoteMetaMap localMetaMap = do
     putStrLn "  - A partial push from another client"
     putStrLn "  - Remote storage corruption"
 
-pullWithCleanup :: Remote -> BitM ()
-pullWithCleanup remote = do
+pullWithCleanup :: Remote -> PullOptions -> BitM ()
+pullWithCleanup remote opts = do
     env <- asks id
-    result <- liftIO $ try @SomeException (runBitM env (pullLogic remote))
+    result <- liftIO $ try @SomeException (runBitM env (pullLogic remote opts))
     case result of
         Left ex -> do
             inProgress <- lift $ Git.isMergeInProgress
@@ -2065,8 +2095,8 @@ pullWithCleanup remote = do
                 else lift $ throwIO ex
         Right _ -> return ()
 
-pullLogic :: Remote -> BitM ()
-pullLogic remote = do
+pullLogic :: Remote -> PullOptions -> BitM ()
+pullLogic remote opts = do
     cwd <- asks envCwd
     maybeBundlePath <- lift $ fetchRemoteBundle remote
     case maybeBundlePath of
@@ -2076,6 +2106,20 @@ pullLogic remote = do
             (_, countOut, _) <- lift $ gitQuery ["rev-list", "--count", "refs/remotes/origin/main"]
             let n = takeWhile (`elem` ['0'..'9']) (filter (/= '\n') countOut)
             lift $ tell $ "remote: Counting objects: " ++ (if null n then "0" else n) ++ ", done."
+
+            -- NEW: Proof of possession — verify remote before pulling
+            unless (pullSkipVerify opts) $ do
+                lift $ putStrLn "Verifying remote files..."
+                (remoteFileCount, remoteIssues) <- lift $ Verify.verifyRemote cwd remote Nothing (Parallel 0)
+                if null remoteIssues
+                    then lift $ putStrLn $ "Verified " ++ show remoteFileCount ++ " remote files."
+                    else do
+                        lift $ hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
+                        lift $ mapM_ (printVerifyIssue (\s -> s)) remoteIssues
+                        lift $ hPutStrLn stderr "hint: Run 'bit verify --remote' to see all mismatches."
+                        lift $ hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
+                        lift $ hPutStrLn stderr "hint: Run 'bit push --force' to overwrite remote with local state."
+                        lift $ exitWith (ExitFailure 1)
 
             oldHash <- lift getLocalHeadE
             (remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]

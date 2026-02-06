@@ -53,6 +53,7 @@ data BitEnv = BitEnv
     , envRemote         :: Maybe Remote
     , envForce          :: Bool
     , envForceWithLease :: Bool
+    , envSkipVerify     :: Bool
     }
 
 type BitM = ReaderT BitEnv IO
