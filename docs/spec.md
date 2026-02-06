@@ -6,7 +6,19 @@
 
 **Mental Model**: bit = Git(metadata) + rclone(sync) + [optional CAS(content) for bit-solid]
 
-**Current State**: We are implementing **bit-lite**. CAS and content-addressed storage come later in **bit-solid**.
+### bit-lite vs Git vs bit-solid: Content Authority
+
+The three systems differ in where content lives and what guarantees that provides:
+
+**Git** stores file content directly in its object store (`.git/objects/`). Every blob, tree, and commit is content-addressed by SHA-1. When you push, you're transferring objects that are self-verifying. When you pull, the objects you receive are self-verifying. Metadata (commits, trees) and content (blobs) live in the same store. The object store is the single source of truth, and it can always back up any metadata claim.
+
+**bit-solid** (planned) will add a content-addressed store (CAS) alongside Git's metadata tracking. Like Git, every version of every file will be stored by its hash. The CAS backs up every metadata claim unconditionally — if the metadata says a file existed at commit N with hash X, the CAS has that blob. This enables full binary history, time travel, and sparse checkout.
+
+**bit-lite** (current) has no object store and no CAS. Git tracks only metadata files (2-line hash+size records). The actual binary content lives exclusively in the working tree. There is exactly one copy of each file — the one on disk right now. Old versions are gone the moment you overwrite a file.
+
+This creates a fundamental architectural constraint that Git and bit-solid don't have: **metadata can become hollow.** If a binary file is deleted, corrupted, or modified without running `bit add`, the metadata in `.bit/index/` claims something that is no longer true. In Git, this situation is impossible — the object store is append-only and self-verifying. In bit-lite, it's the normal consequence of working with mutable files on a regular filesystem.
+
+This constraint gives rise to the **proof of possession** rule (see below): bit-lite must verify that content matches metadata before transferring metadata to or from another repo. Without this rule, hollow metadata propagates between repos, and the system's core value proposition — knowing the true state of your files — is undermined.
 
 ### Origin
 
@@ -67,6 +79,69 @@ No path should write metadata files to `.bit/index/` directly and then commit.
 Scanning the remote via rclone and writing the result to the index bypasses git
 and **will** produce wrong metadata (rclone cannot distinguish text from binary,
 so text files get `hash:/size:` metadata instead of their actual content).
+
+### The Proof of Possession Rule
+
+In Git and in bit-solid (planned), content is always recoverable from an object store. Git stores file content in `.git/objects/`; bit-solid will store it in a content-addressed store (CAS). In both systems, metadata and content are either the same thing or the content is always reachable from the metadata. You can push any metadata you want — the objects back it up unconditionally.
+
+bit-lite is fundamentally different. There is no object store. The working tree is the **only copy** of binary file content. The metadata in `.bit/index/` is just a *claim* — "there exists a file at this path with this hash and this size." If that file is gone, corrupted, or modified since the last commit, the claim is hollow. Pushing hollow claims to a remote means the remote now has metadata that nobody can fulfill. Pulling hollow claims from a remote means your local repo has metadata pointing to content that doesn't exist.
+
+This is the **proof of possession** rule: a repo must not transfer metadata it cannot back up with actual content.
+
+```
+             Git / bit-solid                    bit-lite
+             ──────────────                     ────────
+Content:     Object store (always available)    Working tree (only copy)
+Metadata:    Always backed by objects           Only valid if working tree matches
+Push safety: Unconditional                      Requires verification first
+Pull safety: Unconditional                      Requires remote verification first
+```
+
+The rule applies symmetrically:
+
+**Push (sender must prove possession):**
+1. Verify local — every binary file's hash must match its metadata
+2. If verification fails, refuse to push
+3. If verified, push metadata then copy files
+
+**Pull (sender must prove possession):**
+1. Verify remote — every binary file on the remote must match the remote's metadata
+2. If verification fails, refuse to pull (suggest `--accept-remote`, `--force`, or `--manual-merge`)
+3. If verified, pull metadata then copy files
+
+**What happens when verification fails:**
+
+On push failure (local doesn't match metadata):
+```
+$ bit push
+error: Working tree does not match metadata.
+  Modified: data/model.bin (expected md5:a1b2..., got md5:f8e9...)
+  Missing:  data/weights.bin
+hint: Run 'bit verify' to see all mismatches.
+hint: Run 'bit add' to update metadata, or 'bit restore' to restore files.
+```
+
+On pull failure (remote doesn't match its metadata):
+```
+$ bit pull
+error: Remote files do not match remote metadata.
+  Modified: data/model.bin (expected md5:a1b2..., got md5:c3d4...)
+hint: Run 'bit verify --remote' to see all mismatches.
+hint: Run 'bit pull --accept-remote' to accept the remote's actual file state.
+hint: Run 'bit push --force' to overwrite remote with local state.
+```
+
+The existing divergence resolution mechanisms (`--accept-remote`, `--force`, `--manual-merge`) serve as the escape hatches when the proof of possession check fails.
+
+**Why this matters:** Without this rule, corruption propagates silently through metadata. Repo A has a corrupted file, pushes metadata claiming the file is fine, Repo B pulls that metadata, and now both repos have a lie in their history. The proof of possession rule stops corruption at the boundary — you cannot export claims you can't substantiate.
+
+**Cost:** Verification requires hashing every binary file, which means reading the entire working tree. For a repo with 100GB of binary files, this takes real time. This is the price of not having an object store — the working tree must be checked because it's the only source of truth. Future optimization: cache verification results keyed on (path, mtime, size) to skip re-hashing unchanged files.
+
+**Remote verification cost by transport type:**
+
+- **Cloud remotes (Google Drive, S3, etc.):** `rclone lsjson --hash` returns MD5 hashes as free metadata — Google Drive stores them natively. Verification is essentially a single API call followed by in-memory comparison. Cheap.
+- **Cloud remotes (other backends):** Some backends provide native hashes, some don't. Where hashes aren't free, rclone may need to download file content to hash it. Check per-backend.
+- **Filesystem remotes:** Requires reading and hashing every binary file on the remote. Same cost as local verification.
 
 ### Metadata File Format
 
@@ -750,7 +825,17 @@ Interactive per-file conflict resolution:
     `mergeContinue`, and `pullAcceptRemoteImpl`. The only exception is first
     pull (`oldHead = Nothing`), which falls back to `syncRemoteFilesToLocal`.
 
-11. **Transport strategy split**: Push and pull dispatch based on `RemoteTarget`
+11. **Proof of possession on push/pull**: bit-lite must verify that the sender's
+    working tree matches its metadata before transferring that metadata. On push,
+    the local repo is verified; on pull, the remote is verified. This is necessary
+    because bit-lite has no object store — the working tree is the only copy of
+    binary content, and metadata without matching content is meaningless. Git and
+    bit-solid don't need this rule because their object stores back up every claim
+    unconditionally. The existing divergence resolution mechanisms
+    (`--accept-remote`, `--force`, `--manual-merge`) serve as escape hatches when
+    verification fails.
+
+12. **Transport strategy split**: Push and pull dispatch based on `RemoteTarget`
     classification. Cloud remotes use bundle + rclone (dumb storage). Filesystem
     remotes use direct git fetch/merge (smart storage — full bit repo at remote).
     This split is keyed off `Device.classifyRemotePath` and happens in
@@ -758,13 +843,13 @@ Interactive per-file conflict resolution:
     path uses `filesystemPush`/`filesystemPull` which leverage `runGitAt` for
     running git commands at arbitrary paths.
 
-12. **Filesystem remotes are full repos**: When pushing to a filesystem path,
+13. **Filesystem remotes are full repos**: When pushing to a filesystem path,
     bit creates a complete bit repository at the remote (via `initializeRepoAt`).
     Anyone at that location can run bit commands directly. This is the natural
     model for USB drives, network shares, and local collaboration directories.
     Bundles are skipped entirely — git talks repo-to-repo via filesystem paths.
 
-13. **Upstream tracking requires explicit `-u` flag**: Following git-standard
+14. **Upstream tracking requires explicit `-u` flag**: Following git-standard
     behavior, `branch.main.remote` is never set automatically. Users must use
     `bit push -u <remote>` to establish upstream tracking. This includes:
     - `bit remote add` does NOT set upstream (unlike old bit behavior)
@@ -773,7 +858,7 @@ Interactive per-file conflict resolution:
     - `bit pull` and `bit fetch` require explicit remote if no upstream is set
     This makes bit's remote behavior predictable for git users.
 
-14. **Strict ByteString IO exclusively**: All file operations use strict
+15. **Strict ByteString IO exclusively**: All file operations use strict
     `ByteString` (`Data.ByteString.readFile` / `writeFile`), never lazy IO
     (`Prelude.readFile`, `Data.ByteString.Lazy`, `Data.Text.Lazy.IO`). Lazy IO
     on Windows keeps file handles open until garbage collection, causing
@@ -781,13 +866,13 @@ Interactive per-file conflict resolution:
     Strict IO reads/writes the entire file and closes the handle immediately.
     HLint rules enforce this project-wide.
 
-15. **Atomic writes with retry logic**: All important writes use the temp-file +
+16. **Atomic writes with retry logic**: All important writes use the temp-file +
     rename pattern (`Bit.AtomicWrite.atomicWriteFile`). On Windows, includes
     retry logic (5 attempts with exponential backoff) to handle transient
     "permission denied" errors from antivirus and file indexing. Directory-level
     locking coordinates concurrent writers within the process.
 
-16. **ConcurrentIO newtype without MonadIO**: For modules that need type-level
+17. **ConcurrentIO newtype without MonadIO**: For modules that need type-level
     IO restrictions, `Bit.ConcurrentIO` provides a newtype wrapper where the
     constructor is not exported. This prevents smuggling arbitrary lazy IO via
     `liftIO`. Only whitelisted strict operations are exposed. Used where the
@@ -997,6 +1082,10 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
   causes "delayed read on closed handle" errors; use `Bit.Process.readProcessStrict` instead
 - Use plain `writeFile` for important files — use `atomicWriteFile` for crash safety
   and Windows compatibility
+- Push metadata from an unverified working tree (the metadata may reference
+  files that are missing or corrupted — see Proof of Possession rule)
+- Pull metadata from an unverified remote (corruption propagates through
+  metadata; verify remote first, suggest `--accept-remote` if verification fails)
 
 **ALWAYS:**
 - Prefer `rclone moveto` over delete+upload when hash matches
@@ -1020,3 +1109,10 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
 - Update tracking ref after filesystem pull (same invariant as cloud pull)
 - Use `--no-track` flag for any `git checkout` that should not set upstream
   tracking (e.g., `checkoutRemoteAsMain`, `--accept-remote` flows)
+- Verify local working tree before push (proof of possession)
+- Verify remote before pull (proof of possession); for cloud remotes use
+  `rclone lsjson --hash` (free on Google Drive), for filesystem remotes hash
+  the files
+- When verification fails, refuse the operation and suggest resolution:
+  `bit add` / `bit restore` for local issues, `--accept-remote` / `--force` /
+  `--manual-merge` for remote issues
