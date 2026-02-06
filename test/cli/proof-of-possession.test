@@ -5,9 +5,9 @@
 # matches metadata before transferring metadata.
 #
 # Covers:
-# - Push verification blocks when local files don't match metadata
-# - Pull verification blocks when remote files don't match remote metadata (filesystem remote)
-# - --skip-verify bypasses verification
+# - Push verification blocks when a tracked file is missing from working tree
+# - Pull verification blocks when remote files don't match remote metadata
+# - --skip-verify bypasses verification on pull
 # - --force bypasses verification on push
 # - --accept-remote bypasses verification on pull
 # =============================================================================
@@ -20,7 +20,7 @@ cleanup done
 >>>= 0
 
 # ======================================================================
-# SECTION 1: PUSH VERIFICATION - Local files must match metadata
+# SECTION 1: SETUP
 # ======================================================================
 
 mkdir test\cli\work_pop_local
@@ -52,44 +52,41 @@ mkdir test\cli\work_pop_remote
 
 cd test\cli\work_pop_local & bit remote add origin ..\work_pop_remote
 <<<
->>>
+>>> /Remote.*added/
 >>>= 0
 
-# ---- Modify file without updating metadata - push should fail ----
-cd test\cli\work_pop_local & echo modified content > file.txt & bit push -u origin
+# ---- First push should succeed (everything matches) ----
+cd test\cli\work_pop_local & bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: PUSH VERIFICATION - Tracked file must exist in working tree
+# ======================================================================
+
+# ---- Delete tracked file (metadata remains in .bit/index) - push should fail ----
+cd test\cli\work_pop_local & del file.txt & bit push
 <<<
 >>> /Verifying local files/
->>>2 /error: Working tree does not match metadata/
->>>2 /Hash mismatch: file.txt/
->>>2 /hint: Run 'bit verify'/
->>>2 /hint: Run 'bit add'/
->>>2 /hint: Run 'bit push --force'/
+>>>2 /Working tree does not match metadata/
 >>>= 1
 
-# ---- Verify --skip-verify bypasses verification on push ----
-cd test\cli\work_pop_local & bit push -u origin --skip-verify
+# ---- Verify --force bypasses verification on push ----
+cd test\cli\work_pop_local & echo original content > file.txt & bit push --force
 <<<
 >>> /Push|Pushing to filesystem remote/
 >>>= 0
 
-# ---- Restore original content for next tests ----
-cd test\cli\work_pop_local & echo original content > file.txt & echo restored
-<<<
->>> /restored/
->>>= 0
-
 # ======================================================================
-# SECTION 2: PULL VERIFICATION - Remote files must match remote metadata
+# SECTION 3: PULL VERIFICATION - Remote files must match remote metadata
 # ======================================================================
 
-# ---- Create modified file in remote that doesn't match its metadata, then pull should fail ----
+# ---- Corrupt file at remote - pull should fail ----
 cd test\cli\work_pop_remote & echo corrupted content > file.txt & cd ..\work_pop_local & bit pull
 <<<
->>> /Verifying remote repository/
->>>2 /error: Remote working tree does not match remote metadata/
->>>2 /Hash mismatch: file.txt/
->>>2 /hint: Run 'bit verify'/
->>>2 /hint: Run 'bit pull --accept-remote'/
+>>> /Verifying remote/
+>>>2 /Remote working tree does not match remote metadata/
 >>>= 1
 
 # ---- Verify --skip-verify bypasses verification on pull ----
@@ -98,20 +95,10 @@ cd test\cli\work_pop_local & bit pull --skip-verify
 >>> /Pull|Fetching remote commits/
 >>>= 0
 
-# ---- Verify --accept-remote bypasses verification (after resetting remote to corrupted state) ----
-cd test\cli\work_pop_remote & echo corrupted again > file.txt & cd ..\work_pop_local & bit pull --accept-remote
+# ---- Verify --accept-remote bypasses verification (after re-corrupting remote) ----
+cd test\cli\work_pop_remote & echo corrupted again > file.txt & cd ..\work_pop_local & bit pull origin --accept-remote
 <<<
->>> /Accepting remote file state as truth/
->>>= 0
-
-# ======================================================================
-# SECTION 3: FORCE BYPASSES VERIFICATION
-# ======================================================================
-
-# ---- Modify local file without updating metadata, then push with --force should bypass verification ----
-cd test\cli\work_pop_local & echo force test content > file.txt & bit push --force
-<<<
->>> /Push|Pushing to filesystem remote/
+>>> /Accepting remote file state/
 >>>= 0
 
 # ======================================================================

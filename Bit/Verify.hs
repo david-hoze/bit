@@ -129,13 +129,17 @@ verifyLocal cwd = verifyLocalAt cwd
 
 -- | Extract metadata from a bundle's HEAD commit.
 -- First fetches the bundle into the repo, then reads metadata from refs/remotes/origin/main.
--- Returns list of (relative path, hash, size) for files under index/.
-loadMetadataFromBundle :: BundleName -> IO [(Path, Hash 'MD5, Integer)]
+-- Returns (binaryMetadata, allKnownPaths):
+--   binaryMetadata: list of (path, hash, size) for binary files (verifiable)
+--   allKnownPaths: set of all file paths in the bundle (binary + text, for "extra files" check)
+-- Text files are NOT hash-verified because git may normalize line endings (CRLF→LF),
+-- causing hash mismatches with the actual files on the remote.
+loadMetadataFromBundle :: BundleName -> IO ([(Path, Hash 'MD5, Integer)], Set.Set Path)
 loadMetadataFromBundle bundleName = do
   -- First, fetch the bundle into the repo so we can read from it
   fetchCode <- Git.fetchFromBundle bundleName
   if fetchCode /= ExitSuccess
-    then return []
+    then return ([], Set.empty)
     else do
       -- Get the remote HEAD hash (now available as refs/remotes/origin/main)
       (code, out, _) <- readProcessWithExitCode "git"
@@ -144,41 +148,45 @@ loadMetadataFromBundle bundleName = do
         , "refs/remotes/origin/main"
         ] ""
       case filter (not . isSpace) out of
-        [] -> return []
+        [] -> return ([], Set.empty)
         headHash -> do
-          -- List all files in the commit that are under index/
+          -- List all files in the commit tree (files are at root level)
           (code2, out2, _) <- readProcessWithExitCode "git"
             [ "-C", bitIndexPath
             , "ls-tree"
             , "-r"
             , "--name-only"
             , headHash
-            , "--"
-            , "index/"
             ] ""
           if code2 /= ExitSuccess
-            then return []
+            then return ([], Set.empty)
             else do
-              -- Filter to get only paths under index/ and remove the "index/" prefix
-              let paths = filter (not . null) $ map (drop 6) $ filter ("index/" `isPrefixOf`) $ lines out2
-              -- Read each metadata file from the commit
+              -- Filter out .git-related paths and .gitignore
+              let paths = filter isUserFile $ filter (not . null) $ lines out2
+                  allPaths = Set.fromList (map normalise paths)
+              -- Read each metadata file from the commit (only binary files return entries)
               metaList <- mapM (readMetadataFromCommit headHash) paths
-              return $ concat metaList
+              return (concat metaList, allPaths)
   where
-    -- Read a metadata file from a specific commit
+    -- Only include user files, not git internal files
+    isUserFile path = not (isGitPath path) && path /= ".gitignore"
+
+    -- Read a metadata file from a specific commit.
+    -- Returns metadata entry only for binary files (where parseMetadata succeeds).
+    -- Text files return [] because their hashes can't be reliably compared
+    -- (git may normalize line endings, causing CRLF/LF mismatches).
     readMetadataFromCommit :: String -> FilePath -> IO [(Path, Hash 'MD5, Integer)]
     readMetadataFromCommit commitHash relPath = do
-      let gitPath = "index/" ++ relPath
       (code, content, _) <- readProcessWithExitCode "git"
         [ "-C", bitIndexPath
         , "show"
-        , commitHash ++ ":" ++ gitPath
+        , commitHash ++ ":" ++ relPath
         ] ""
       if code /= ExitSuccess
         then return []
         else case parseMetadata content of
-          Nothing -> return []
           Just (MetaContent { metaHash = h, metaSize = sz }) -> return [(relPath, h, sz)]
+          Nothing -> return []  -- Text file: skip hash verification
 
 -- | Verify remote files match remote metadata.
 -- Returns (number of files checked, list of issues).
@@ -205,8 +213,8 @@ verifyRemote cwd remote mCounter concurrency = do
   if not bundleExistsNow
     then return (0, [])
     else do
-      -- 2. Load metadata from the bundle
-      remoteMeta <- loadMetadataFromBundle fetchedBundle
+      -- 2. Load metadata from the bundle (binary metadata + all known paths)
+      (remoteMeta, allKnownPaths) <- loadMetadataFromBundle fetchedBundle
       
       -- 3. Fetch actual remote files
       Remote.Scan.fetchRemoteFiles remote >>= either
@@ -222,13 +230,13 @@ verifyRemote cwd remote mCounter concurrency = do
                 ]
               remoteMetaMap = Map.fromList [(normalise p, (h, sz)) | (p, h, sz) <- remoteMeta]
           
-          -- 5. Compare metadata with actual files
+          -- 5. Compare binary file metadata with actual files on remote
           issues <- traverse (checkRemoteFile remoteFileMap) remoteMeta
           
-          -- 6. Check for files on remote that aren't in metadata
-          let metaPaths = Set.fromList (Map.keys remoteMetaMap)
-              filePaths = Set.fromList (Map.keys remoteFileMap)
-              extraPaths = filePaths `Set.difference` metaPaths
+          -- 6. Check for files on remote that aren't known to the bundle
+          -- Use allKnownPaths (binary + text) to avoid false positives for text files
+          let filePaths = Set.fromList (Map.keys remoteFileMap)
+              extraPaths = filePaths `Set.difference` allKnownPaths
               extraIssues = map (\p -> HashMismatch p "(not in metadata)" "(exists on remote)" 0 0) (Set.toList extraPaths)
           
           return (length remoteMeta, concat issues ++ extraIssues))

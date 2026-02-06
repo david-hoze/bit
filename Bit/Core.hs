@@ -1342,7 +1342,9 @@ filesystemPullNormal cwd remotePath remoteHash = do
                     putStrLn "Merge made by the 'recursive' strategy."
                     hasChanges <- hasStagedChangesE
                     when hasChanges $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
-                    filesystemApplyMergeToWorkingDir cwd remotePath localHash remoteHash
+                    -- Use actual merged HEAD (not remoteHash) to avoid deleting local-only files
+                    mergedHead <- fromMaybe remoteHash <$> getLocalHeadE
+                    filesystemApplyMergeToWorkingDir cwd remotePath localHash mergedHead
                     putStrLn "Syncing binaries... done."
                     void $ Git.updateRemoteTrackingBranchToHash remoteHash
                 else do
@@ -1368,7 +1370,9 @@ filesystemPullNormal cwd remotePath remoteHash = do
                         then do
                             void $ Git.runGitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
                             putStrLn $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
-                            filesystemApplyMergeToWorkingDir cwd remotePath localHash remoteHash
+                            -- Use actual merged HEAD (not remoteHash) to avoid deleting local-only files
+                            mergedHead <- fromMaybe remoteHash <$> getLocalHeadE
+                            filesystemApplyMergeToWorkingDir cwd remotePath localHash mergedHead
                             putStrLn "Syncing binaries... done."
                             void $ Git.updateRemoteTrackingBranchToHash remoteHash
                         else return ()
@@ -1965,7 +1969,7 @@ pullManualMergeImpl remote = do
         Just bPath -> do
             lift $ saveFetchedBundle remote (Just bPath)
 
-            remoteMeta <- lift $ Verify.loadMetadataFromBundle fetchedBundle
+            (remoteMeta, _allBundlePaths) <- lift $ Verify.loadMetadataFromBundle fetchedBundle
             lift $ tell "Scanning remote files... done."
             result <- lift $ Remote.Scan.fetchRemoteFiles remote
             case result of

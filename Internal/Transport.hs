@@ -23,7 +23,8 @@ import System.Exit (ExitCode(..))
 import System.Directory (removeFile, doesFileExist)
 import System.IO (hPutStrLn, stderr, hGetLine, hIsEOF, hClose, hGetContents, Handle)
 import System.FilePath (normalise)
-import Control.Monad (when, unless)
+import Control.Monad (when, unless, void)
+import Control.Concurrent.Async (async, wait)
 import Data.List (isInfixOf, isPrefixOf)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
@@ -33,11 +34,12 @@ import Data.Maybe (fromMaybe)
 import Data.String (fromString)
 import Bit.Remote (Remote, remoteUrl)
 import Data.IORef (IORef, modifyIORef')
-import Control.Exception (bracket)
+import Control.Exception (bracket, try, SomeException)
 
 -- | Run a process and capture stdout as raw bytes (avoiding locale encoding issues).
 -- Returns (ExitCode, ByteString, String) where stdout is raw bytes and stderr is String.
 -- Uses bracket for exception-safe resource cleanup.
+-- Reads stdout and stderr concurrently to avoid pipe deadlocks.
 readProcessBytes :: FilePath -> [String] -> IO (ExitCode, LBS.ByteString, String)
 readProcessBytes cmd args = do
     let cp = (proc cmd args)
@@ -48,21 +50,25 @@ readProcessBytes cmd args = do
     bracket (createProcess cp) cleanupProcess $ \(_, mStdout, mStderr, ph) -> do
         case (mStdout, mStderr) of
             (Just hOut, Just hErr) -> do
-                -- Read strictly to avoid lazy IO issues
-                outBytes <- BS.hGetContents hOut  -- Strict read (closes handle)
-                errStr   <- hGetContents' hErr     -- Strict read for stderr
+                -- Read stdout and stderr concurrently to avoid deadlocks
+                -- BS.hGetContents is strict and closes handle when done
+                asyncOut <- async (BS.hGetContents hOut)
+                asyncErr <- async (hGetContents' hErr)
+                -- Wait for both reads to complete
+                outBytes <- wait asyncOut
+                errStr   <- wait asyncErr
                 code     <- waitForProcess ph
                 return (code, LBS.fromStrict outBytes, errStr)
             _ -> error "readProcessBytes: failed to create pipes"
   where
     -- Cleanup: close any handles that might still be open and wait for process
     cleanupProcess (mStdin, mStdout, mStderr, ph) = do
-        -- Note: BS.hGetContents closes handles automatically, but we ensure cleanup
+        -- Try to close handles (may already be closed by hGetContents)
         maybe (return ()) (const $ return ()) mStdin
-        maybe (return ()) (const $ return ()) mStdout
-        maybe (return ()) (const $ return ()) mStderr
-        _ <- waitForProcess ph
-        return ()
+        maybe (return ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStdout
+        maybe (return ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStderr
+        -- Ensure process is cleaned up
+        void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
     
     -- Strict reading of handle contents
     hGetContents' :: Handle -> IO String
@@ -240,10 +246,16 @@ checkRemote localPath remote mCounter = do
             bracket (createProcess cp) cleanup $ \(_, mStdout, mStderr, ph) -> do
                 case (mStdout, mStderr) of
                     (Just hOut, Just hErr) -> do
+                        -- CRITICAL: drain stderr concurrently to avoid pipe deadlock
+                        -- When rclone checks large repos (especially cloud remotes like Google Drive),
+                        -- it produces stderr output (rate limits, retries, transfer stats).
+                        -- If we read stdout first, stderr pipe buffer can fill (~64KB on Windows)
+                        -- causing rclone to block on stderr write while we block on stdout read.
+                        asyncErr <- async (hGetContents' hErr)
                         -- Read stdout line by line, accumulating and counting
                         outLines <- readLinesWithProgress hOut counter
-                        -- Read all stderr
-                        errOutput <- hGetContents' hErr
+                        -- Now join stderr read
+                        errOutput <- wait asyncErr
                         -- Wait for process to finish
                         code <- waitForProcess ph
                         let out = unlines outLines
@@ -260,9 +272,12 @@ checkRemote localPath remote mCounter = do
                             }
                     _ -> error "checkRemote: failed to create pipes"
   where
-    cleanup (_, mOut, mErr, _) = do
-        maybe (return ()) (\h -> hIsEOF h >> return ()) mOut
-        maybe (return ()) (\h -> hIsEOF h >> return ()) mErr
+    cleanup (_, mOut, mErr, ph) = do
+        -- Try to close any handles that are still open
+        maybe (return ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mOut
+        maybe (return ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mErr
+        -- Ensure process is cleaned up
+        void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
     
     -- Read lines from handle, incrementing counter for each line
     readLinesWithProgress :: Handle -> IORef Int -> IO [String]
