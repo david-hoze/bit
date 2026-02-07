@@ -171,10 +171,13 @@ loadCacheEntry root relPath = do
 -- | Save cache entry for a file (non-atomic write, cache corruption is acceptable)
 saveCacheEntry :: FilePath -> FilePath -> CacheEntry -> IO ()
 saveCacheEntry root relPath entry = do
-  let cachePath = root </> ".bit" </> "cache" </> relPath
-  createDirectoryIfMissing True (takeDirectory cachePath)
-  -- Use strict bytestring writing to ensure file handle is closed immediately
-  BS.writeFile cachePath (encodeUtf8 (T.pack (serializeCacheEntry entry)))
+  let bitRoot = root </> ".bit"
+  bitExists <- doesDirectoryExist bitRoot
+  when bitExists $ do
+    let cachePath = bitRoot </> "cache" </> relPath
+    createDirectoryIfMissing True (takeDirectory cachePath)
+    -- Use strict bytestring writing to ensure file handle is closed immediately
+    BS.writeFile cachePath (encodeUtf8 (T.pack (serializeCacheEntry entry)))
 
 -- | Normalize a file path for consistent comparison (forward slashes, trimmed)
 normalizePath :: FilePath -> FilePath
@@ -235,69 +238,73 @@ progressLoop counter total = go
 -- Main scan function
 scanWorkingDir :: FilePath -> IO [FileEntry]
 scanWorkingDir root = do
-    -- Read config once for all files
-    config <- ConfigFile.readTextConfig
+    let bitRoot = root </> ".bit"
+    bitExists <- doesDirectoryExist bitRoot
+    if not bitExists then return []
+    else do
+      -- Read config once for all files
+      config <- ConfigFile.readTextConfig
     
-    -- First pass: collect all paths (without hashing)
-    allPaths <- collectPaths root
+      -- First pass: collect all paths (without hashing)
+      allPaths <- collectPaths root
     
-    -- Filter through git check-ignore
-    let filePaths = [p | (p, False) <- allPaths]  -- Only check files, not directories
-    ignoredSet <- checkIgnoredFiles root filePaths
+      -- Filter through git check-ignore
+      let filePaths = [p | (p, False) <- allPaths]  -- Only check files, not directories
+      ignoredSet <- checkIgnoredFiles root filePaths
     
-    -- Separate directories from files to hash
-    let (dirs, files) = partition snd allPaths
-        dirEntries = [FileEntry { path = rel, kind = Directory } | (rel, _) <- dirs]
-        filesToHash = [(rel, root </> rel) | (rel, False) <- allPaths
-                                           , not (Set.member (normalizePath rel) ignoredSet)]
+      -- Separate directories from files to hash
+      let (dirs, files) = partition snd allPaths
+          dirEntries = [FileEntry { path = rel, kind = Directory } | (rel, _) <- dirs]
+          filesToHash = [(rel, root </> rel) | (rel, False) <- allPaths
+                                             , not (Set.member (normalizePath rel) ignoredSet)]
     
-    -- Setup progress tracking
-    let total = length filesToHash
-    counter <- newIORef (0 :: Int)
+      -- Setup progress tracking
+      let total = length filesToHash
+      counter <- newIORef (0 :: Int)
     
-    -- Hash/classify files in parallel (bounded by numCapabilities * 4)
-    caps <- getNumCapabilities
-    let concurrency = max 4 (caps * 4)
+      -- Hash/classify files in parallel (bounded by numCapabilities * 4)
+      caps <- getNumCapabilities
+      let concurrency = max 4 (caps * 4)
     
-    let hashWithProgress (rel, fullPath) = do
-            size <- getFileSize fullPath
-            mtime <- getModificationTime fullPath
-            let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
-            cached <- loadCacheEntry root rel
-            case cached of
-              Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
-                -- Cache hit: reuse hash and isText
-                atomicModifyIORef' counter (\n -> (n + 1, ()))
-                return $ FileEntry
-                    { path = rel
-                    , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fIsText = ceIsText ce }
-                    }
-              _ -> do
-                -- Cache miss: hash the file, save cache entry
-                (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
-                saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h isText)
-                atomicModifyIORef' counter (\n -> (n + 1, ()))
-                return $ FileEntry
-                    { path = rel
-                    , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
-                    }
+      let hashWithProgress (rel, fullPath) = do
+              size <- getFileSize fullPath
+              mtime <- getModificationTime fullPath
+              let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+              cached <- loadCacheEntry root rel
+              case cached of
+                Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
+                  -- Cache hit: reuse hash and isText
+                  atomicModifyIORef' counter (\n -> (n + 1, ()))
+                  return $ FileEntry
+                      { path = rel
+                      , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fIsText = ceIsText ce }
+                      }
+                _ -> do
+                  -- Cache miss: hash the file, save cache entry
+                  (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
+                  saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h isText)
+                  atomicModifyIORef' counter (\n -> (n + 1, ()))
+                  return $ FileEntry
+                      { path = rel
+                      , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
+                      }
     
-    -- Wrap hashing with progress reporter
-    let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress filesToHash
+      -- Wrap hashing with progress reporter
+      let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress filesToHash
     
-    fileEntries <- if total > 50
-        then do
-            -- Show progress for large scans
-            reporterThread <- forkIO (progressLoop counter total)
-            finally hashingAction $ do
-                killThread reporterThread
-                clearProgress
-                hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
-        else
-            -- No progress for small scans
-            hashingAction
+      fileEntries <- if total > 50
+          then do
+              -- Show progress for large scans
+              reporterThread <- forkIO (progressLoop counter total)
+              finally hashingAction $ do
+                  killThread reporterThread
+                  clearProgress
+                  hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
+          else
+              -- No progress for small scans
+              hashingAction
     
-    return $ dirEntries ++ fileEntries
+      return $ dirEntries ++ fileEntries
   where
     collectPaths :: FilePath -> IO [(FilePath, Bool)]
     collectPaths path = do
@@ -320,76 +327,79 @@ scanWorkingDir root = do
 
 writeMetadataFiles :: FilePath -> [FileEntry] -> IO ()
 writeMetadataFiles root entries = do
-    let metaRoot = root </> ".bit/index"
-    createDirectoryIfMissing True metaRoot
+    let bitRoot = root </> ".bit"
+    bitExists <- doesDirectoryExist bitRoot
+    when bitExists $ do
+      let metaRoot = bitRoot </> "index"
+      createDirectoryIfMissing True metaRoot
 
-    -- Separate directories from files
-    let (dirs, files) = partitionEntries entries
+      -- Separate directories from files
+      let (dirs, files) = partitionEntries entries
     
-    -- First pass: create all directories sequentially (avoid race conditions)
-    forM_ dirs $ \dirPath -> do
-      let fullPath = metaRoot </> dirPath
-      createDirectoryIfMissing True fullPath
+      -- First pass: create all directories sequentially (avoid race conditions)
+      forM_ dirs $ \dirPath -> do
+        let fullPath = metaRoot </> dirPath
+        createDirectoryIfMissing True fullPath
     
-    -- Second pass: create parent directories for files
-    let parentDirs = Set.fromList [takeDirectory (path e) | e <- files]
-    forM_ parentDirs $ \dirPath -> do
-      let fullPath = metaRoot </> dirPath
-      createDirectoryIfMissing True fullPath
+      -- Second pass: create parent directories for files
+      let parentDirs = Set.fromList [takeDirectory (path e) | e <- files]
+      forM_ parentDirs $ \dirPath -> do
+        let fullPath = metaRoot </> dirPath
+        createDirectoryIfMissing True fullPath
     
-    -- Setup progress tracking
-    let total = length files
-    isTTY <- hIsTerminalDevice stderr
-    counter <- newIORef (0 :: Int)
-    skipped <- newIORef (0 :: Int)
+      -- Setup progress tracking
+      let total = length files
+      isTTY <- hIsTerminalDevice stderr
+      counter <- newIORef (0 :: Int)
+      skipped <- newIORef (0 :: Int)
     
-    -- Start progress reporter thread if we're in a TTY and have enough files
-    let shouldShowProgress = isTTY && total > 10
-    reporterThread <- if shouldShowProgress
-        then Just <$> forkIO (writeProgressLoop counter skipped total)
-        else return Nothing
+      -- Start progress reporter thread if we're in a TTY and have enough files
+      let shouldShowProgress = isTTY && total > 10
+      reporterThread <- if shouldShowProgress
+          then Just <$> forkIO (writeProgressLoop counter skipped total)
+          else return Nothing
     
-    -- Third pass: write files in parallel (bounded concurrency)
-    caps <- getNumCapabilities
-    let concurrency = max 4 (caps * 4)
+      -- Third pass: write files in parallel (bounded concurrency)
+      caps <- getNumCapabilities
+      let concurrency = max 4 (caps * 4)
     
-    let writeWithProgress entry = do
-            let metaPath = metaRoot </> path entry
-            case kind entry of
-              File { fHash, fSize, fIsText } -> do
-                -- Check if file is unchanged before writing
-                needsWrite <- shouldWriteFile root metaPath entry fHash fSize fIsText
-                if needsWrite
-                  then do
-                    if fIsText
-                      then do
-                        -- For text files, copy the actual content directly
-                        let actualPath = root </> path entry
-                        copyFileWithMetadata actualPath metaPath
-                      else do
-                        -- For binary files, write metadata (hash + size). Spec: raw hash value; atomic write.
-                        atomicWriteFileStr metaPath $
-                          serializeMetadata (MetaContent fHash fSize)
-                    atomicModifyIORef' counter (\n -> (n + 1, ()))
-                  else do
-                    atomicModifyIORef' skipped (\n -> (n + 1, ()))
-                    atomicModifyIORef' counter (\n -> (n + 1, ()))
-              Directory -> return ()  -- Already handled in first pass
+      let writeWithProgress entry = do
+              let metaPath = metaRoot </> path entry
+              case kind entry of
+                File { fHash, fSize, fIsText } -> do
+                  -- Check if file is unchanged before writing
+                  needsWrite <- shouldWriteFile root metaPath entry fHash fSize fIsText
+                  if needsWrite
+                    then do
+                      if fIsText
+                        then do
+                          -- For text files, copy the actual content directly
+                          let actualPath = root </> path entry
+                          copyFileWithMetadata actualPath metaPath
+                        else do
+                          -- For binary files, write metadata (hash + size). Spec: raw hash value; atomic write.
+                          atomicWriteFileStr metaPath $
+                            serializeMetadata (MetaContent fHash fSize)
+                      atomicModifyIORef' counter (\n -> (n + 1, ()))
+                    else do
+                      atomicModifyIORef' skipped (\n -> (n + 1, ()))
+                      atomicModifyIORef' counter (\n -> (n + 1, ()))
+                Directory -> return ()  -- Already handled in first pass
     
-    finally
-        (void $ mapConcurrentlyBounded concurrency writeWithProgress files)
-        (do
-            -- Clean up: kill reporter thread and finalize progress line
-            maybe (return ()) killThread reporterThread
-            when shouldShowProgress $ do
-                n <- readIORef counter
-                s <- readIORef skipped
-                clearProgress
-                let written = n - s
-                hPutStr stderr $ "Wrote " ++ show written ++ " metadata files"
-                when (s > 0) $ hPutStr stderr $ " (skipped " ++ show s ++ " unchanged)"
-                hPutStrLn stderr "."
-        )
+      finally
+          (void $ mapConcurrentlyBounded concurrency writeWithProgress files)
+          (do
+              -- Clean up: kill reporter thread and finalize progress line
+              maybe (return ()) killThread reporterThread
+              when shouldShowProgress $ do
+                  n <- readIORef counter
+                  s <- readIORef skipped
+                  clearProgress
+                  let written = n - s
+                  hPutStr stderr $ "Wrote " ++ show written ++ " metadata files"
+                  when (s > 0) $ hPutStr stderr $ " (skipped " ++ show s ++ " unchanged)"
+                  hPutStrLn stderr "."
+          )
   where
     partitionEntries :: [FileEntry] -> ([FilePath], [FileEntry])
     partitionEntries es =

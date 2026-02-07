@@ -1163,6 +1163,12 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
   files that are missing or corrupted — see Proof of Possession rule)
 - Pull metadata from an unverified remote (corruption propagates through
   metadata; verify remote first, suggest `--accept-remote` if verification fails)
+- Create `.bit/` from non-init code paths — only `init` and `initializeRepoAt`
+  may create `.bit/` from scratch. All other functions (`scanWorkingDir`,
+  `writeMetadataFiles`, `saveCacheEntry`) must check that `.bit/` already
+  exists and silently no-op if it doesn't. This prevents accidental `.bit/`
+  directory creation in non-repo directories (e.g., from Windows `&`-chaining
+  after a failed `cd`)
 
 **ALWAYS:**
 - Prefer `rclone moveto` over delete+upload when hash matches
