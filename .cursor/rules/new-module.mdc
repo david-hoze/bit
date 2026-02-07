@@ -1,0 +1,44 @@
+---
+alwaysApply: true
+---
+
+# New Haskell Module Conventions
+
+When creating a new `.hs` file, always include these pragmas at the top:
+
+```haskell
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
+```
+
+`ScopedTypeVariables` is required whenever exception handlers use type annotations in patterns (e.g., `\(_ :: IOError) -> ...`), which is common throughout this codebase. Always include it proactively.
+
+## Qualified Imports for Ambiguous Modules
+
+When importing modules that share common function names, always use qualified imports:
+
+```haskell
+-- REQUIRED: These modules have overlapping names (removeFile, etc.)
+import qualified System.Directory as Dir
+import qualified System.Process as Proc
+
+-- Then use: Dir.removeFile, Dir.doesFileExist, Proc.readProcess, etc.
+```
+
+This makes wrong-module imports impossible. The following module pairs MUST use qualified imports:
+
+- `System.Directory` / `System.Process` (both export file-related names)
+- `Data.Text` / `Data.Text.IO` (already qualified as `T` / `TIO` in codebase)
+- `Data.ByteString` / `Data.ByteString.Lazy` (already qualified as `BS` / `LBS`)
+
+## String Concatenation
+
+Remember that `hPutStrLn handle` takes a single `String` argument. Use `$` to compose:
+
+```haskell
+-- Correct
+hPutStrLn stderr $ "Error: " ++ msg
+
+-- Wrong (won't compile but error is confusing)
+hPutStrLn stderr "Error: " ++ msg
+```
