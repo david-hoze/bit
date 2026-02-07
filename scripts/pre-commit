@@ -52,4 +52,84 @@ if [ -n "$VIOLATIONS" ]; then
     exit 1
 fi
 
+# Check for shelltest format violations (duplicate directives)
+FORMAT_VIOLATIONS=""
+for FILE in $STAGED_TEST_FILES; do
+    # Use awk to check for duplicate directives within test cases
+    # Test cases are separated by blank lines
+    FORMAT_CHECK=$(awk -v file="$FILE" '
+        BEGIN { 
+            stdin_count = 0; stdout_count = 0; stderr_count = 0; exit_count = 0
+            start_line = 1
+        }
+        # Blank line or end of file = end of test case
+        /^[[:space:]]*$/ || (NR > 1 && prev_blank && /^[[:space:]]*$/) {
+            if (stderr_count > 1) {
+                print "DUPLICATE >>>2 in " file " near line " start_line " (found " stderr_count " occurrences)"
+            }
+            if (stdout_count > 1) {
+                print "DUPLICATE >>> in " file " near line " start_line " (found " stdout_count " occurrences)"
+            }
+            if (stdin_count > 1) {
+                print "DUPLICATE <<< in " file " near line " start_line " (found " stdin_count " occurrences)"
+            }
+            if (exit_count > 1) {
+                print "DUPLICATE >>>= in " file " near line " start_line " (found " exit_count " occurrences)"
+            }
+            # Reset counters
+            stdin_count = 0; stdout_count = 0; stderr_count = 0; exit_count = 0
+            start_line = NR + 1
+            prev_blank = 1
+            next
+        }
+        # Skip comment lines
+        /^[[:space:]]*#/ { next }
+        # Count directives (only at line start or after whitespace)
+        /^[[:space:]]*>>>=/ { exit_count++; prev_blank = 0; next }
+        /^[[:space:]]*>>>2/ { stderr_count++; prev_blank = 0; next }
+        /^[[:space:]]*>>>([^2=]|$)/ { stdout_count++; prev_blank = 0; next }
+        /^[[:space:]]*<<</ { stdin_count++; prev_blank = 0; next }
+        # Non-blank, non-directive line
+        { prev_blank = 0 }
+        # Check last test case at end of file
+        END {
+            if (stderr_count > 1) {
+                print "DUPLICATE >>>2 in " file " near line " start_line " (found " stderr_count " occurrences)"
+            }
+            if (stdout_count > 1) {
+                print "DUPLICATE >>> in " file " near line " start_line " (found " stdout_count " occurrences)"
+            }
+            if (stdin_count > 1) {
+                print "DUPLICATE <<< in " file " near line " start_line " (found " stdin_count " occurrences)"
+            }
+            if (exit_count > 1) {
+                print "DUPLICATE >>>= in " file " near line " start_line " (found " exit_count " occurrences)"
+            }
+        }
+    ' "$FILE")
+    
+    if [ -n "$FORMAT_CHECK" ]; then
+        FORMAT_VIOLATIONS="${FORMAT_VIOLATIONS}${FORMAT_CHECK}
+"
+    fi
+done
+
+if [ -n "$FORMAT_VIOLATIONS" ]; then
+    echo "========================================"
+    echo "PRE-COMMIT HOOK: SHELLTEST FORMAT ERRORS"
+    echo "========================================"
+    echo "$FORMAT_VIOLATIONS"
+    echo ""
+    echo "Why this matters: Shelltest Format 3 allows only ONE of each directive"
+    echo "(<<<, >>>, >>>2, >>>=) per test case. Multiple directives cause parse"
+    echo "errors that prevent the test from running at all."
+    echo ""
+    echo "Fix: Combine expectations into a single directive with a regex pattern."
+    echo "Example: >>>2 /pattern1.*pattern2|pattern2.*pattern1/"
+    echo ""
+    echo "Commit REJECTED. Please fix the violations and try again."
+    echo "========================================"
+    exit 1
+fi
+
 exit 0

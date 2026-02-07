@@ -18,7 +18,31 @@ command to run
 optional stdin input
 >>>
 expected stdout (literal text or /regex/)
+>>>2
+expected stderr (literal text or /regex/)
 >>>= expected_exit_code
+```
+
+**CRITICAL FORMAT RULE**: Each directive (`<<<`, `>>>`, `>>>2`, `>>>=`) can appear **at most once per test case**. Test cases are separated by blank lines. The `lint-tests` suite enforces this rule and will fail if you use duplicate directives.
+
+```batch
+# WRONG - Multiple >>>2 directives (parse error):
+command
+>>>2 /error 1/
+>>>2 /error 2/
+>>>= 1
+
+# CORRECT - Single >>>2 with regex alternation:
+command
+>>>2 /error 1|error 2/
+>>>= 1
+
+# CORRECT - Multi-line output with single >>> directive:
+command
+>>>
+line 1
+line 2
+>>>= 0
 ```
 
 ## Directory Naming Convention

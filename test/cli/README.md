@@ -42,6 +42,70 @@ Relative paths resolve at the time the command executes, so they work correctly 
 2. **Pre-commit hook** — Run `scripts\install-hooks.bat` to install a git hook that blocks commits containing these patterns
 3. **CI** — The lint test runs in continuous integration, catching violations before merge
 
+## Format Validation
+
+The `lint-tests` suite also validates **shelltest Format 3 syntax** to catch parse errors before test execution.
+
+### Format 3 Rules
+
+Each test case can have at most **one** of each directive:
+- **`<<<`** — stdin input (one per test case)
+- **`>>>`** — expected stdout (one per test case)
+- **`>>>2`** — expected stderr (one per test case)
+- **`>>>=`** — expected exit code (one per test case)
+
+Test cases are separated by blank lines.
+
+### Violations Caught
+
+**Critical (causes parse errors — test won't run):**
+
+1. **Multiple `>>>` in one test case** — Only one stdout expectation allowed
+2. **Multiple `>>>2` in one test case** — Only one stderr expectation allowed
+3. **Multiple `>>>=` in one test case** — Only one exit code expectation allowed
+4. **Multiple `<<<` in one test case** — Only one stdin block allowed
+
+### Example Violation
+
+```batch
+# WRONG - This test case has TWO >>>2 directives:
+command
+>>>2 /error pattern 1/
+>>>2 /error pattern 2/
+>>>= 1
+```
+
+**Result**: Shelltestrunner reports a generic parse error and the test never executes.
+
+### The Fix
+
+Combine expectations into a single directive using regex:
+
+```batch
+# CORRECT - One >>>2 directive with alternation:
+command
+>>>2 /error pattern 1|error pattern 2/
+>>>= 1
+```
+
+For multi-line output, use a multi-line literal or a regex that matches across newlines:
+
+```batch
+# CORRECT - One >>> with multiple lines:
+command
+>>>
+line 1
+line 2
+>>>= 0
+```
+
+### Enforcement
+
+Same as forbidden patterns:
+1. **`cabal test lint-tests`** — Parses and validates all `.test` files
+2. **Pre-commit hook** — Blocks commits with format violations
+3. **CI** — Runs in continuous integration
+
 ## Test Infrastructure
 
 ### Directory Naming

@@ -831,7 +831,7 @@ Interactive per-file conflict resolution:
 
 1. **Phantom-typed hashes**: `Hash (a :: HashAlgo)` — the compiler distinguishes MD5 from SHA256. Mixing algorithms is a compile error. The `DataKinds` extension is used per-module.
 
-2. **Unified metadata parser**: A single `bit/Internal/Metadata.hs` module handles all parsing and serialization, eliminating the class of bugs where multiple parsers handle edge cases differently.
+2. **Unified metadata parser and loader**: A single `bit/Internal/Metadata.hs` module handles all parsing and serialization, and `Bit/Verify.hs` provides unified metadata loading via the `MetadataSource` abstraction. This eliminates the class of bugs where multiple parsers or loaders handle edge cases differently. The `MetadataEntry` type forces callers to explicitly handle the binary vs. text file distinction, ensuring text files (whose git blobs may have normalized line endings) are not incorrectly hash-verified across sources.
 
 3. **`ReaderT BitEnv IO` (no free monad)**: The application monad is `ReaderT BitEnv IO`. A free monad effect system was considered (for testability and dry-run mode) but rejected as premature — no pure tests or dry-run usage existed to justify the complexity. Direct IO with `ReaderT` for environment threading is cleaner for now.
 
@@ -1011,7 +1011,7 @@ Interactive per-file conflict resolution:
 | `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
 | `bit/Plan.hs` | Pure plan: GitDiff → RcloneAction |
 | `bit/Pipeline.hs` | Composed pipeline: diffAndPlan, pushSyncFiles, pullSyncFiles |
-| `bit/Verify.hs` | Local and remote verification (parallelized); `verifyLocalAt` for filesystem remotes |
+| `bit/Verify.hs` | Local and remote verification (parallelized); unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
 | `bit/Fsck.hs` | Full integrity check (parallelized) |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
 | `bit/Remote/Scan.hs` | Remote file scanning via rclone |
@@ -1030,17 +1030,32 @@ Interactive per-file conflict resolution:
 
 ## Test Infrastructure
 
-### Lint Test Suite (Pattern Safety)
+### Lint Test Suite (Pattern Safety + Format Validation)
 
-**Purpose**: Prevent dangerous Windows environment variable patterns in test files that can cause commands to escape test sandboxes.
+**Purpose**: Prevent dangerous Windows environment variable patterns and shelltest format errors in test files.
 
-**Problem**: Windows expands environment variables like `%CD%` before command chains execute. Example:
+**Two Categories of Violations**:
+
+1. **Pattern Safety**: Dangerous Windows environment variables that can cause commands to escape test sandboxes
+2. **Format Validation**: Shelltest Format 3 syntax violations that cause parse errors and prevent tests from running
+
+**Problem 1 (Pattern Safety)**: Windows expands environment variables like `%CD%` before command chains execute. Example:
 ```batch
 cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
 ```
 If the `cd` fails, `%CD%` still expands to the current directory (potentially the main repo), causing `bit remote add` to modify the development repo's remote URL instead of the test repo's.
 
-**Solution**: Automated guards enforcing relative path usage.
+**Problem 2 (Format Validation)**: Shelltest Format 3 allows only one of each directive (`<<<`, `>>>`, `>>>2`, `>>>=`) per test case. Multiple directives cause parse errors that silently prevent tests from running. Example:
+```batch
+# WRONG - Two >>>2 directives:
+command
+>>>2 /error 1/
+>>>2 /error 2/
+>>>= 1
+```
+This causes a parse error and the test never executes, giving false confidence that the test is passing.
+
+**Solution**: Automated guards enforcing both relative path usage and shelltest format rules.
 
 #### Lint Test (Primary Guard)
 
@@ -1050,11 +1065,19 @@ If the `cd` fails, `%CD%` still expands to the current directory (potentially th
 
 **What it does**:
 - Recursively scans all `.test` files under `test/cli/`
-- Detects dangerous patterns (case-insensitive):
+- **Pattern Safety Checks** (case-insensitive):
   - `%CD%` — current directory, expands before command execution
   - `%~dp0` — batch script directory variable
   - `%USERPROFILE%`, `%APPDATA%`, `%HOMEDRIVE%`, `%HOMEPATH%` — user directory variables
-- Fails with detailed error showing file, line number, pattern, reason, and fix
+- **Format Validation Checks**:
+  - Parses test cases (separated by blank lines)
+  - Detects duplicate directives within a single test case:
+    - Multiple `<<<` (stdin)
+    - Multiple `>>>` (stdout)
+    - Multiple `>>>2` (stderr)
+    - Multiple `>>>=` (exit code)
+  - Distinguishes between new directives and multi-line continuation
+- Fails with detailed error showing file, line number, violation type, and fix
 - Runs as part of `cabal test` and CI
 
 **Example Output on Violation**:

@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Bit.Verify
   ( verifyLocal
@@ -9,6 +10,12 @@ module Bit.Verify
   , VerifyIssue(..)
   , loadMetadataIndex
   , loadMetadataFromBundle
+  , MetadataEntry(..)
+  , MetadataSource(..)
+  , loadMetadata
+  , entryPath
+  , binaryEntries
+  , allEntryPaths
   ) where
 
 import Data.Traversable (traverse)
@@ -23,7 +30,7 @@ import Data.Either (either)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Internal.Git as Git
-import Bit.Internal.Metadata (MetaContent(..), parseMetadata, readMetadataOrComputeHash, hashFile)
+import Bit.Internal.Metadata (MetaContent(..), parseMetadata, readMetadataOrComputeHash, hashFile, parseMetadataFile)
 import qualified Bit.Remote.Scan as Remote.Scan
 import qualified Bit.Remote
 import qualified Internal.Transport as Transport
@@ -44,6 +51,47 @@ data VerifyIssue
   | Missing Path                                      -- path (in metadata but no actual file)
   deriving (Show, Eq)
 
+-- | A metadata entry loaded from any source.
+-- Binary files have hash+size metadata that can be verified.
+-- Text files are known to exist but their hashes may not be reliably comparable
+-- across sources (git normalizes line endings in blobs).
+data MetadataEntry
+  = BinaryEntry Path (Hash 'MD5) Integer   -- ^ Hash-verifiable: path, hash, size
+  | TextEntry Path                          -- ^ Exists but not hash-comparable
+  deriving (Show, Eq)
+
+-- | Source for reading metadata entries.
+data MetadataSource
+  = FromFilesystem FilePath            -- ^ Read .bit/index/ directory on disk
+  | FromCommit String                  -- ^ Read from a git commit hash (e.g. refs/remotes/origin/main)
+  deriving (Show, Eq)
+
+-- | Extract path from any entry.
+entryPath :: MetadataEntry -> Path
+entryPath (BinaryEntry p _ _) = p
+entryPath (TextEntry p) = p
+
+-- | Extract verifiable (binary) entries only.
+binaryEntries :: [MetadataEntry] -> [(Path, Hash 'MD5, Integer)]
+binaryEntries = concatMap go
+  where go (BinaryEntry p h s) = [(p, h, s)]
+        go (TextEntry _) = []
+
+-- | Extract all known paths (binary + text).
+allEntryPaths :: [MetadataEntry] -> Set.Set Path
+allEntryPaths = Set.fromList . map entryPath
+
+-- | Filter to user files only (exclude .git internals and .gitignore).
+-- Used by BOTH filesystem and commit-tree paths.
+isUserFile :: FilePath -> Bool
+isUserFile path = not (isGitPath path) && path /= ".gitignore"
+
+-- | Resolve concurrency setting to a concrete bound.
+resolveConcurrency :: Concurrency -> IO Int
+resolveConcurrency Sequential = return 1
+resolveConcurrency (Parallel 0) = ioConcurrency
+resolveConcurrency (Parallel n) = return n
+
 -- | List all regular files under dir, with paths relative to baseDir.
 listFilesRecursive :: FilePath -> FilePath -> IO [FilePath]
 listFilesRecursive baseDir dir = do
@@ -60,30 +108,63 @@ listFilesRecursive baseDir dir = do
 isGitPath :: FilePath -> Bool
 isGitPath path = ".git" `isPrefixOf` normalise path || normalise path == ".git"
 
--- | Load all metadata from .rgit/index: list of (relative path, expected hash, expected size).
--- Handles both text files (content stored directly) and binary files (metadata stored).
-loadMetadataIndex :: FilePath -> Concurrency -> IO [(Path, Hash 'MD5, Integer)]
-loadMetadataIndex indexDir concurrency = do
+-- | Load metadata entries from any source.
+-- Handles file enumeration, parsing, and binary/text classification uniformly.
+loadMetadata :: MetadataSource -> Concurrency -> IO [MetadataEntry]
+loadMetadata (FromFilesystem indexDir) concurrency = do
   exists <- doesDirectoryExist indexDir
   if not exists
     then return []
     else do
       relPaths <- listFilesRecursive indexDir indexDir
-      -- Determine concurrency level
-      bound <- case concurrency of
-        Sequential -> return 1
-        Parallel 0 -> ioConcurrency  -- 0 means auto-detect
-        Parallel n -> return n
-      
-      -- Parallelize metadata reading (IO-bound: reading and parsing files)
-      pairs <- runConcurrently (Parallel bound) (\relPath -> do
-        let fullPath = indexDir </> relPath
-        mc <- readMetadataOrComputeHash fullPath
-        return $ case mc of
-          Just mc' -> [(relPath, metaHash mc', metaSize mc')]
-          Nothing -> []
-        ) relPaths
-      return (concat pairs)
+      let userPaths = filter isUserFile relPaths
+      bound <- resolveConcurrency concurrency
+      runConcurrently (Parallel bound) (readEntryFromFilesystem indexDir) userPaths
+
+loadMetadata (FromCommit commitHash) _concurrency = do
+  -- ls-tree at ROOT level (no prefix!) to enumerate all files
+  (code, out, _) <- readProcessWithExitCode "git"
+    [ "-C", bitIndexPath, "ls-tree", "-r", "--name-only", commitHash ] ""
+  if code /= ExitSuccess
+    then return []
+    else do
+      let paths = filter isUserFile $ filter (not . null) $ lines out
+      mapM (readEntryFromCommit commitHash) paths
+
+-- | Read a single metadata entry from a filesystem path.
+readEntryFromFilesystem :: FilePath -> FilePath -> IO MetadataEntry
+readEntryFromFilesystem indexDir relPath = do
+  let fullPath = indexDir </> relPath
+  mc <- readMetadataOrComputeHash fullPath
+  case mc of
+    Just (MetaContent { metaHash = h, metaSize = sz }) ->
+      -- Check if this was parsed as metadata (binary) or computed from content (text)
+      -- by trying parseMetadata on the raw content
+      parseMetadataFile fullPath >>= \case
+        Just _ -> return (BinaryEntry relPath h sz)   -- has hash:/size: format → binary
+        Nothing -> return (TextEntry relPath)          -- content IS the file → text
+    Nothing -> return (TextEntry relPath)  -- shouldn't happen, but safe fallback
+
+-- | Read a single metadata entry from a git commit tree.
+readEntryFromCommit :: String -> FilePath -> IO MetadataEntry
+readEntryFromCommit commitHash relPath = do
+  -- NOTE: path is at root level in the commit tree, NOT under index/
+  (code, content, _) <- readProcessWithExitCode "git"
+    [ "-C", bitIndexPath, "show", commitHash ++ ":" ++ relPath ] ""
+  if code /= ExitSuccess
+    then return (TextEntry relPath)
+    else case parseMetadata content of
+      Just (MetaContent { metaHash = h, metaSize = sz }) ->
+        return (BinaryEntry relPath h sz)
+      Nothing ->
+        return (TextEntry relPath)  -- text file: content IS the data, skip hash verify
+
+-- | Load all metadata from .rgit/index: list of (relative path, expected hash, expected size).
+-- Returns only binary entries as (path, hash, size) triples for backward compatibility.
+-- Callers that need text-file awareness should use loadMetadata directly.
+loadMetadataIndex :: FilePath -> Concurrency -> IO [(Path, Hash 'MD5, Integer)]
+loadMetadataIndex indexDir concurrency =
+  binaryEntries <$> loadMetadata (FromFilesystem indexDir) concurrency
 
 -- | Verify working tree at an arbitrary root path against metadata at that path.
 -- This is the core verification function used for both local and filesystem remote verification.
@@ -92,31 +173,43 @@ loadMetadataIndex indexDir concurrency = do
 verifyLocalAt :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
 verifyLocalAt root mCounter concurrency = do
   let indexDir = root </> ".bit/index"
-  meta <- loadMetadataIndex indexDir concurrency
+  entries <- loadMetadata (FromFilesystem indexDir) concurrency
   -- Filter out .git directory entries
-  let filteredMeta = filter (\(relPath, _, _) -> not (isGitPath relPath)) meta
+  let filteredEntries = filter (\entry -> not (isGitPath (entryPath entry))) entries
   
   -- Determine concurrency level
-  bound <- case concurrency of
-    Sequential -> return 1
-    Parallel 0 -> ioConcurrency  -- 0 means auto-detect
-    Parallel n -> return n
+  bound <- resolveConcurrency concurrency
   
   -- Parallelize verification (IO-bound: file reads and hashing)
-  issues <- runConcurrently (Parallel bound) (checkOne root) filteredMeta
-  return (length filteredMeta, concat issues)
+  issues <- runConcurrently (Parallel bound) (checkOne root indexDir) filteredEntries
+  return (length filteredEntries, concat issues)
   where
-    checkOne rootPath (relPath, expectedHash, expectedSize) = do
-      let actualPath = rootPath </> relPath
+    checkOne rootPath indexPath entry = do
+      let relPath = entryPath entry
+          actualPath = rootPath </> relPath
       exists <- doesFileExist actualPath
       result <- if not exists
         then return [Missing relPath]
-        else do
-          actualHash <- hashFile actualPath
-          actualSize <- fromIntegral . BS.length <$> BS.readFile actualPath
-          if actualHash == expectedHash && actualSize == expectedSize
-            then return []
-            else return [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
+        else case entry of
+          BinaryEntry _ expectedHash expectedSize -> do
+            actualHash <- hashFile actualPath
+            actualSize <- fromIntegral . BS.length <$> BS.readFile actualPath
+            if actualHash == expectedHash && actualSize == expectedSize
+              then return []
+              else return [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
+          TextEntry _ -> do
+            -- Text files: just verify they exist (already checked above)
+            -- Could optionally verify content matches index, but that's redundant
+            -- since the index content IS the file content for text files
+            actualHash <- hashFile actualPath
+            actualSize <- fromIntegral . BS.length <$> BS.readFile actualPath
+            -- For text files, we need to check against what's in the index
+            let indexFilePath = indexPath </> relPath
+            indexHash <- hashFile indexFilePath
+            indexSize <- fromIntegral . BS.length <$> BS.readFile indexFilePath
+            if actualHash == indexHash && actualSize == indexSize
+              then return []
+              else return [HashMismatch relPath (T.unpack (hashToText indexHash)) (T.unpack (hashToText actualHash)) indexSize actualSize]
       -- Increment counter after checking file (atomicModifyIORef' is thread-safe)
       maybe (return ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
       return result
@@ -150,43 +243,8 @@ loadMetadataFromBundle bundleName = do
       case filter (not . isSpace) out of
         [] -> return ([], Set.empty)
         headHash -> do
-          -- List all files in the commit tree (files are at root level)
-          (code2, out2, _) <- readProcessWithExitCode "git"
-            [ "-C", bitIndexPath
-            , "ls-tree"
-            , "-r"
-            , "--name-only"
-            , headHash
-            ] ""
-          if code2 /= ExitSuccess
-            then return ([], Set.empty)
-            else do
-              -- Filter out .git-related paths and .gitignore
-              let paths = filter isUserFile $ filter (not . null) $ lines out2
-                  allPaths = Set.fromList (map normalise paths)
-              -- Read each metadata file from the commit (only binary files return entries)
-              metaList <- mapM (readMetadataFromCommit headHash) paths
-              return (concat metaList, allPaths)
-  where
-    -- Only include user files, not git internal files
-    isUserFile path = not (isGitPath path) && path /= ".gitignore"
-
-    -- Read a metadata file from a specific commit.
-    -- Returns metadata entry only for binary files (where parseMetadata succeeds).
-    -- Text files return [] because their hashes can't be reliably compared
-    -- (git may normalize line endings, causing CRLF/LF mismatches).
-    readMetadataFromCommit :: String -> FilePath -> IO [(Path, Hash 'MD5, Integer)]
-    readMetadataFromCommit commitHash relPath = do
-      (code, content, _) <- readProcessWithExitCode "git"
-        [ "-C", bitIndexPath
-        , "show"
-        , commitHash ++ ":" ++ relPath
-        ] ""
-      if code /= ExitSuccess
-        then return []
-        else case parseMetadata content of
-          Just (MetaContent { metaHash = h, metaSize = sz }) -> return [(relPath, h, sz)]
-          Nothing -> return []  -- Text file: skip hash verification
+          entries <- loadMetadata (FromCommit headHash) Sequential
+          return (binaryEntries entries, allEntryPaths entries)
 
 -- | Verify remote files match remote metadata.
 -- Returns (number of files checked, list of issues).
