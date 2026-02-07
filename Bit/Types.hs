@@ -19,6 +19,7 @@ import Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import Data.Text (Text, unpack)
 import GHC.Generics (Generic)
 import Bit.Remote (Remote)
+import Data.IORef (IORef)
 
 type Path = String
 

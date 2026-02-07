@@ -98,6 +98,7 @@ import Prelude hiding (init, log)
 import Control.Exception (bracket)
 import qualified Bit.CopyProgress as CopyProgress
 import Bit.CopyProgress (SyncProgress)
+import Data.IORef (IORef, newIORef, writeIORef)
 import Data.IORef (writeIORef, newIORef, IORef, readIORef, atomicModifyIORef')
 import Control.Concurrent (forkIO, threadDelay, killThread)
 import Control.Exception (finally)
@@ -465,14 +466,15 @@ pull opts = withRemote $ \remote -> do
         Just (Device.TargetLocalPath _) -> liftIO $ filesystemPull cwd remote opts
         _ -> cloudPull remote opts  -- Cloud remote or no target info (use cloud flow)
 
--- | Pull from a cloud remote (original flow, unchanged).
+-- | Pull from a cloud remote (uses unified transport abstraction).
 cloudPull :: Remote -> PullOptions -> BitM ()
 cloudPull remote opts =
-    if pullAcceptRemote opts
-        then pullAcceptRemoteImpl remote
+    let transport = mkCloudTransport remote
+    in if pullAcceptRemote opts
+        then pullAcceptRemoteImpl transport remote
         else if pullManualMerge opts
             then pullManualMergeImpl remote
-            else pullWithCleanup remote opts
+            else pullWithCleanup transport remote opts
 
 fetch :: BitM ()
 fetch = withRemote $ \remote -> do
@@ -778,7 +780,14 @@ mergeContinue = do
                         liftIO $ putStrLn "Merge complete."
                         case mRemote of
                             Nothing -> return ()
-                            Just remote -> syncBinariesAfterMerge remote oldHead
+                            Just remote -> do
+                                -- Determine transport type based on remote
+                                mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
+                                let transport = case mTarget of
+                                      Just (Device.TargetDevice _ _) -> mkFilesystemTransport (remoteUrl remote)
+                                      Just (Device.TargetLocalPath _) -> mkFilesystemTransport (remoteUrl remote)
+                                      _ -> mkCloudTransport remote
+                                syncBinariesAfterMerge transport remote oldHead
                     else do
                         liftIO $ hPutStrLn stderr "error: no merge in progress."
                         liftIO $ exitWith (ExitFailure 1)
@@ -803,7 +812,14 @@ mergeContinue = do
 
                 case mRemote of
                     Nothing -> return ()
-                    Just remote -> syncBinariesAfterMerge remote oldHead
+                    Just remote -> do
+                        -- Determine transport type based on remote
+                        mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
+                        let transport = case mTarget of
+                              Just (Device.TargetDevice _ _) -> mkFilesystemTransport (remoteUrl remote)
+                              Just (Device.TargetLocalPath _) -> mkFilesystemTransport (remoteUrl remote)
+                              _ -> mkCloudTransport remote
+                        syncBinariesAfterMerge transport remote oldHead
 
 -- ============================================================================
 -- Internal helpers (not exported, moved from Commands.hs)
@@ -1193,6 +1209,64 @@ parseFilesystemDiffOutput = mapMaybe parseLine . lines
             | otherwise -> Nothing
         _ -> Nothing
 
+-- =============================================================================
+-- FILE TRANSPORT ABSTRACTION
+-- =============================================================================
+
+-- | Abstracts how files are transferred during pull.
+-- Cloud remotes use rclone; filesystem remotes use direct file copy.
+data FileTransport = FileTransport
+  { -- | Copy/download a single file to the working directory.
+    -- Args: cwd, relative path, progress tracker
+    transportDownloadFile :: FilePath -> FilePath -> SyncProgress -> IO ()
+    -- | Sync ALL files from remote to local (used for first pull when there's no oldHead to diff against).
+    -- Called after git checkout has updated the index, so files are listed from current HEAD.
+    -- Args: cwd
+  , transportSyncAllFiles :: FilePath -> IO ()
+  }
+
+-- | Build a cloud transport that uses rclone to copy files.
+mkCloudTransport :: Remote -> FileTransport
+mkCloudTransport remote = FileTransport
+  { transportDownloadFile = \cwd path _progress -> downloadOrCopyFromIndex cwd remote path
+  , transportSyncAllFiles = \cwd -> do
+      -- Cloud path uses the existing syncRemoteFilesToLocal logic
+      -- which scans remote via rclone and syncs to local.
+      localFiles <- Scan.scanWorkingDir cwd
+      remoteResult <- Remote.Scan.fetchRemoteFiles remote
+      case remoteResult of
+        Left _ -> hPutStrLn stderr "Error: Failed to fetch remote file list."
+        Right remoteFiles -> do
+          let actions = Pipeline.pullSyncFiles localFiles remoteFiles
+          putStrLn "--- Pulling changes from remote ---"
+          if null actions
+            then putStrLn "Working tree already up to date with remote."
+            else do
+              -- Create progress tracker for cloud operations (file-count only)
+              progress <- CopyProgress.newSyncProgress (length actions)
+              CopyProgress.withSyncProgressReporter progress $ do
+                -- Use lower concurrency for network/subprocess operations
+                caps <- getNumCapabilities
+                let concurrency = min 8 (max 2 (caps * 2))
+                void $ runConcurrentlyBounded concurrency (\a -> do
+                  executePullCommand cwd remote a
+                  CopyProgress.incrementFilesComplete progress
+                  ) actions
+  }
+
+-- | Build a filesystem transport that uses direct file copy.
+mkFilesystemTransport :: FilePath -> FileTransport
+mkFilesystemTransport remotePath = FileTransport
+  { transportDownloadFile = filesystemDownloadOrCopyFromIndex' remotePath
+  , transportSyncAllFiles = filesystemSyncRemoteFilesToLocal' remotePath
+  }
+  where
+    -- Wrapper that matches the signature expected by FileTransport
+    filesystemDownloadOrCopyFromIndex' remotePath cwd path progress =
+      filesystemDownloadOrCopyFromIndex cwd remotePath path progress
+    filesystemSyncRemoteFilesToLocal' remotePath cwd =
+      filesystemSyncRemoteFilesToLocalFromHEAD cwd remotePath
+
 -- | Fetch from a filesystem remote. Fetches commits without merging or syncing files.
 filesystemFetch :: FilePath -> Remote -> IO ()
 filesystemFetch cwd remote = do
@@ -1275,62 +1349,41 @@ filesystemPull cwd remote opts = do
                 hPutStrLn stderr "hint: Run 'bit push --force' to overwrite remote with local state."
                 exitWith (ExitFailure 1)
     
-    -- 4. Merge locally using existing logic
+    -- 4. Build transport and delegate to unified pull logic
+    let transport = mkFilesystemTransport remotePath
+    
+    -- Create a minimal BitEnv to call the shared logic
+    localFiles <- Scan.scanWorkingDir cwd
+    let env = BitEnv cwd localFiles (Just remote) False False (pullSkipVerify opts)
+    
+    -- Delegate to the unified path
     if pullAcceptRemote opts
-        then filesystemPullAcceptRemote cwd remotePath remoteHash
-        else filesystemPullNormal cwd remotePath remoteHash
+        then runBitM env (filesystemPullAcceptRemoteImpl transport remoteHash)
+        else runBitM env (filesystemPullLogicImpl transport remote remoteHash)
 
--- | Pull with --accept-remote for filesystem remotes.
-filesystemPullAcceptRemote :: FilePath -> FilePath -> String -> IO ()
-filesystemPullAcceptRemote cwd remotePath remoteHash = do
-    putStrLn "Accepting remote file state as truth..."
-    
-    -- Record current HEAD before checkout
-    oldHead <- getLocalHeadE
-    
-    -- Force-checkout the remote branch
-    checkoutCode <- Git.checkoutRemoteAsMain
-    if checkoutCode /= ExitSuccess
-        then do
-            hPutStrLn stderr "Error: Failed to checkout remote state."
-            exitWith (ExitFailure 1)
-        else do
-            -- Sync actual files based on what changed
-            case oldHead of
-                Just oh -> filesystemApplyMergeToWorkingDir cwd remotePath oh remoteHash
-                Nothing -> filesystemSyncRemoteFilesToLocal cwd remotePath remoteHash
-            
-            -- Update tracking ref
-            void $ Git.updateRemoteTrackingBranchToHash remoteHash
-            putStrLn "Pull with --accept-remote completed."
-
--- | Normal pull for filesystem remotes (with merge).
-filesystemPullNormal :: FilePath -> FilePath -> String -> IO ()
-filesystemPullNormal cwd remotePath remoteHash = do
-    oldHash <- getLocalHeadE
+-- | Filesystem pull logic (simplified - no bundle fetching, just merge + sync)
+filesystemPullLogicImpl :: FileTransport -> Remote -> String -> BitM ()
+filesystemPullLogicImpl transport remote remoteHash = do
+    cwd <- asks envCwd
+    oldHash <- lift getLocalHeadE
     
     case oldHash of
         Nothing -> do
-            -- First pull: just checkout remote
-            putStrLn $ "Checking out " ++ take 7 remoteHash ++ " (first pull)"
-            checkoutCode <- Git.checkoutRemoteAsMain
+            lift $ putStrLn $ "Checking out " ++ take 7 remoteHash ++ " (first pull)"
+            checkoutCode <- lift $ Git.checkoutRemoteAsMain
             if checkoutCode == ExitSuccess
                 then do
-                    filesystemSyncRemoteFilesToLocal cwd remotePath remoteHash
-                    putStrLn "Syncing binaries... done."
-                    -- Update tracking ref (Tracking Ref Invariant from spec)
-                    void $ Git.updateRemoteTrackingBranchToHash remoteHash
-                else do
-                    hPutStrLn stderr "Error: Failed to checkout remote branch."
-                    exitWith (ExitFailure 1)
+                    lift $ transportSyncAllFiles transport cwd
+                    lift $ putStrLn "Syncing binaries... done."
+                    lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
+                else lift $ hPutStrLn stderr "Error: Failed to checkout remote branch."
         
         Just localHash -> do
-            -- Subsequent pull: merge
-            (mergeCode, mergeOut, mergeErr) <- Git.runGitWithOutput 
+            (mergeCode, mergeOut, mergeErr) <- lift $ Git.runGitWithOutput 
                 ["merge", "--no-commit", "--no-ff", "refs/remotes/origin/main"]
             
             (finalMergeCode, finalMergeOut, finalMergeErr) <-
-                if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
+                lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
                 then do
                     putStrLn "Merging unrelated histories..."
                     Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
@@ -1338,50 +1391,73 @@ filesystemPullNormal cwd remotePath remoteHash = do
             
             if finalMergeCode == ExitSuccess
                 then do
-                    putStrLn $ "Updating " ++ take 7 localHash ++ ".." ++ take 7 remoteHash
-                    putStrLn "Merge made by the 'recursive' strategy."
-                    hasChanges <- hasStagedChangesE
-                    when hasChanges $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
-                    -- Use actual merged HEAD (not remoteHash) to avoid deleting local-only files
-                    mergedHead <- fromMaybe remoteHash <$> getLocalHeadE
-                    filesystemApplyMergeToWorkingDir cwd remotePath localHash mergedHead
-                    putStrLn "Syncing binaries... done."
-                    void $ Git.updateRemoteTrackingBranchToHash remoteHash
+                    lift $ putStrLn $ "Updating " ++ take 7 localHash ++ ".." ++ take 7 remoteHash
+                    lift $ putStrLn "Merge made by the 'recursive' strategy."
+                    hasChanges <- lift hasStagedChangesE
+                    when hasChanges $ lift $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
+                    -- CRITICAL: Always read actual HEAD after merge, never use remoteHash
+                    lift $ applyMergeToWorkingDir transport cwd localHash
+                    lift $ putStrLn "Syncing binaries... done."
+                    lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
                 else do
-                    putStrLn finalMergeOut
-                    hPutStrLn stderr finalMergeErr
-                    putStrLn "Automatic merge failed."
-                    putStrLn "bit requires you to pick a version for each conflict."
-                    putStrLn ""
-                    putStrLn "Resolving conflicts..."
+                    lift $ putStrLn finalMergeOut
+                    lift $ hPutStrLn stderr finalMergeErr
+                    lift $ putStrLn "Automatic merge failed."
+                    lift $ putStrLn "bit requires you to pick a version for each conflict."
+                    lift $ putStrLn ""
+                    lift $ putStrLn "Resolving conflicts..."
                     
-                    conflicts <- Conflict.getConflictedFilesE
-                    resolutions <- Conflict.resolveAll conflicts
+                    conflicts <- lift Conflict.getConflictedFilesE
+                    resolutions <- lift $ Conflict.resolveAll conflicts
                     let total = length resolutions
                     
-                    invalid <- Metadata.validateMetadataDir (cwd </> bitIndexPath)
+                    invalid <- lift $ Metadata.validateMetadataDir (cwd </> bitIndexPath)
                     unless (null invalid) $ do
-                        void $ Git.runGitRaw ["merge", "--abort"]
-                        hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."
-                        throwIO (userError "Invalid metadata")
+                        lift $ void $ Git.runGitRaw ["merge", "--abort"]
+                        lift $ hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."
+                        lift $ throwIO (userError "Invalid metadata")
                     
-                    conflictsNow <- Conflict.getConflictedFilesE
+                    conflictsNow <- lift Conflict.getConflictedFilesE
                     if null conflictsNow
                         then do
-                            void $ Git.runGitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
-                            putStrLn $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
-                            -- Use actual merged HEAD (not remoteHash) to avoid deleting local-only files
-                            mergedHead <- fromMaybe remoteHash <$> getLocalHeadE
-                            filesystemApplyMergeToWorkingDir cwd remotePath localHash mergedHead
-                            putStrLn "Syncing binaries... done."
-                            void $ Git.updateRemoteTrackingBranchToHash remoteHash
+                            lift $ void $ Git.runGitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
+                            lift $ putStrLn $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
+                            -- CRITICAL: Always read actual HEAD after merge, never use remoteHash
+                            lift $ applyMergeToWorkingDir transport cwd localHash
+                            lift $ putStrLn "Syncing binaries... done."
+                            lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
                         else return ()
 
--- | Sync all files from remote to local based on commit hash (first pull).
-filesystemSyncRemoteFilesToLocal :: FilePath -> FilePath -> String -> IO ()
-filesystemSyncRemoteFilesToLocal localRoot remotePath commitHash = do
+-- | Filesystem pull --accept-remote implementation
+filesystemPullAcceptRemoteImpl :: FileTransport -> String -> BitM ()
+filesystemPullAcceptRemoteImpl transport remoteHash = do
+    cwd <- asks envCwd
+    lift $ putStrLn "Accepting remote file state as truth..."
+    
+    -- Record current HEAD before checkout
+    oldHead <- lift getLocalHeadE
+    
+    -- Force-checkout the remote branch
+    checkoutCode <- lift Git.checkoutRemoteAsMain
+    if checkoutCode /= ExitSuccess
+        then lift $ hPutStrLn stderr "Error: Failed to checkout remote state."
+        else do
+            -- Sync actual files based on what changed
+            case oldHead of
+                Just oh -> lift $ applyMergeToWorkingDir transport cwd oh
+                Nothing -> lift $ transportSyncAllFiles transport cwd
+            
+            -- Update tracking ref
+            lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
+            lift $ putStrLn "Pull with --accept-remote completed."
+
+-- | Sync all files from remote to local using current HEAD (after checkout).
+-- This is called after git checkout has updated the index, so we list files from HEAD.
+filesystemSyncRemoteFilesToLocalFromHEAD :: FilePath -> FilePath -> IO ()
+filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
     let localIndex = localRoot </> ".bit" </> "index"
-    (code, out, _) <- Git.runGitWithOutput ["ls-tree", "-r", "--name-only", commitHash]
+    -- Use HEAD to list files (after checkout, HEAD points to the remote branch)
+    (code, out, _) <- Git.runGitWithOutput ["ls-tree", "-r", "--name-only", "HEAD"]
     when (code == ExitSuccess) $ do
         let paths = filter (not . null) (lines out)
         
@@ -1432,58 +1508,7 @@ filesystemSyncRemoteFilesToLocal localRoot remotePath commitHash = do
                             CopyProgress.incrementFilesComplete progress
                 ) fileInfo
 
--- | Apply merge changes to working directory for filesystem pull.
-filesystemApplyMergeToWorkingDir :: FilePath -> FilePath -> String -> String -> IO ()
-filesystemApplyMergeToWorkingDir localRoot remotePath oldHead newHead = do
-    changes <- Git.getDiffNameStatus oldHead newHead
-    putStrLn "--- Pulling changes from remote ---"
-    if null changes
-        then putStrLn "Working tree already up to date with remote."
-        else do
-            -- First pass: collect paths that will be copied and their sizes
-            filesToCopy <- fmap concat $ forM changes $ \(status, path, mNewPath) -> case status of
-                'A' -> return [path]
-                'M' -> return [path]
-                'R' -> return (maybe [] (\p -> [p]) mNewPath)
-                _ -> return []
-            
-            -- Gather file sizes for binary files
-            fileInfo <- forM filesToCopy $ \path -> do
-                fromIndex <- isTextFileInIndex localRoot path
-                if fromIndex
-                    then return (path, True, 0)
-                    else do
-                        let srcPath = remotePath </> path
-                        srcExists <- Dir.doesFileExist srcPath
-                        if srcExists
-                            then do
-                                size <- Dir.getFileSize srcPath
-                                return (path, False, fromIntegral size)
-                            else return (path, False, 0)
-            
-            let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
-                totalBytes = sum [s | (_, s) <- binaryFiles]
-            
-            -- Create progress tracker
-            progress <- CopyProgress.newSyncProgress (length binaryFiles)
-            writeIORef (CopyProgress.spBytesTotal progress) totalBytes
-            
-            -- Second pass: apply changes with progress (parallelized)
-            CopyProgress.withSyncProgressReporter progress $ do
-                -- Use lower concurrency for file copies to avoid disk thrashing
-                caps <- getNumCapabilities
-                let concurrency = max 2 (caps * 2)
-                void $ runConcurrentlyBounded concurrency (\(status, path, mNewPath) -> case status of
-                    'A' -> filesystemDownloadOrCopyFromIndex localRoot remotePath path progress
-                    'M' -> filesystemDownloadOrCopyFromIndex localRoot remotePath path progress
-                    'D' -> safeDeleteWorkFile localRoot path
-                    'R' -> case mNewPath of
-                        Just newPath -> do
-                            safeDeleteWorkFile localRoot path
-                            filesystemDownloadOrCopyFromIndex localRoot remotePath newPath progress
-                        Nothing -> return ()
-                    _ -> return ()
-                    ) changes
+-- filesystemApplyMergeToWorkingDir was removed - now using unified applyMergeToWorkingDir with FileTransport
 
 -- | Download a file from remote or copy from index for filesystem pull.
 filesystemDownloadOrCopyFromIndex :: FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
@@ -1755,12 +1780,15 @@ syncRemoteFilesToLocal = withRemote $ \remote -> do
                             ) actions
 
 -- | Sync binaries after a successful merge commit
-syncBinariesAfterMerge :: Remote -> Maybe String -> BitM ()
-syncBinariesAfterMerge remote oldHead = do
+syncBinariesAfterMerge :: FileTransport -> Remote -> Maybe String -> BitM ()
+syncBinariesAfterMerge transport remote oldHead = do
+    cwd <- asks envCwd
     liftIO $ putStrLn "Syncing binaries... done."
     case oldHead of
-        Just oh -> applyMergeToWorkingDir remote oh
-        Nothing -> syncRemoteFilesToLocal  -- fallback
+        Just oh -> liftIO $ applyMergeToWorkingDir transport cwd oh
+        Nothing -> do
+            -- Fallback: use transportSyncAllFiles (syncs from current HEAD)
+            liftIO $ transportSyncAllFiles transport cwd
     maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
     case maybeRemoteHash of
         Just rHash -> liftIO $ void $ Git.updateRemoteTrackingBranchToHash rHash
@@ -1770,34 +1798,64 @@ syncBinariesAfterMerge remote oldHead = do
 -- Uses `git diff --name-status oldHead newHead` to determine what changed,
 -- then downloads/deletes/moves actual files accordingly.
 -- This replaces syncRemoteFilesToLocal for merge pulls.
-applyMergeToWorkingDir :: Remote -> String -> BitM ()
-applyMergeToWorkingDir remote oldHead = do
-    cwd <- asks envCwd
-    newHead <- liftIO getLocalHeadE
+--
+-- CRITICAL: Always reads the actual HEAD after merge from git (via getLocalHeadE).
+-- Never accepts newHead as a parameter - this prevents the bug where remoteHash
+-- was passed instead of the merged HEAD, causing local-only files to appear deleted.
+applyMergeToWorkingDir :: FileTransport -> FilePath -> String -> IO ()
+applyMergeToWorkingDir transport cwd oldHead = do
+    newHead <- getLocalHeadE
     case newHead of
         Nothing -> return ()  -- shouldn't happen after merge commit
         Just newH -> do
-            changes <- liftIO $ Git.getDiffNameStatus oldHead newH
-            liftIO $ putStrLn "--- Pulling changes from remote ---"
+            changes <- Git.getDiffNameStatus oldHead newH
+            putStrLn "--- Pulling changes from remote ---"
             if null changes
-                then liftIO $ putStrLn "Working tree already up to date with remote."
+                then putStrLn "Working tree already up to date with remote."
                 else do
-                    -- Use lower concurrency for network/subprocess operations
-                    caps <- liftIO getNumCapabilities
-                    let concurrency = min 8 (max 2 (caps * 2))
-                    void $ liftIO $ runConcurrentlyBounded concurrency (\(status, path, mNewPath) -> case status of
-                        'A' -> downloadOrCopyFromIndex cwd remote path
-                        'M' -> downloadOrCopyFromIndex cwd remote path
-                        'D' -> safeDeleteWorkFile cwd path
-                        'R' -> case mNewPath of
-                            Just newPath -> do
-                                safeDeleteWorkFile cwd path
-                                downloadOrCopyFromIndex cwd remote newPath
-                            Nothing -> return ()
-                        _ -> return ()  -- ignore unknown statuses
-                        ) changes
+                    -- First pass: collect paths that will be copied and their sizes
+                    filesToCopy <- fmap concat $ forM changes $ \(status, path, mNewPath) -> case status of
+                        'A' -> return [path]
+                        'M' -> return [path]
+                        'R' -> return (maybe [] (\p -> [p]) mNewPath)
+                        _ -> return []
+                    
+                    -- Gather file sizes for binary files (for progress tracking)
+                    fileInfo <- forM filesToCopy $ \path -> do
+                        fromIndex <- isTextFileInIndex cwd path
+                        if fromIndex
+                            then return (path, True, 0)
+                            else do
+                                -- Binary file: try to get size for progress
+                                -- (size might not be available yet, that's ok)
+                                let destPath = cwd </> path
+                                return (path, False, 0)  -- Size will be tracked during copy
+                    
+                    let binaryFiles = [(p, s) | (p, False, s) <- fileInfo]
+                        totalFiles = length binaryFiles
+                    
+                    -- Create progress tracker
+                    progress <- CopyProgress.newSyncProgress totalFiles
+                    
+                    -- Second pass: apply changes with progress (parallelized)
+                    CopyProgress.withSyncProgressReporter progress $ do
+                        -- Use lower concurrency for file operations to avoid thrashing
+                        caps <- getNumCapabilities
+                        let concurrency = max 2 (caps * 2)
+                        void $ runConcurrentlyBounded concurrency (\(status, path, mNewPath) -> case status of
+                            'A' -> transportDownloadFile transport cwd path progress
+                            'M' -> transportDownloadFile transport cwd path progress
+                            'D' -> safeDeleteWorkFile cwd path
+                            'R' -> case mNewPath of
+                                Just newPath -> do
+                                    safeDeleteWorkFile cwd path
+                                    transportDownloadFile transport cwd newPath progress
+                                Nothing -> return ()
+                            _ -> return ()
+                            ) changes
 
 -- | Download a file from remote, or copy from index if it's a text file.
+-- Used by cloud transport.
 downloadOrCopyFromIndex :: FilePath -> Remote -> FilePath -> IO ()
 downloadOrCopyFromIndex cwd remote path = do
     fromIndex <- isTextFileInIndex cwd path
@@ -1917,12 +1975,10 @@ saveFetchedBundle remote (Just bPath) = do
 
 -- | Full pull with conflict resolution. Uses bracket_ to abort merge on exception (e.g. Ctrl+C).
 
--- | Pull with --accept-remote: accept remote file state as truth.
--- Scans actual remote files, updates local metadata to match, syncs files, and commits.
 -- | Pull with --accept-remote: force-checkout the remote branch, then sync files.
 -- Git manages .bit/index/ (the metadata); we only sync actual files to the working tree.
-pullAcceptRemoteImpl :: Remote -> BitM ()
-pullAcceptRemoteImpl remote = do
+pullAcceptRemoteImpl :: FileTransport -> Remote -> BitM ()
+pullAcceptRemoteImpl transport remote = do
     cwd <- asks envCwd
     lift $ tell "Accepting remote file state as truth..."
 
@@ -1945,9 +2001,11 @@ pullAcceptRemoteImpl remote = do
                 then lift $ tellErr "Error: Failed to checkout remote state."
                 else do
                     -- 4. Sync actual files to working tree based on what changed in git
+                    (remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
+                    let newHash = takeWhile (/= '\n') remoteOut
                     case oldHead of
-                        Just oh -> applyMergeToWorkingDir remote oh
-                        Nothing -> syncRemoteFilesToLocal  -- First time, no diff available
+                        Just oh -> lift $ applyMergeToWorkingDir transport cwd oh
+                        Nothing -> lift $ transportSyncAllFiles transport cwd  -- First time, no diff available
 
                     -- 5. Update tracking ref
                     maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
@@ -1992,7 +2050,8 @@ pullManualMergeImpl remote = do
                     if null divergentFiles
                         then do
                             lift $ tell "No remote divergence detected. Proceeding with normal pull..."
-                            pullWithCleanup remote defaultPullOptions
+                            let transport = mkCloudTransport remote
+                            pullWithCleanup transport remote defaultPullOptions
                         else do
                             oldHash <- lift getLocalHeadE
                             (remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
@@ -2085,10 +2144,10 @@ printConflictList divergentFiles remoteFileMap remoteMetaMap localMetaMap = do
     putStrLn "  - A partial push from another client"
     putStrLn "  - Remote storage corruption"
 
-pullWithCleanup :: Remote -> PullOptions -> BitM ()
-pullWithCleanup remote opts = do
+pullWithCleanup :: FileTransport -> Remote -> PullOptions -> BitM ()
+pullWithCleanup transport remote opts = do
     env <- asks id
-    result <- liftIO $ try @SomeException (runBitM env (pullLogic remote opts))
+    result <- liftIO $ try @SomeException (runBitM env (pullLogic transport remote opts))
     case result of
         Left ex -> do
             inProgress <- lift $ Git.isMergeInProgress
@@ -2099,8 +2158,8 @@ pullWithCleanup remote opts = do
                 else lift $ throwIO ex
         Right _ -> return ()
 
-pullLogic :: Remote -> PullOptions -> BitM ()
-pullLogic remote opts = do
+pullLogic :: FileTransport -> Remote -> PullOptions -> BitM ()
+pullLogic transport remote opts = do
     cwd <- asks envCwd
     maybeBundlePath <- lift $ fetchRemoteBundle remote
     case maybeBundlePath of
@@ -2135,7 +2194,7 @@ pullLogic remote opts = do
                     checkoutCode <- lift $ Git.checkoutRemoteAsMain
                     if checkoutCode == ExitSuccess
                         then do
-                            syncRemoteFilesToLocal
+                            lift $ transportSyncAllFiles transport cwd
                             lift $ tell "Syncing binaries... done."
                         else lift $ tellErr "Error: Failed to checkout remote branch."
 
@@ -2153,7 +2212,7 @@ pullLogic remote opts = do
                         lift $ tell "Merge made by the 'recursive' strategy."
                         hasChanges <- lift hasStagedChangesE
                         when hasChanges $ lift $ void $ gitRaw ["commit", "-m", "Merge remote"]
-                        applyMergeToWorkingDir remote localHead
+                        lift $ applyMergeToWorkingDir transport cwd localHead
                         lift $ tell "Syncing binaries... done."
                         maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
                         case maybeRemoteHash of
@@ -2190,7 +2249,7 @@ pullLogic remote opts = do
                                 tell $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
                             -- After auto-resolution, files are already in correct state (we chose local/remote versions)
                             -- Still need to sync any files that changed on remote but weren't in conflict
-                            applyMergeToWorkingDir remote localHead
+                            lift $ applyMergeToWorkingDir transport cwd localHead
                             lift $ tell "Syncing binaries... done."
                             maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
                             case maybeRemoteHash of
