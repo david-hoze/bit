@@ -8,10 +8,7 @@ executable bit
         -threaded
         -rtsopts
         -with-rtsopts=-N
-        -- -Wall
-        -- -Wunused-imports
-        -- -Widentities
-        -- -Wincomplete-patterns
+        -Wall
     other-modules:    Bit.AtomicWrite,
                       Bit.Commands,
                       Bit.Concurrency,
