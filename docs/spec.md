@@ -356,6 +356,11 @@ past the merge).
 | `bit merge --continue` | `git merge --continue` | Continue after conflict resolution |
 | `bit merge --abort` | `git merge --abort` | Abort current merge |
 | `bit branch --unset-upstream` | `git branch --unset-upstream` | Remove tracking config |
+| `bit @<remote> init` | — | Scan remote and build metadata workspace |
+| `bit @<remote> add <path>` | — | Stage files in remote workspace |
+| `bit @<remote> commit -m <msg>` | — | Commit and push metadata bundle to remote |
+| `bit @<remote> status` | — | Show remote workspace status |
+| `bit @<remote> log` | — | Show remote workspace history |
 
 ---
 
@@ -526,6 +531,143 @@ error: refusing to update checked-out branch: refs/heads/main
 ```
 
 The correct approach: Have the remote **fetch** from local, then **merge --ff-only**. This is what filesystem push does.
+
+---
+
+## Remote-Targeted Commands (`@<remote>` Syntax)
+
+### Problem Statement
+
+When a user has large amounts of data already on a remote (e.g., 10GB of files on Google Drive), the traditional workflow requires:
+1. Download everything locally (expensive, time-consuming)
+2. Run `bit init`, `bit add`, `bit commit` locally
+3. Push everything back to the remote (redundant upload)
+
+This is wasteful when the files are already at the destination. The user wants to **create metadata for files already on the remote** without downloading them.
+
+### Solution: Remote Workspaces
+
+The `@<remote>` syntax allows commands to operate against a remote as if it were a working directory, while only downloading small files (for text classification). Large binary files stay on the remote — bit just reads their hashes from `rclone lsjson --hash`.
+
+### User Workflow
+
+```bash
+# Files already exist on gdrive:Projects/footage (10GB of video + some .txt/.md)
+bit init                                    # local repo (empty working dir)
+bit remote add origin gdrive:Projects/footage
+
+bit @origin init                            # scan remote, build metadata workspace
+bit @origin add .                           # stage all files
+bit @origin commit -m "Initial commit"      # commit metadata, push bundle to remote
+
+bit pull                                    # pull metadata locally (instant — just the bundle)
+# Working dir is still empty, but bit knows about all 847 files
+# User can then selectively download, or bit pull will sync everything
+```
+
+### Architecture
+
+#### The `@<remote>` Prefix
+
+`@<remote>` is parsed in `Commands.hs` before command dispatch. When present, it switches the execution context from "local working directory" to "remote-targeted workspace."
+
+The remote name after `@` is resolved via the existing `resolveRemote` function, same as named remotes for push/pull.
+
+#### Remote Workspace Structure
+
+A remote workspace is a temporary `.bit/index` built from the remote's actual file state. It lives at `.bit/remote-workspaces/<remote-name>/` inside the local repo:
+
+```
+.bit/
+├── index/              ← local metadata (normal)
+├── remote-workspaces/
+│   └── origin/         ← remote-targeted workspace
+│       ├── .git/       ← git repo for this workspace
+│       └── <metadata>  ← files mirroring remote structure
+```
+
+#### Text File Classification Without Full Download
+
+The `rclone lsjson --hash` scan returns hashes for all files, but `fIsText = False` for everything (rclone can't classify text without reading content). bit's text classification needs:
+1. File size (available from rclone scan)
+2. File extension (available from path)
+3. First 8KB of content (for NULL-byte and UTF-8 checks)
+
+Strategy:
+- Files above `textSizeLimit` (default 1MB) → binary, no download needed
+- Files with `binaryExtensions` (`.mp4`, `.zip`, etc.) → binary, no download needed
+- Remaining small files → download to temp dir, classify with existing `hashAndClassifyFile`
+
+For a typical 10GB media repo, this downloads maybe 50KB of text files while skipping the 10GB of video.
+
+### Supported Commands
+
+| Command | Behavior |
+|---------|----------|
+| `bit @<remote> init` | Scan remote, classify files, build metadata workspace |
+| `bit @<remote> add <path>` | Stage files in remote workspace (git add in workspace) |
+| `bit @<remote> commit -m <msg>` | Commit workspace metadata, create bundle, push to remote |
+| `bit @<remote> status` | Show remote workspace status (git status in workspace) |
+| `bit @<remote> log` | Show remote workspace history (git log in workspace) |
+
+All other commands are not supported in remote context (e.g., `bit @origin push` will error).
+
+### Implementation Details
+
+#### 1. `bit @origin init`
+
+Located in `Bit.RemoteWorkspace.initRemoteWorkspace`:
+
+1. Creates workspace directory structure at `.bit/remote-workspaces/<remote>/`
+2. Runs `rclone lsjson --hash --recursive` on the remote (via `fetchRemoteFiles`)
+3. Partitions files into "definitely binary" (by size/extension) and "maybe text" (candidates)
+4. Downloads text candidates to a temp directory via rclone
+5. Classifies downloaded files using existing `hashAndClassifyFile`
+6. For text files: downloads actual content to workspace
+7. For binary files: writes hash+size metadata
+8. Initializes a git repo in the workspace (`git init --initial-branch=main`)
+
+#### 2. `bit @origin add/commit/status/log`
+
+These commands operate on the remote workspace git repository:
+
+- `bit @origin add .` → `git -C .bit/remote-workspaces/origin add .`
+- `bit @origin commit -m "msg"` → `git -C .bit/remote-workspaces/origin commit -m "msg"` + create bundle + push to remote
+- `bit @origin status` → `git -C .bit/remote-workspaces/origin status`
+- `bit @origin log` → `git -C .bit/remote-workspaces/origin log`
+
+On commit, the workspace commits its metadata, then:
+1. Creates a git bundle at `.bit/remote-workspaces/origin/.git/bit.bundle`
+2. Uploads the bundle to the remote at `.bit/bit.bundle` via `rclone copyto`
+3. Cleans up the local bundle file
+
+The remote now has a `.bit/bit.bundle` that can be fetched via normal `bit pull`.
+
+### Integration with Normal Pull
+
+After `bit @origin commit`, the remote has a bundle at `.bit/bit.bundle`. A local `bit pull` will:
+1. Fetch the bundle (existing `fetchBundle` logic)
+2. Import it to local `.bit/index/.git/`
+3. Merge the metadata
+4. Sync files as needed (download from remote or copy from index)
+
+The existing pull flow handles this transparently.
+
+### Edge Cases
+
+- **Workspace already exists**: Error with instructions (delete workspace or use `status`)
+- **Remote is empty**: `fetchRemoteFiles` returns `[]`, workspace created but empty
+- **Network failure during classification**: Failed downloads treated as binary, warning printed
+- **Filesystem remotes**: `@<remote>` works for filesystem remotes too, though less useful (user could just `cd` there)
+- **Multiple `@origin init` calls**: Error on second call, user must delete workspace first
+
+### Limitations
+
+This feature does NOT provide:
+- **Selective file download** — that's a separate feature (sparse working tree). After `bit pull`, all files are expected locally.
+- **Incremental remote re-scan** — `bit @origin init` always scans from scratch.
+- **`bit @origin push`** — pushing *to* a remote workspace doesn't make sense. Push targets the actual remote.
+- **Conflict resolution in remote context** — not needed. The workspace is single-writer (the local user).
 
 ---
 

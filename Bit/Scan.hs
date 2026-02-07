@@ -9,6 +9,8 @@ module Bit.Scan
   , readMetadataFile
   , listMetadataPaths
   , getFileHashAndSize
+  , hashAndClassifyFile
+  , binaryExtensions
   , FileEntry(..)
   , EntryKind(..)
   ) where

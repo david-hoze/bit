@@ -29,6 +29,7 @@ executable bit
                       Bit.Pipeline,
                       Bit.Remote,
                       Bit.Remote.Scan,
+                      Bit.RemoteWorkspace,
                       Bit.Scan,
                       Bit.Types,
                       Bit.Verify,

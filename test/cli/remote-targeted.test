@@ -1,0 +1,199 @@
+# =============================================================================
+# Remote-Targeted Commands Test
+#
+# Tests the @<remote> syntax for operating on remote repositories without
+# downloading large files. Verifies scanning, staging, committing, and status.
+# Prerequisites: filesystem remote support
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work_rmt_a 2>nul & rmdir /s /q test\cli\fs_remote_rmt 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP - Create a filesystem remote with test files
+# ======================================================================
+
+# ---- Create remote directory with test files ----
+mkdir test\cli\fs_remote_rmt
+<<<
+>>>
+>>>= 0
+
+# ---- Create some text files in the remote ----
+echo Text file 1 > test\cli\fs_remote_rmt\file1.txt
+<<<
+>>>
+>>>= 0
+
+echo Text file 2 > test\cli\fs_remote_rmt\file2.md
+<<<
+>>>
+>>>= 0
+
+# ---- Create a subdirectory with files ----
+mkdir test\cli\fs_remote_rmt\subdir
+<<<
+>>>
+>>>= 0
+
+echo Subdir text > test\cli\fs_remote_rmt\subdir\file3.txt
+<<<
+>>>
+>>>= 0
+
+# ---- Create a binary file (simulated) ----
+echo Binary content > test\cli\fs_remote_rmt\data.bin
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 2: INIT LOCAL REPO AND ADD REMOTE
+# ======================================================================
+
+# ---- Create local repo ----
+mkdir test\cli\work_rmt_a
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_rmt_a & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Add filesystem remote ----
+cd test\cli\work_rmt_a & bit remote add origin ..\fs_remote_rmt
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: TEST REMOTE-TARGETED INIT
+# ======================================================================
+
+# ---- Test @origin init - scan the remote and build metadata workspace ----
+cd test\cli\work_rmt_a & bit @origin init
+<<<
+>>> /Scanning remote/
+>>>= 0
+
+# ---- Verify workspace was created ----
+cd test\cli\work_rmt_a & if exist .bit\remote-workspaces\origin\.git echo workspace exists
+<<<
+>>>
+workspace exists
+>>>= 0
+
+# ---- Test error: workspace already exists ----
+cd test\cli\work_rmt_a & bit @origin init
+<<<
+>>>2 /already exists/
+>>>= 1
+
+# ======================================================================
+# SECTION 4: TEST REMOTE-TARGETED ADD
+# ======================================================================
+
+# ---- Stage all files in remote workspace ----
+cd test\cli\work_rmt_a & bit @origin add .
+<<<
+>>>
+>>>= 0
+
+# ---- Test error: add without init ----
+cd test\cli\work_rmt_a & bit @nonexistent add .
+<<<
+>>>2 /not found/
+>>>= 1
+
+# ======================================================================
+# SECTION 5: TEST REMOTE-TARGETED STATUS
+# ======================================================================
+
+# ---- Check status of remote workspace ----
+cd test\cli\work_rmt_a & bit @origin status
+<<<
+>>> /Changes to be committed|new file/
+>>>= 0
+
+# ======================================================================
+# SECTION 6: TEST REMOTE-TARGETED COMMIT
+# ======================================================================
+
+# ---- Commit in remote workspace (creates bundle and pushes it) ----
+cd test\cli\work_rmt_a & bit @origin commit -m "Initial commit from remote scan"
+<<<
+>>> /Pushing.*bundle|Remote is now a bit repository/
+>>>= 0
+
+# ---- Verify bundle was created on remote ----
+cd test\cli\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
+<<<
+>>>
+bundle exists
+>>>= 0
+
+# ---- Test status after commit (should be clean) ----
+cd test\cli\work_rmt_a & bit @origin status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 7: TEST REMOTE-TARGETED LOG
+# ======================================================================
+
+# ---- View commit history in remote workspace ----
+cd test\cli\work_rmt_a & bit @origin log --oneline
+<<<
+>>> /Initial commit from remote scan/
+>>>= 0
+
+# ======================================================================
+# SECTION 8: TEST ERROR CASES
+# ======================================================================
+
+# ---- Test unsupported command in remote context ----
+cd test\cli\work_rmt_a & bit @origin push
+<<<
+>>>2 /not supported in remote context/
+>>>= 1
+
+# ---- Test with non-existent remote ----
+cd test\cli\work_rmt_a & bit @fake init
+<<<
+>>>2 /remote.*not found/
+>>>= 1
+
+# ---- Test @remote commands without a bit repository ----
+mkdir test\cli\work_rmt_a\notrepo
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_rmt_a\notrepo & bit @origin init
+<<<
+>>>2 /not a bit repository/
+>>>= 1
+
+# ======================================================================
+# SECTION 9: VERIFY BUNDLE ON REMOTE
+# ======================================================================
+
+# Note: Full pull integration test would go here.
+# The bundle exists on the remote and can be fetched separately.
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\work_rmt_a 2>nul & rmdir /s /q test\cli\fs_remote_rmt 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Bit.Commands (run) where
 
@@ -8,13 +9,19 @@ import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
 import Bit.Remote (getDefaultRemote, resolveRemote)
 import Bit.Utils (atomicWriteFileStr)
 import Bit.Concurrency (Concurrency(..))
+import qualified Bit.RemoteWorkspace as RemoteWorkspace
 import System.Environment (getArgs)
 import System.Exit (ExitCode(..), exitWith)
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
+import System.Process (rawSystem)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
 import qualified Internal.Git as Git
+import qualified Internal.Transport as Transport
+import Data.List (isPrefixOf)
+import Control.Exception (catch)
+import System.IO.Error (IOError)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -53,8 +60,99 @@ run = do
             , "  fsck                           Full integrity check"
             , "  merge --continue|--abort       Continue or abort merge"
             , "  branch --unset-upstream        Unset upstream tracking"
+            , ""
+            , "Remote-targeted commands:"
+            , "  @<remote> init                 Scan remote and build metadata workspace"
+            , "  @<remote> add <path>           Stage files in remote workspace"
+            , "  @<remote> commit -m <msg>      Commit and push metadata bundle to remote"
+            , "  @<remote> status               Show remote workspace status"
+            , "  @<remote> log                  Show remote workspace history"
             ]
-        _  -> runCommand args
+        _  -> do
+            -- Check for @<remote> prefix
+            let (mRemoteTarget, remainingArgs) = extractRemoteTarget args
+            case mRemoteTarget of
+                Nothing -> runCommand remainingArgs       -- normal local execution
+                Just remoteName -> runRemoteCommand remoteName remainingArgs
+
+-- | Extract @<remote> from args. Returns (Just remoteName, rest) or (Nothing, args).
+extractRemoteTarget :: [String] -> (Maybe String, [String])
+extractRemoteTarget [] = (Nothing, [])
+extractRemoteTarget (arg:rest)
+    | "@" `isPrefixOf` arg && length arg > 1 = (Just (drop 1 arg), rest)
+    | otherwise = (Nothing, arg:rest)
+
+-- | Execute a command in the context of a remote workspace
+runRemoteCommand :: String -> [String] -> IO ()
+runRemoteCommand remoteName args = do
+    cwd <- Dir.getCurrentDirectory
+    bitExists <- Dir.doesDirectoryExist (cwd </> ".bit")
+    unless bitExists $ do
+        hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
+        exitWith (ExitFailure 1)
+
+    -- Resolve the remote
+    mRemote <- resolveRemote cwd remoteName
+    case mRemote of
+        Nothing -> do
+            hPutStrLn stderr $ "fatal: remote '" ++ remoteName ++ "' not found."
+            exitWith (ExitFailure 1)
+        Just remote -> do
+            let wsPath = RemoteWorkspace.remoteWorkspacePath cwd remoteName
+
+            case args of
+                ["init"] ->
+                    RemoteWorkspace.initRemoteWorkspace cwd remote remoteName
+
+                ("add":paths) -> do
+                    -- Stage files in the remote workspace git repo
+                    wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
+                    unless wsExists $ do
+                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit @" ++ remoteName ++ " init' first."
+                        exitWith (ExitFailure 1)
+                    -- git add in the workspace
+                    code <- rawSystem "git" (["-C", wsPath, "add"] ++ paths)
+                    exitWith code
+
+                ("commit":commitArgs) -> do
+                    wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
+                    unless wsExists $ do
+                        hPutStrLn stderr $ "fatal: remote workspace not initialized."
+                        exitWith (ExitFailure 1)
+                    -- git commit in the workspace
+                    code <- rawSystem "git" (["-C", wsPath, "commit"] ++ commitArgs)
+                    when (code == ExitSuccess) $ do
+                        -- Create bundle and push to remote
+                        putStrLn "Pushing metadata bundle to remote..."
+                        let bundlePath = wsPath </> ".git" </> "bit.bundle"
+                        bCode <- rawSystem "git" ["-C", wsPath, "bundle", "create", bundlePath, "main"]
+                        when (bCode == ExitSuccess) $ do
+                            rCode <- Transport.copyToRemote bundlePath remote ".bit/bit.bundle"
+                            if rCode == ExitSuccess
+                                then putStrLn "Remote is now a bit repository."
+                                else hPutStrLn stderr "Error uploading bundle to remote."
+                            -- Cleanup bundle
+                            Dir.removeFile bundlePath `catch` (\(_ :: IOError) -> return ())
+                    exitWith code
+
+                ("status":rest) -> do
+                    wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
+                    unless wsExists $ do
+                        hPutStrLn stderr $ "fatal: remote workspace not initialized."
+                        exitWith (ExitFailure 1)
+                    void $ rawSystem "git" (["-C", wsPath, "status"] ++ rest)
+
+                ("log":rest) -> do
+                    wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
+                    unless wsExists $ do
+                        hPutStrLn stderr $ "fatal: remote workspace not initialized."
+                        exitWith (ExitFailure 1)
+                    void $ rawSystem "git" (["-C", wsPath, "log"] ++ rest)
+
+                _ -> do
+                    hPutStrLn stderr $ "error: command not supported in remote context: " ++ unwords args
+                    hPutStrLn stderr "Supported: init, add, commit, status, log"
+                    exitWith (ExitFailure 1)
 
 -- | Helper function to push with upstream tracking
 pushWithUpstream :: BitEnv -> FilePath -> String -> IO ()
