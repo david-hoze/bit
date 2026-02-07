@@ -62,18 +62,16 @@ import System.Exit (ExitCode(..), exitWith)
 import qualified Data.Map as Map
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
-import Internal.Config (bitDir, bitGitDir, fetchedBundle, bitIndexPath, bitDevicesDir, bitRemotesDir, bundleCwdPath, bundleGitRelPath, fromCwdPath, fromGitRelPath, BundleName(..))
+import Internal.Config (bitDir, fetchedBundle, bitIndexPath, bitDevicesDir, bitRemotesDir, bundleCwdPath, fromCwdPath, BundleName(..))
 import qualified Bit.Internal.Metadata as Metadata
-import Bit.Internal.Metadata (MetaContent(..), parseMetadata, displayHash, serializeMetadata)
+import Bit.Internal.Metadata (MetaContent(..), displayHash, serializeMetadata)
 import Data.Char (isSpace)
 import qualified Bit.Scan as Scan
-import qualified Bit.Diff as Diff
-import qualified Bit.Plan as Plan
 import qualified Bit.Pipeline as Pipeline
 import qualified Bit.Verify as Verify
 import qualified Bit.Fsck as Fsck
 import Bit.Plan (RcloneAction(..))
-import Bit.Concurrency (Concurrency(..), runConcurrently, runConcurrentlyBounded, ioConcurrency)
+import Bit.Concurrency (Concurrency(..), runConcurrentlyBounded)
 import Control.Concurrent (getNumCapabilities)
 import Bit.Types
 import qualified Bit.Remote.Scan as Remote.Scan
@@ -81,10 +79,9 @@ import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Exception (try, throwIO, SomeException, IOException)
-import System.IO (hFlush, stdout, stderr, hPutStr, hPutStrLn, hIsTerminalDevice)
+import System.IO (stderr, hPutStrLn, hIsTerminalDevice)
 import System.Process (readProcessWithExitCode)
-import Data.Maybe (fromMaybe, listToMaybe, maybe, maybeToList, mapMaybe)
-import Data.Either (either)
+import Data.Maybe (fromMaybe, maybeToList, mapMaybe)
 import Bit.Utils (toPosix, filterOutBitPaths, atomicWriteFileStr)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
@@ -98,8 +95,7 @@ import Prelude hiding (init, log)
 import Control.Exception (bracket)
 import qualified Bit.CopyProgress as CopyProgress
 import Bit.CopyProgress (SyncProgress)
-import Data.IORef (IORef, newIORef, writeIORef)
-import Data.IORef (writeIORef, newIORef, IORef, readIORef, atomicModifyIORef')
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Control.Concurrent (forkIO, threadDelay, killThread)
 import Control.Exception (finally)
 import Bit.Progress (reportProgress, clearProgress)
@@ -268,18 +264,18 @@ addRemote name pathOrUrl = do
             Device.writeRemoteFile cwd name (Device.TargetCloud url)
             void $ Git.addRemote name url
             putStrLn $ "Remote '" ++ name ++ "' added (" ++ url ++ ")."
-        Device.FilesystemPath path -> addRemoteFilesystem cwd name path
+        Device.FilesystemPath filePath -> addRemoteFilesystem cwd name filePath
 
 promptDeviceName :: FilePath -> FilePath -> Maybe String -> IO String
 promptDeviceName cwd _volRoot mLabel =
     DevicePrompt.acquireDeviceNameAuto mLabel $ \name -> (name `elem`) <$> Device.listDeviceNames cwd
 
 addRemoteFilesystem :: FilePath -> String -> FilePath -> IO ()
-addRemoteFilesystem cwd name path = do
-    absPath <- Dir.makeAbsolute path
+addRemoteFilesystem cwd name filePath = do
+    absPath <- Dir.makeAbsolute filePath
     exists <- Dir.doesDirectoryExist absPath
     unless exists $ do
-        hPutStrLn stderr ("fatal: Path does not exist or is not accessible: " ++ path)
+        hPutStrLn stderr ("fatal: Path does not exist or is not accessible: " ++ filePath)
         exitWith (ExitFailure 1)
     volRoot <- Device.getVolumeRoot absPath
     let relPath = Device.getRelativePath volRoot absPath
@@ -290,8 +286,7 @@ addRemoteFilesystem cwd name path = do
     result <- try @IOException $ case (mStoreUuid, mExistingDevice) of
         (Just _u, Just dev) -> do
             putStrLn $ "Using existing device '" ++ dev ++ "'."
-            mInfo <- Device.readDeviceFile cwd dev
-            let storeType = maybe Device.Physical Device.deviceType mInfo
+            _mInfo <- Device.readDeviceFile cwd dev
             Device.writeRemoteFile cwd name (Device.TargetDevice dev relPath)
             putStrLn $ "Remote '" ++ name ++ "' → " ++ dev ++ ":" ++ relPath
             putStrLn $ "(using existing device '" ++ dev ++ "')"
@@ -358,11 +353,11 @@ removeDirectoryRecursive dir = do
     when exists $ do
         contents <- listDirectory dir
         forM_ contents $ \item -> do
-            let path = dir </> item
-            isDir <- doesDirectoryExist path
+            let itemPath = dir </> item
+            isDir <- doesDirectoryExist itemPath
             if isDir
-                then removeDirectoryRecursive path
-                else removeFile path
+                then removeDirectoryRecursive itemPath
+                else removeFile itemPath
         removeDirectory dir
 
 -- ============================================================================
@@ -661,7 +656,7 @@ remoteShow mRemoteName = do
 remoteCheck :: Maybe String -> BitM ()
 remoteCheck mName = do
     cwd <- asks envCwd
-    (mRemote, name) <- liftIO $ case mName of
+    (mRemote, _name) <- liftIO $ case mName of
         Nothing -> do
             name <- Git.getTrackedRemoteName
             mRemote <- resolveRemote cwd name
@@ -828,7 +823,7 @@ mergeContinue = do
 -- | Determine the remote target type from a remote name.
 -- Returns the RemoteTarget if the remote is configured, Nothing otherwise.
 getRemoteTargetType :: FilePath -> String -> IO (Maybe Device.RemoteTarget)
-getRemoteTargetType cwd remoteName = Device.readRemoteFile cwd remoteName
+getRemoteTargetType cwd remName = Device.readRemoteFile cwd remName
 
 -- Git helpers via effect layer
 getLocalHeadE :: IO (Maybe String)
@@ -849,8 +844,8 @@ hasStagedChangesE = do
 -- | True if the path is a text file in the index (content stored in metadata, not hash/size).
 -- Used during pull to avoid re-downloading from rclone when content is already in the bundle.
 isTextFileInIndex :: FilePath -> FilePath -> IO Bool
-isTextFileInIndex localRoot path = do
-    let metaPath = localRoot </> bitIndexPath </> path
+isTextFileInIndex localRoot filePath = do
+    let metaPath = localRoot </> bitIndexPath </> filePath
     exists <- Dir.doesFileExist metaPath
     if not exists then return False
     else do
@@ -862,20 +857,20 @@ isTextFileInIndex localRoot path = do
 -- | Copy a file from the index to the working tree. Call only when the path
 -- is a text file (content in index). Creates parent dirs as needed.
 copyFromIndexToWorkTree :: FilePath -> FilePath -> IO ()
-copyFromIndexToWorkTree localRoot path = do
-    let metaPath = localRoot </> bitIndexPath </> path
-        workPath = localRoot </> path
+copyFromIndexToWorkTree localRoot filePath = do
+    let metaPath = localRoot </> bitIndexPath </> filePath
+        workPath = localRoot </> filePath
     createDirectoryIfMissing True (takeDirectory workPath)
     copyFile metaPath workPath
 
 -- | Helper to read a file safely (returns Nothing on error).
 -- Uses strict ByteString reading to avoid Windows file locking issues.
 readFileMaybe :: FilePath -> IO (Maybe String)
-readFileMaybe path = do
-    exists <- Dir.doesFileExist path
+readFileMaybe filePath = do
+    exists <- Dir.doesFileExist filePath
     if exists
         then do
-            bs <- BS.readFile path
+            bs <- BS.readFile filePath
             return $ case decodeUtf8' bs of
                 Left _ -> Nothing  -- Invalid UTF-8
                 Right txt -> Just (T.unpack txt)
@@ -893,12 +888,6 @@ tell = putStrLn
 
 tellErr :: String -> IO ()
 tellErr = hPutStrLn stderr
-
-askUser :: String -> IO String
-askUser prompt = do
-    putStr prompt
-    hFlush stdout
-    getLine
 
 gitRaw :: [String] -> IO ExitCode
 gitRaw = Git.runGitRaw
@@ -920,26 +909,8 @@ copyFileE = copyFile
 fileExistsE :: FilePath -> IO Bool
 fileExistsE = Dir.doesFileExist
 
-dirExistsE :: FilePath -> IO Bool
-dirExistsE = Dir.doesDirectoryExist
-
 createDirE :: FilePath -> IO ()
 createDirE = createDirectoryIfMissing True
-
-removeFileE :: FilePath -> IO ()
-removeFileE = Dir.removeFile
-
-removeDirRecursiveE :: FilePath -> IO ()
-removeDirRecursiveE = Dir.removeDirectoryRecursive
-
-getCurrentDirE :: IO FilePath
-getCurrentDirE = Dir.getCurrentDirectory
-
-exitWithE :: ExitCode -> IO ()
-exitWithE = exitWith
-
-safeRemoveE :: FilePath -> IO ()
-safeRemoveE = safeRemove
 
 -- | Run an action with the remote, or print error if not configured.
 withRemote :: (Remote -> BitM ()) -> BitM ()
@@ -976,7 +947,7 @@ filesystemPush cwd remote = do
     let remoteIndex = remotePath </> ".bit" </> "index"
     
     putStrLn "Fetching local commits into remote..."
-    (fetchCode, fetchOut, fetchErr) <- Git.runGitAt remoteIndex 
+    (fetchCode, _fetchOut, fetchErr) <- Git.runGitAt remoteIndex 
         ["fetch", localIndexGit, "main:refs/remotes/origin/main"]
     
     when (fetchCode /= ExitSuccess) $ do
@@ -991,7 +962,7 @@ filesystemPush cwd remote = do
     
     -- 4. Check if remote HEAD is ancestor of what we're pushing (fast-forward check)
     case mOldHead of
-        Just oldHead -> do
+        Just _oldHead -> do
             (checkCode, _, _) <- Git.runGitAt remoteIndex 
                 ["merge-base", "--is-ancestor", "HEAD", "refs/remotes/origin/main"]
             when (checkCode /= ExitSuccess) $ do
@@ -1002,7 +973,7 @@ filesystemPush cwd remote = do
     
     -- 5. Merge at remote (ff-only)
     putStrLn "Merging at remote (fast-forward only)..."
-    (mergeCode, mergeOut, mergeErr) <- Git.runGitAt remoteIndex 
+    (mergeCode, _mergeOut, mergeErr) <- Git.runGitAt remoteIndex 
         ["merge", "--ff-only", "refs/remotes/origin/main"]
     
     if mergeCode /= ExitSuccess
@@ -1045,20 +1016,20 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
             let paths = filter (not . null) (lines out)
             
             -- First pass: classify files and gather sizes for binary files
-            fileInfo <- forM paths $ \path -> do
-                let metaPath = remoteIndex </> path
+            fileInfo <- forM paths $ \filePath -> do
+                let metaPath = remoteIndex </> filePath
                 isText <- isTextMetadataFile metaPath
                 if isText
-                    then return (path, True, 0)
+                    then return (filePath, True, 0)
                     else do
                         -- Binary file: get size from local file
-                        let srcPath = localRoot </> path
+                        let srcPath = localRoot </> filePath
                         srcExists <- Dir.doesFileExist srcPath
                         if srcExists
                             then do
                                 size <- Dir.getFileSize srcPath
-                                return (path, False, fromIntegral size)
-                            else return (path, False, 0)
+                                return (filePath, False, fromIntegral size)
+                            else return (filePath, False, 0)
             
             let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
                 totalBytes = sum [s | (_, s) <- binaryFiles]
@@ -1072,21 +1043,21 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
                 -- Use lower concurrency for file copies to avoid disk thrashing
                 caps <- getNumCapabilities
                 let concurrency = max 2 (caps * 2)
-                void $ runConcurrentlyBounded concurrency (\(path, isText, size) -> do
-                    let metaPath = remoteIndex </> path
+                void $ runConcurrentlyBounded concurrency (\(filePath, isText, size) -> do
+                    let metaPath = remoteIndex </> filePath
                     if isText
                         then do
                             -- Text file: metadata IS the content, copy from remote index to working tree
-                            let workPath = remotePath </> path
+                            let workPath = remotePath </> filePath
                             createDirectoryIfMissing True (takeDirectory workPath)
                             copyFile metaPath workPath
                         else do
                             -- Binary file: metadata is hash/size, copy actual file from local working tree
-                            let srcPath = localRoot </> path
-                            let destPath = remotePath </> path
+                            let srcPath = localRoot </> filePath
+                            let destPath = remotePath </> filePath
                             srcExists <- Dir.doesFileExist srcPath
                             when srcExists $ do
-                                writeIORef (CopyProgress.spCurrentFile progress) path
+                                writeIORef (CopyProgress.spCurrentFile progress) filePath
                                 CopyProgress.copyFileWithProgress srcPath destPath size progress
                                 CopyProgress.incrementFilesComplete progress
                     ) fileInfo
@@ -1116,26 +1087,26 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
             let parsedChanges = parseFilesystemDiffOutput out
             
             -- First pass: collect paths that will be copied and their sizes
-            filesToCopy <- fmap concat $ forM parsedChanges $ \(status, path, mNewPath) -> case status of
-                'A' -> return [path]
-                'M' -> return [path]
+            filesToCopy <- fmap concat $ forM parsedChanges $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
+                'A' -> return [filePath]
+                'M' -> return [filePath]
                 'R' -> return (maybe [] (\p -> [p]) mNewPath)
                 _ -> return []
             
             -- Gather file sizes for binary files
-            fileInfo <- forM filesToCopy $ \path -> do
-                let metaPath = remoteIndex </> path
+            fileInfo <- forM filesToCopy $ \p -> do
+                let metaPath = remoteIndex </> p
                 isText <- isTextMetadataFile metaPath
                 if isText
-                    then return (path, True, 0)
+                    then return (p, True, 0)
                     else do
-                        let srcPath = localRoot </> path
+                        let srcPath = localRoot </> p
                         srcExists <- Dir.doesFileExist srcPath
                         if srcExists
                             then do
                                 size <- Dir.getFileSize srcPath
-                                return (path, False, fromIntegral size)
-                            else return (path, False, 0)
+                                return (p, False, fromIntegral size)
+                            else return (p, False, 0)
             
             let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
                 totalBytes = sum [s | (_, s) <- binaryFiles]
@@ -1149,13 +1120,13 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
                 -- Use lower concurrency for file copies to avoid disk thrashing
                 caps <- getNumCapabilities
                 let concurrency = max 2 (caps * 2)
-                void $ runConcurrentlyBounded concurrency (\(status, path, mNewPath) -> case status of
-                    'A' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex path progress
-                    'M' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex path progress
-                    'D' -> filesystemDeleteFileAtRemote remotePath path
+                void $ runConcurrentlyBounded concurrency (\(st, p, mNewPath) -> case st of
+                    'A' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
+                    'M' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
+                    'D' -> filesystemDeleteFileAtRemote remotePath p
                     'R' -> case mNewPath of
                         Just newPath -> do
-                            filesystemDeleteFileAtRemote remotePath path
+                            filesystemDeleteFileAtRemote remotePath p
                             filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
                         Nothing -> return ()
                     _ -> return ()
@@ -1164,31 +1135,31 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
 
 -- | Copy a file from local to remote (handles both text and binary).
 filesystemCopyFileToRemote :: FilePath -> FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
-filesystemCopyFileToRemote localRoot remotePath remoteIndex path progress = do
+filesystemCopyFileToRemote localRoot remotePath remoteIndex filePath progress = do
     -- Check if it's a text file (content in index) or binary (hash/size in index)
-    let metaPath = remoteIndex </> path
+    let metaPath = remoteIndex </> filePath
     isText <- isTextMetadataFile metaPath
     if isText
         then do
             -- Text file: metadata IS the content, copy from remote index to working tree
-            let workPath = remotePath </> path
+            let workPath = remotePath </> filePath
             createDirectoryIfMissing True (takeDirectory workPath)
             copyFile metaPath workPath
         else do
             -- Binary file: metadata is hash/size, copy actual file from local working tree
-            let srcPath = localRoot </> path
-            let destPath = remotePath </> path
+            let srcPath = localRoot </> filePath
+            let destPath = remotePath </> filePath
             srcExists <- Dir.doesFileExist srcPath
             when srcExists $ do
                 size <- Dir.getFileSize srcPath
-                writeIORef (CopyProgress.spCurrentFile progress) path
+                writeIORef (CopyProgress.spCurrentFile progress) filePath
                 CopyProgress.copyFileWithProgress srcPath destPath (fromIntegral size) progress
                 CopyProgress.incrementFilesComplete progress
 
 -- | Delete a file at the remote working tree.
 filesystemDeleteFileAtRemote :: FilePath -> FilePath -> IO ()
-filesystemDeleteFileAtRemote remotePath path = do
-    let fullPath = remotePath </> path
+filesystemDeleteFileAtRemote remotePath filePath = do
+    let fullPath = remotePath </> filePath
     exists <- Dir.doesFileExist fullPath
     when exists $ Dir.removeFile fullPath
 
@@ -1197,14 +1168,14 @@ parseFilesystemDiffOutput :: String -> [(Char, FilePath, Maybe FilePath)]
 parseFilesystemDiffOutput = mapMaybe parseLine . lines
   where
     parseLine line = case line of
-        (status:rest)
-            | status == 'R' || status == 'C' ->
+        (fileStatus:rest)
+            | fileStatus == 'R' || fileStatus == 'C' ->
                 case words (dropWhile (\c -> c /= '\t' && c /= ' ') rest) of
-                    (old:new:_) -> Just (status, old, Just new)
+                    (old:new:_) -> Just (fileStatus, old, Just new)
                     _ -> Nothing
-            | status `elem` ("ADM" :: String) ->
+            | fileStatus `elem` ("ADM" :: String) ->
                 case words rest of
-                    (path:_) -> Just (status, path, Nothing)
+                    (filePath:_) -> Just (fileStatus, filePath, Nothing)
                     _ -> Nothing
             | otherwise -> Nothing
         _ -> Nothing
@@ -1228,7 +1199,7 @@ data FileTransport = FileTransport
 -- | Build a cloud transport that uses rclone to copy files.
 mkCloudTransport :: Remote -> FileTransport
 mkCloudTransport remote = FileTransport
-  { transportDownloadFile = \cwd path _progress -> downloadOrCopyFromIndex cwd remote path
+  { transportDownloadFile = \cwd filePath _progress -> downloadOrCopyFromIndex cwd remote filePath
   , transportSyncAllFiles = \cwd -> do
       -- Cloud path uses the existing syncRemoteFilesToLocal logic
       -- which scans remote via rclone and syncs to local.
@@ -1262,14 +1233,14 @@ mkFilesystemTransport remotePath = FileTransport
   }
   where
     -- Wrapper that matches the signature expected by FileTransport
-    filesystemDownloadOrCopyFromIndex' remotePath cwd path progress =
-      filesystemDownloadOrCopyFromIndex cwd remotePath path progress
-    filesystemSyncRemoteFilesToLocal' remotePath cwd =
+    filesystemDownloadOrCopyFromIndex' remPath cwd filePath progress =
+        filesystemDownloadOrCopyFromIndex cwd remPath filePath progress
+    filesystemSyncRemoteFilesToLocal' _remPath cwd =
       filesystemSyncRemoteFilesToLocalFromHEAD cwd remotePath
 
 -- | Fetch from a filesystem remote. Fetches commits without merging or syncing files.
 filesystemFetch :: FilePath -> Remote -> IO ()
-filesystemFetch cwd remote = do
+filesystemFetch _cwd remote = do
     let remotePath = remoteUrl remote
     putStrLn $ "Fetching from filesystem remote: " ++ remotePath
     
@@ -1282,10 +1253,9 @@ filesystemFetch cwd remote = do
     
     -- Fetch remote into local
     let remoteIndexGit = remotePath </> ".bit" </> "index" </> ".git"
-    let localIndex = cwd </> ".bit" </> "index"
     
     putStrLn "Fetching remote commits..."
-    (fetchCode, fetchOut, fetchErr) <- Git.runGitWithOutput 
+    (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput 
         ["fetch", remoteIndexGit, "main:refs/remotes/origin/main"]
     
     when (fetchCode /= ExitSuccess) $ do
@@ -1313,10 +1283,9 @@ filesystemPull cwd remote opts = do
     
     -- 1. Fetch remote into local
     let remoteIndexGit = remotePath </> ".bit" </> "index" </> ".git"
-    let localIndex = cwd </> ".bit" </> "index"
     
     putStrLn "Fetching remote commits..."
-    (fetchCode, fetchOut, fetchErr) <- Git.runGitWithOutput 
+    (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput 
         ["fetch", remoteIndexGit, "main:refs/remotes/origin/main"]
     
     when (fetchCode /= ExitSuccess) $ do
@@ -1363,7 +1332,7 @@ filesystemPull cwd remote opts = do
 
 -- | Filesystem pull logic (simplified - no bundle fetching, just merge + sync)
 filesystemPullLogicImpl :: FileTransport -> Remote -> String -> BitM ()
-filesystemPullLogicImpl transport remote remoteHash = do
+filesystemPullLogicImpl transport _remote remoteHash = do
     cwd <- asks envCwd
     oldHash <- lift getLocalHeadE
     
@@ -1462,20 +1431,20 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
         let paths = filter (not . null) (lines out)
         
         -- First pass: classify files and gather sizes for binary files
-        fileInfo <- forM paths $ \path -> do
-            let metaPath = localIndex </> path
+        fileInfo <- forM paths $ \filePath -> do
+            let metaPath = localIndex </> filePath
             isText <- isTextMetadataFile metaPath
             if isText
-                then return (path, True, 0)
+                then return (filePath, True, 0)
                 else do
                     -- Binary file: get size from remote file
-                    let srcPath = remotePath </> path
+                    let srcPath = remotePath </> filePath
                     srcExists <- Dir.doesFileExist srcPath
                     if srcExists
                         then do
                             size <- Dir.getFileSize srcPath
-                            return (path, False, fromIntegral size)
-                        else return (path, False, 0)
+                            return (filePath, False, fromIntegral size)
+                        else return (filePath, False, 0)
         
         let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
             totalBytes = sum [s | (_, s) <- binaryFiles]
@@ -1489,21 +1458,21 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
             -- Use lower concurrency for file copies to avoid disk thrashing
             caps <- getNumCapabilities
             let concurrency = max 2 (caps * 2)
-            void $ runConcurrentlyBounded concurrency (\(path, isText, size) -> do
-                let metaPath = localIndex </> path
+            void $ runConcurrentlyBounded concurrency (\(filePath, isText, size) -> do
+                let metaPath = localIndex </> filePath
                 if isText
                     then do
                         -- Text file: metadata IS the content, copy from local index to working tree
-                        let workPath = localRoot </> path
+                        let workPath = localRoot </> filePath
                         createDirectoryIfMissing True (takeDirectory workPath)
                         copyFile metaPath workPath
                     else do
                         -- Binary file: metadata is hash/size, copy actual file from remote working tree
-                        let srcPath = remotePath </> path
-                        let destPath = localRoot </> path
+                        let srcPath = remotePath </> filePath
+                        let destPath = localRoot </> filePath
                         srcExists <- Dir.doesFileExist srcPath
                         when srcExists $ do
-                            writeIORef (CopyProgress.spCurrentFile progress) path
+                            writeIORef (CopyProgress.spCurrentFile progress) filePath
                             CopyProgress.copyFileWithProgress srcPath destPath size progress
                             CopyProgress.incrementFilesComplete progress
                 ) fileInfo
@@ -1512,18 +1481,18 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
 
 -- | Download a file from remote or copy from index for filesystem pull.
 filesystemDownloadOrCopyFromIndex :: FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
-filesystemDownloadOrCopyFromIndex localRoot remotePath path progress = do
-    fromIndex <- isTextFileInIndex localRoot path
+filesystemDownloadOrCopyFromIndex localRoot remotePath filePath progress = do
+    fromIndex <- isTextFileInIndex localRoot filePath
     if fromIndex
-        then copyFromIndexToWorkTree localRoot path
+        then copyFromIndexToWorkTree localRoot filePath
         else do
             -- Binary file: copy from remote working tree
-            let srcPath = remotePath </> path
-            let destPath = localRoot </> path
+            let srcPath = remotePath </> filePath
+            let destPath = localRoot </> filePath
             srcExists <- Dir.doesFileExist srcPath
             when srcExists $ do
                 size <- Dir.getFileSize srcPath
-                writeIORef (CopyProgress.spCurrentFile progress) path
+                writeIORef (CopyProgress.spCurrentFile progress) filePath
                 CopyProgress.copyFileWithProgress srcPath destPath (fromIntegral size) progress
                 CopyProgress.incrementFilesComplete progress
 
@@ -1537,8 +1506,8 @@ executeCommand localRoot remote action = case action of
         Move src dest ->
             void $ Transport.moveRemote remote (toPosix src) (toPosix dest)
 
-        Delete path ->
-            void $ Transport.deleteRemote remote (toPosix path)
+        Delete p ->
+            void $ Transport.deleteRemote remote (toPosix p)
 
         Swap _ _ _ -> return ()  -- not produced by planAction; future-proofing
 
@@ -1546,7 +1515,7 @@ executeCommand localRoot remote action = case action of
 -- Text files are already in the git bundle (index); copy from index to work dir instead of rclone.
 executePullCommand :: FilePath -> Remote -> RcloneAction -> IO ()
 executePullCommand localRoot remote action = case action of
-        Copy src dest -> do
+        Copy _src dest -> do
             fromIndex <- isTextFileInIndex localRoot dest
             if fromIndex
             then copyFromIndexToWorkTree localRoot dest
@@ -1565,17 +1534,17 @@ executePullCommand localRoot remote action = case action of
             let localDestPath = localRoot </> dest
             exists <- Dir.doesFileExist localDestPath
             when exists $ Dir.removeFile localDestPath
-        Delete path -> do
-            let localPath = localRoot </> path
+        Delete filePath -> do
+            let localPath = localRoot </> filePath
             exists <- Dir.doesFileExist localPath
             when exists $ Dir.removeFile localPath
         Swap _ _ _ -> return ()
 
 -- Helper to ensure we don't crash if cleanup fails (IO version for use outside BitM)
 safeRemove :: FilePath -> IO ()
-safeRemove path = do
-    exists <- Dir.doesFileExist path
-    when exists (Dir.removeFile path)
+safeRemove filePath = do
+    exists <- Dir.doesFileExist filePath
+    when exists (Dir.removeFile filePath)
 
 
 -- | Show up to 10 paths; if more than 20, show first 10 then "... and N more".
@@ -1650,9 +1619,9 @@ uploadToRemote src remote = do
 
 -- Helper for cleanup that doesn't crash if the file was never made
 cleanupTemp :: FilePath -> IO ()
-cleanupTemp path = do
-    exists <- Dir.doesFileExist path
-    when exists (Dir.removeFile path)
+cleanupTemp filePath = do
+    exists <- Dir.doesFileExist filePath
+    when exists (Dir.removeFile filePath)
 
 -- fetchBundle moved to Internal.Transport
 
@@ -1720,7 +1689,7 @@ processExistingRemote = do
                         (Just rHash, True) -> do
                             maybeFetchedHash <- liftIO $ Git.getHashFromBundle fetchedBundle
                             case maybeFetchedHash of
-                                Just fHash | rHash == fHash -> do
+                                Just fileHash | rHash == fileHash -> do
                                     lift $ tell "Remote check passed (--force-with-lease). Proceeding with push..."
                                     maybe (lift $ tellErr "Error: No remote configured.") pushToRemote mRemote
                                 Just _fHash -> lift $ do
@@ -1754,34 +1723,9 @@ processExistingRemote = do
 
                         _ -> lift $ tellErr "Error: Could not extract hashes for comparison."
 
--- | Sync files from remote to local (make local match remote). Used after pull.
-syncRemoteFilesToLocal :: BitM ()
-syncRemoteFilesToLocal = withRemote $ \remote -> do
-    cwd <- asks envCwd
-    localFiles <- asks envLocalFiles
-    remoteResult <- lift $ Remote.Scan.fetchRemoteFiles remote
-    case remoteResult of
-        Left _ -> lift $ tellErr "Error: Failed to fetch remote file list."
-        Right remoteFiles -> do
-            let actions = Pipeline.pullSyncFiles localFiles remoteFiles
-            lift $ tell "--- Pulling changes from remote ---"
-            if null actions
-                then lift $ tell "Working tree already up to date with remote."
-                else do
-                    -- Create progress tracker for cloud operations (file-count only)
-                    progress <- lift $ CopyProgress.newSyncProgress (length actions)
-                    lift $ CopyProgress.withSyncProgressReporter progress $ do
-                        -- Use lower concurrency for network/subprocess operations
-                        caps <- getNumCapabilities
-                        let concurrency = min 8 (max 2 (caps * 2))
-                        void $ runConcurrentlyBounded concurrency (\a -> do
-                            executePullCommand cwd remote a
-                            CopyProgress.incrementFilesComplete progress
-                            ) actions
-
 -- | Sync binaries after a successful merge commit
 syncBinariesAfterMerge :: FileTransport -> Remote -> Maybe String -> BitM ()
-syncBinariesAfterMerge transport remote oldHead = do
+syncBinariesAfterMerge transport _remote oldHead = do
     cwd <- asks envCwd
     liftIO $ putStrLn "Syncing binaries... done."
     case oldHead of
@@ -1814,22 +1758,22 @@ applyMergeToWorkingDir transport cwd oldHead = do
                 then putStrLn "Working tree already up to date with remote."
                 else do
                     -- First pass: collect paths that will be copied and their sizes
-                    filesToCopy <- fmap concat $ forM changes $ \(status, path, mNewPath) -> case status of
-                        'A' -> return [path]
-                        'M' -> return [path]
+                    filesToCopy <- fmap concat $ forM changes $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
+                        'A' -> return [filePath]
+                        'M' -> return [filePath]
                         'R' -> return (maybe [] (\p -> [p]) mNewPath)
                         _ -> return []
                     
                     -- Gather file sizes for binary files (for progress tracking)
-                    fileInfo <- forM filesToCopy $ \path -> do
-                        fromIndex <- isTextFileInIndex cwd path
+                    fileInfo <- forM filesToCopy $ \filePath -> do
+                        fromIndex <- isTextFileInIndex cwd filePath
                         if fromIndex
-                            then return (path, True, 0)
+                            then return (filePath, True, (0 :: Integer))
                             else do
                                 -- Binary file: try to get size for progress
                                 -- (size might not be available yet, that's ok)
-                                let destPath = cwd </> path
-                                return (path, False, 0)  -- Size will be tracked during copy
+                                let _destPath = cwd </> filePath
+                                return (filePath, False, 0)  -- Size will be tracked during copy
                     
                     let binaryFiles = [(p, s) | (p, False, s) <- fileInfo]
                         totalFiles = length binaryFiles
@@ -1842,14 +1786,14 @@ applyMergeToWorkingDir transport cwd oldHead = do
                         -- Use lower concurrency for file operations to avoid thrashing
                         caps <- getNumCapabilities
                         let concurrency = max 2 (caps * 2)
-                        void $ runConcurrentlyBounded concurrency (\(status, path, mNewPath) -> case status of
-                            'A' -> transportDownloadFile transport cwd path progress
-                            'M' -> transportDownloadFile transport cwd path progress
-                            'D' -> safeDeleteWorkFile cwd path
+                        void $ runConcurrentlyBounded concurrency (\(fileStatus, filePath, mNewPath) -> case fileStatus of
+                            'A' -> (transportDownloadFile transport) cwd filePath progress
+                            'M' -> (transportDownloadFile transport) cwd filePath progress
+                            'D' -> safeDeleteWorkFile cwd filePath
                             'R' -> case mNewPath of
                                 Just newPath -> do
-                                    safeDeleteWorkFile cwd path
-                                    transportDownloadFile transport cwd newPath progress
+                                    safeDeleteWorkFile cwd filePath
+                                    (transportDownloadFile transport) cwd newPath progress
                                 Nothing -> return ()
                             _ -> return ()
                             ) changes
@@ -1857,19 +1801,19 @@ applyMergeToWorkingDir transport cwd oldHead = do
 -- | Download a file from remote, or copy from index if it's a text file.
 -- Used by cloud transport.
 downloadOrCopyFromIndex :: FilePath -> Remote -> FilePath -> IO ()
-downloadOrCopyFromIndex cwd remote path = do
-    fromIndex <- isTextFileInIndex cwd path
+downloadOrCopyFromIndex cwd remote filePath = do
+    fromIndex <- isTextFileInIndex cwd filePath
     if fromIndex
-        then copyFromIndexToWorkTree cwd path
+        then copyFromIndexToWorkTree cwd filePath
         else do
-            let localPath = cwd </> path
+            let localPath = cwd </> filePath
             createDirectoryIfMissing True (takeDirectory localPath)
-            void $ Transport.copyFromRemote remote (toPosix path) (toPosix localPath)
+            void $ Transport.copyFromRemote remote (toPosix filePath) (toPosix localPath)
 
 -- | Safely delete a file from the working directory.
 safeDeleteWorkFile :: FilePath -> FilePath -> IO ()
-safeDeleteWorkFile cwd path = do
-    let fullPath = cwd </> path
+safeDeleteWorkFile cwd filePath = do
+    let fullPath = cwd </> filePath
     exists <- Dir.doesFileExist fullPath
     when exists $ Dir.removeFile fullPath
 
@@ -1928,7 +1872,7 @@ fetchRemoteBundle remote = do
                     return Nothing
 
 saveFetchedBundle :: Remote -> Maybe FilePath -> IO ()
-saveFetchedBundle remote Nothing = pure ()
+saveFetchedBundle _remote Nothing = pure ()
 saveFetchedBundle remote (Just bPath) = do
     let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
     hadPrevious <- Dir.doesFileExist fetchedPath
@@ -1957,7 +1901,7 @@ saveFetchedBundle remote (Just bPath) = do
 
     -- Output fetch results in git format
     case (maybeOldHash, maybeNewHash) of
-        (Nothing, Just newHash) -> do
+        (Nothing, Just _newHash) -> do
             -- First time fetching - show as new branch
             hPutStrLn stderr $ "From " ++ remoteName remote
             hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
@@ -2001,8 +1945,8 @@ pullAcceptRemoteImpl transport remote = do
                 then lift $ tellErr "Error: Failed to checkout remote state."
                 else do
                     -- 4. Sync actual files to working tree based on what changed in git
-                    (remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
-                    let newHash = takeWhile (/= '\n') remoteOut
+                    (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
+                    let _newHash = takeWhile (/= '\n') remoteOut
                     case oldHead of
                         Just oh -> lift $ applyMergeToWorkingDir transport cwd oh
                         Nothing -> lift $ transportSyncAllFiles transport cwd  -- First time, no diff available
@@ -2053,9 +1997,9 @@ pullManualMergeImpl remote = do
                             let transport = mkCloudTransport remote
                             pullWithCleanup transport remote defaultPullOptions
                         else do
-                            oldHash <- lift getLocalHeadE
-                            (remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
-                            let newHash = takeWhile (/= '\n') remoteOut
+                            _oldHash <- lift getLocalHeadE
+                            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
+                            let _newHash = takeWhile (/= '\n') remoteOut
 
                             (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", "refs/remotes/origin/main"]
                             (_finalMergeCode, _, _) <- lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
@@ -2077,66 +2021,67 @@ pullManualMergeImpl remote = do
 
 -- | Find files where remote actual files don't match remote metadata.
 findDivergentFiles :: Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> [(FilePath, Hash 'MD5, Hash 'MD5, Integer, Integer)]
-findDivergentFiles remoteFileMap remoteMetaMap localMetaMap =
-    Map.foldlWithKey (\acc path (metaHash, metaSize) ->
-        case Map.lookup path remoteFileMap of
+findDivergentFiles remoteFileMap remoteMetaMap _localMetaMap =
+    Map.foldlWithKey (\acc filePath (expectedHash, expectedSize) ->
+        let normalizedPath = normalise filePath
+        in case Map.lookup normalizedPath remoteFileMap of
             Nothing -> acc  -- File missing on remote, skip
-            Just (actualHash, kind) ->
-                case kind of
+            Just (actualHash, entryKind) ->
+                case entryKind of
                     File _ actualSize _ ->
-                        if actualHash == metaHash && actualSize == metaSize
+                        if actualHash == expectedHash && actualSize == expectedSize
                             then acc  -- Matches, no divergence
-                            else (path, metaHash, actualHash, metaSize, actualSize) : acc  -- Divergence!
+                            else (filePath, expectedHash, actualHash, expectedSize, actualSize) : acc  -- Divergence!
                     _ -> acc
         ) [] remoteMetaMap
 
 -- | Create conflict directories for divergent files.
 createConflictDirectories :: Remote -> [(FilePath, Hash 'MD5, Hash 'MD5, Integer, Integer)] -> Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> BitM ()
-createConflictDirectories remote divergentFiles remoteFileMap remoteMetaMap localMetaMap = do
+createConflictDirectories remote divergentFiles _remoteFileMap _remoteMetaMap localMetaMap = do
     cwd <- asks envCwd
     let conflictsDir = cwd </> ".bit" </> "conflicts"
     lift $ createDirE conflictsDir
 
-    forM_ divergentFiles $ \(path, metaHash, actualHash, metaSize, actualSize) -> do
-        let conflictDir = conflictsDir </> path
+    forM_ divergentFiles $ \(filePath, _expectedHash, actualHash, _expectedSize, actualSize) -> do
+        let conflictDir = conflictsDir </> filePath
         lift $ createDirE (takeDirectory conflictDir)
 
-        let localPath = cwd </> path
+        let localPath = cwd </> filePath
         localExists <- lift $ fileExistsE localPath
         when localExists $ lift $ copyFileE localPath (conflictDir </> "LOCAL")
 
-        code <- liftIO $ Transport.copyFromRemote remote (toPosix path) (conflictDir </> "REMOTE")
-        when (code /= ExitSuccess) $ lift $ tellErr $ "Warning: Could not download remote file: " ++ path
+        code <- liftIO $ Transport.copyFromRemote remote (toPosix filePath) (conflictDir </> "REMOTE")
+        when (code /= ExitSuccess) $ lift $ tellErr $ "Warning: Could not download remote file: " ++ filePath
 
-        lift $ case Map.lookup (normalise path) localMetaMap of
+        lift $ case Map.lookup (normalise filePath) localMetaMap of
             Just (localHash, localSize) ->
                 writeFileAtomicE (conflictDir </> "METADATA_LOCAL") $
                     serializeMetadata (MetaContent localHash localSize)
             Nothing -> writeFileAtomicE (conflictDir </> "METADATA_LOCAL") "hash: (not tracked)\nsize: 0\n"
 
         lift $ writeFileAtomicE (conflictDir </> "METADATA_REMOTE") $
-            serializeMetadata (MetaContent metaHash metaSize)
+            serializeMetadata (MetaContent actualHash actualSize)
 
 -- | Print conflict list in spec format.
 printConflictList :: [(FilePath, Hash 'MD5, Hash 'MD5, Integer, Integer)] -> Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> IO ()
-printConflictList divergentFiles remoteFileMap remoteMetaMap localMetaMap = do
+printConflictList divergentFiles _remoteFileMap _remoteMetaMap localMetaMap = do
     putStrLn ""
     putStrLn "✗ Remote divergence detected:"
     putStrLn ""
     
-    forM_ divergentFiles $ \(path, metaHash, actualHash, metaSize, actualSize) -> do
-        putStrLn $ "  " ++ toPosix path ++ ":"
+    forM_ divergentFiles $ \(filePath, expectedHash, remoteHash, expectedSize, remoteSize) -> do
+        putStrLn $ "  " ++ toPosix filePath ++ ":"
         
         -- Get local metadata (use displayHash for Hash 'MD5 values)
-        let localInfo = case Map.lookup (normalise path) localMetaMap of
+        let localInfo = case Map.lookup (normalise filePath) localMetaMap of
                 Just (localHash, localSize) -> (displayHash localHash, show localSize)
                 Nothing -> ("(not tracked)", "0")
         
         putStrLn $ "    Local:           " ++ fst localInfo ++ " (" ++ snd localInfo ++ " bytes)"
-        putStrLn $ "    Remote actual:   " ++ displayHash actualHash ++ " (" ++ show actualSize ++ " bytes)"
-        putStrLn $ "    Remote metadata: " ++ displayHash metaHash ++ " (" ++ show metaSize ++ " bytes)"
+        putStrLn $ "    Remote actual:   " ++ displayHash remoteHash ++ " (" ++ show remoteSize ++ " bytes)"
+        putStrLn $ "    Remote metadata: " ++ displayHash expectedHash ++ " (" ++ show expectedSize ++ " bytes)"
         putStrLn $ ""
-        putStrLn $ "    Files saved to: .bit/conflicts/" ++ toPosix path ++ "/"
+        putStrLn $ "    Files saved to: .bit/conflicts/" ++ toPosix filePath ++ "/"
         putStrLn ""
     
     putStrLn "This can happen when:"
@@ -2185,7 +2130,7 @@ pullLogic transport remote opts = do
                         lift $ exitWith (ExitFailure 1)
 
             oldHash <- lift getLocalHeadE
-            (remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
+            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
             let newHash = takeWhile (/= '\n') remoteOut
 
             case oldHash of
@@ -2259,24 +2204,24 @@ pullLogic transport remote opts = do
 
 printVerifyIssue :: (String -> String) -> Verify.VerifyIssue -> IO ()
 printVerifyIssue fmtHash = \case
-  Verify.HashMismatch path expectedHash actualHash _expectedSize _actualSize -> do
-    hPutStrLn stderr $ "[ERROR] Hash mismatch: " ++ toPosix path
+  Verify.HashMismatch filePath expectedHash actualHash _expectedSize _actualSize -> do
+    hPutStrLn stderr $ "[ERROR] Hash mismatch: " ++ toPosix filePath
     hPutStrLn stderr $ "  Expected: " ++ fmtHash expectedHash
     hPutStrLn stderr $ "  Actual:   " ++ fmtHash actualHash
-  Verify.Missing path ->
-    hPutStrLn stderr $ "[ERROR] Missing: " ++ toPosix path
+  Verify.Missing filePath ->
+    hPutStrLn stderr $ "[ERROR] Missing: " ++ toPosix filePath
 
 -- | Format remote display line (e.g. "origin → black_usb:Backup (physical, connected at E:\)")
 formatRemoteDisplay :: FilePath -> String -> Maybe Device.RemoteTarget -> IO String
 formatRemoteDisplay cwd name mTarget = case mTarget of
     Just (Device.TargetLocalPath p) -> return (name ++ " → " ++ p ++ " (local path)")
-    Just (Device.TargetDevice dev path) -> do
-        res <- Device.resolveRemoteTarget cwd (Device.TargetDevice dev path)
+    Just (Device.TargetDevice dev devPath) -> do
+        res <- Device.resolveRemoteTarget cwd (Device.TargetDevice dev devPath)
         mInfo <- Device.readDeviceFile cwd dev
         let typ = maybe "unknown" (\i -> case Device.deviceType i of Device.Physical -> "physical"; Device.Network -> "network") mInfo
         case res of
-            Device.Resolved mount -> return (name ++ " → " ++ dev ++ ":" ++ path ++ " (" ++ typ ++ ", connected at " ++ mount ++ ")")
-            Device.NotConnected _ -> return (name ++ " → " ++ dev ++ ":" ++ path ++ " (" ++ typ ++ ", NOT CONNECTED)")
+            Device.Resolved mount -> return (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", connected at " ++ mount ++ ")")
+            Device.NotConnected _ -> return (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", NOT CONNECTED)")
     Just (Device.TargetCloud u) -> return (name ++ " → " ++ u ++ " (cloud)")
     Nothing -> return (name ++ " → (no target)")
 
@@ -2384,9 +2329,9 @@ doRestore args = do
         unless stagedOnly $ do
             let rawPaths = restoreCheckoutPaths args
             paths <- lift $ expandPathsToFiles cwd rawPaths
-            forM_ paths $ \path -> do
-                let metaPath = cwd </> bitIndexPath </> path
-                let workPath = cwd </> path
+            forM_ paths $ \filePath -> do
+                let metaPath = cwd </> bitIndexPath </> filePath
+                let workPath = cwd </> filePath
                 metaExists <- lift $ fileExistsE metaPath
                 when metaExists $ do
                     mcontent <- lift $ readFileE metaPath
@@ -2409,9 +2354,9 @@ doCheckout args = do
         cwd <- asks envCwd
         let rawPaths = restoreCheckoutPaths args'
         paths <- lift $ expandPathsToFiles cwd rawPaths
-        forM_ paths $ \path -> do
-            let metaPath = cwd </> bitIndexPath </> path
-            let workPath = cwd </> path
+        forM_ paths $ \filePath -> do
+            let metaPath = cwd </> bitIndexPath </> filePath
+            let workPath = cwd </> filePath
             metaExists <- lift $ fileExistsE metaPath
             when metaExists $ do
                 mcontent <- lift $ readFileE metaPath

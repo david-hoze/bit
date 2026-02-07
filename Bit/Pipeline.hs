@@ -9,7 +9,7 @@ module Bit.Pipeline
   ) where
 
 import Bit.Types
-import Bit.Diff (buildIndexFromFileEntries, computeDiff, GitDiff)
+import Bit.Diff (buildIndexFromFileEntries, computeDiff)
 import Bit.Plan (RcloneAction(..), planAction)
 import Bit.Utils (filterOutBitPaths)
 

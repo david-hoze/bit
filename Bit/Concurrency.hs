@@ -24,7 +24,7 @@ module Bit.Concurrency
   ) where
 
 import Control.Concurrent (getNumCapabilities)
-import Control.Concurrent.QSem (QSem, newQSem, waitQSem, signalQSem)
+import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
 import Control.Concurrent.Async (mapConcurrently)
 import Control.Exception (bracket_)
 

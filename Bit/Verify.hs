@@ -18,7 +18,6 @@ module Bit.Verify
   , allEntryPaths
   ) where
 
-import Data.Traversable (traverse)
 import Bit.Types (Hash(..), HashAlgo(..), Path, FileEntry(..), EntryKind(..), syncHash, hashToText)
 import Bit.Utils (filterOutBitPaths)
 import Bit.Concurrency (Concurrency(..), runConcurrently, ioConcurrency)
@@ -26,7 +25,6 @@ import System.FilePath ((</>), makeRelative, normalise)
 import System.Directory (doesFileExist, listDirectory, doesDirectoryExist, removeFile)
 import Data.List (isPrefixOf)
 import Data.Maybe (maybeToList)
-import Data.Either (either)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Internal.Git as Git
@@ -34,16 +32,15 @@ import Bit.Internal.Metadata (MetaContent(..), parseMetadata, readMetadataOrComp
 import qualified Bit.Remote.Scan as Remote.Scan
 import qualified Bit.Remote
 import qualified Internal.Transport as Transport
-import Internal.Config (fetchedBundle, fetchedBundlePath, bitIndexPath, bundleCwdPath, fromCwdPath, BundleName)
+import Internal.Config (fetchedBundle, bitIndexPath, bundleCwdPath, fromCwdPath, BundleName)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
 import System.IO (hPutStrLn, stderr)
-import Control.Monad (when, unless)
+import Control.Monad (when)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.IORef (IORef, atomicModifyIORef')
-import Data.Maybe (fromMaybe)
 
 -- | Result of comparing one file to metadata.
 data VerifyIssue
@@ -84,7 +81,7 @@ allEntryPaths = Set.fromList . map entryPath
 -- | Filter to user files only (exclude .git internals and .gitignore).
 -- Used by BOTH filesystem and commit-tree paths.
 isUserFile :: FilePath -> Bool
-isUserFile path = not (isGitPath path) && path /= ".gitignore"
+isUserFile filePath = not (isGitPath filePath) && filePath /= ".gitignore"
 
 -- | Resolve concurrency setting to a concrete bound.
 resolveConcurrency :: Concurrency -> IO Int
@@ -106,7 +103,7 @@ listFilesRecursive baseDir dir = do
 
 -- | Check if a path is within the .git directory.
 isGitPath :: FilePath -> Bool
-isGitPath path = ".git" `isPrefixOf` normalise path || normalise path == ".git"
+isGitPath filePath = ".git" `isPrefixOf` normalise filePath || normalise filePath == ".git"
 
 -- | Load metadata entries from any source.
 -- Handles file enumeration, parsing, and binary/text classification uniformly.
@@ -234,7 +231,7 @@ loadMetadataFromBundle bundleName = do
     then return ([], Set.empty)
     else do
       -- Get the remote HEAD hash (now available as refs/remotes/origin/main)
-      (code, out, _) <- readProcessWithExitCode "git"
+      (_code, out, _) <- readProcessWithExitCode "git"
         [ "-C", bitIndexPath
         , "rev-parse"
         , "refs/remotes/origin/main"
@@ -249,7 +246,7 @@ loadMetadataFromBundle bundleName = do
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
 verifyRemote :: FilePath -> Bit.Remote.Remote -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
-verifyRemote cwd remote mCounter concurrency = do
+verifyRemote _cwd remote mCounter _concurrency = do
   -- 1. Fetch the remote bundle if needed
   let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
   bundleExists <- doesFileExist fetchedPath
@@ -285,7 +282,6 @@ verifyRemote cwd remote mCounter concurrency = do
                 | e <- filteredRemoteFiles
                 , h <- maybeToList (syncHash e.kind)
                 ]
-              remoteMetaMap = Map.fromList [(normalise p, (h, sz)) | (p, h, sz) <- remoteMeta]
           
           -- 5. Compare binary file metadata with actual files on remote
           issues <- traverse (checkRemoteFile remoteFileMap) remoteMeta
@@ -315,6 +311,6 @@ verifyRemote cwd remote mCounter concurrency = do
 
 -- Helper to safely remove a file
 safeRemove :: FilePath -> IO ()
-safeRemove path = do
-  exists <- doesFileExist path
-  when exists $ removeFile path
+safeRemove filePath = do
+  exists <- doesFileExist filePath
+  when exists $ removeFile filePath

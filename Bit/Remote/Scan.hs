@@ -16,7 +16,6 @@ import System.Exit (ExitCode(..))
 import System.FilePath (normalise)
 import Data.Maybe
 import qualified Data.Text as T
-import Data.Time (UTCTime)
 import Bit.Types
 import qualified Internal.Transport as Transport
 import Bit.Remote (Remote)
@@ -57,10 +56,6 @@ rcloneFileToFileEntry rf =
     where
       md5 =
         Map.findWithDefault "" "md5" (fromMaybe Map.empty rf.rfHashes)
-
--- TODO: rclone provides ModTime; wire it later
-stubTime :: UTCTime
-stubTime = read "2026-01-01 00:00:00 UTC"
 ----------------------------------------------------------------------
 -- rclone JSON model
 ----------------------------------------------------------------------

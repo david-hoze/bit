@@ -9,10 +9,8 @@ module Internal.ConfigFile
 
 import System.FilePath ((</>))
 import System.Directory (doesFileExist)
-import Data.Char (isSpace, toLower)
-import Data.List (isPrefixOf)
+import Data.Char (isSpace)
 import Data.Maybe (fromMaybe)
-import Control.Monad (when)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString as BS
@@ -57,9 +55,9 @@ readConfig = readTextConfig
 -- | Parse config file content (INI-style format)
 parseConfig :: T.Text -> TextConfig
 parseConfig content = 
-  let lines = T.lines content
+  let linesOfText = T.lines content
       -- Find [text] section
-      textSection = extractSection "text" lines
+      textSection = extractSection "text" linesOfText
       -- Parse size-limit
       sizeLimit = fromMaybe (textSizeLimit defaultTextConfig) (parseSizeLimit textSection)
       -- Parse extensions
@@ -74,22 +72,22 @@ findIndex p xs = case [i | (i, x) <- zip [0..] xs, p x] of
 
 -- | Extract lines for a given section (between [section] and next [section] or EOF)
 extractSection :: String -> [T.Text] -> [T.Text]
-extractSection sectionName lines =
+extractSection sectionName linesOfText =
   let sectionHeader = "[" ++ sectionName ++ "]"
       -- Find start of section
-      startIdx = case findIndex (\l -> T.strip l == T.pack sectionHeader) lines of
-        Nothing -> length lines  -- Section not found
+      startIdx = case findIndex (\l -> T.strip l == T.pack sectionHeader) linesOfText of
+        Nothing -> length linesOfText  -- Section not found
         Just idx -> idx + 1
       -- Find end of section (next [section] or EOF)
-      endIdx = case findIndex (\l -> T.stripStart l `T.isPrefixOf` T.pack "[") (drop startIdx lines) of
-        Nothing -> length lines
+      endIdx = case findIndex (\l -> T.stripStart l `T.isPrefixOf` T.pack "[") (drop startIdx linesOfText) of
+        Nothing -> length linesOfText
         Just idx -> startIdx + idx
-  in map T.strip $ take (endIdx - startIdx) (drop startIdx lines)
+  in map T.strip $ take (endIdx - startIdx) (drop startIdx linesOfText)
 
 -- | Parse size-limit from section lines
 parseSizeLimit :: [T.Text] -> Maybe Integer
-parseSizeLimit lines =
-  let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- lines, T.stripStart l `T.isPrefixOf` T.pack prefix]
+parseSizeLimit linesOfText =
+  let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- linesOfText, T.stripStart l `T.isPrefixOf` T.pack prefix]
       sizeLines = findLine "size-limit"
   in case sizeLines of
     [] -> Nothing
@@ -103,8 +101,8 @@ parseSizeLimit lines =
 
 -- | Parse extensions from section lines
 parseExtensions :: [T.Text] -> Maybe [String]
-parseExtensions lines =
-  let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- lines, T.stripStart l `T.isPrefixOf` T.pack prefix]
+parseExtensions linesOfText =
+  let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- linesOfText, T.stripStart l `T.isPrefixOf` T.pack prefix]
       extLines = findLine "extensions"
   in case extLines of
     [] -> Nothing

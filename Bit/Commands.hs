@@ -4,7 +4,7 @@
 module Bit.Commands (run) where
 
 import qualified Bit.Core as Bit
-import Bit.Types (BitEnv(..), BitM, runBitM)
+import Bit.Types (BitEnv(..), runBitM)
 import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
 import Bit.Remote (getDefaultRemote, resolveRemote)
 import Bit.Utils (atomicWriteFileStr)
@@ -20,8 +20,7 @@ import qualified System.Directory as Dir
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Data.List (isPrefixOf)
-import Control.Exception (catch)
-import System.IO.Error (IOError)
+import Control.Exception (catch, SomeException)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -132,7 +131,7 @@ runRemoteCommand remoteName args = do
                                 then putStrLn "Remote is now a bit repository."
                                 else hPutStrLn stderr "Error uploading bundle to remote."
                             -- Cleanup bundle
-                            Dir.removeFile bundlePath `catch` (\(_ :: IOError) -> return ())
+                            Dir.removeFile bundlePath `catch` (\(_ :: SomeException) -> return ())
                     exitWith code
 
                 ("status":rest) -> do

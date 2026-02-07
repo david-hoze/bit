@@ -60,6 +60,7 @@ executable bit
 executable generate-literate
     main-is:             GenerateLiterate.hs
     hs-source-dirs:      scripts
+    ghc-options:         -Wall
     build-depends:       base, directory, filepath, process, bytestring, text
     default-language:    Haskell2010
 
@@ -67,6 +68,7 @@ test-suite cli
     type:                exitcode-stdio-1.0
     main-is:             RunCliTests.hs
     hs-source-dirs:      test
+    ghc-options:         -Wall
     build-depends:       base, directory, filepath, process
     default-language:    Haskell2010
 
@@ -75,6 +77,7 @@ test-suite device-prompt
     main-is:             DevicePromptTests.hs
     hs-source-dirs:      test, .
     other-modules:       Bit.DevicePrompt
+    ghc-options:         -Wall
     build-depends:       base,
                         directory,
                         tasty,
@@ -85,7 +88,8 @@ test-suite pipeline
     type:                exitcode-stdio-1.0
     main-is:             PipelineSpec.hs
     hs-source-dirs:      test, .
-    other-modules:       Bit.Types,
+    other-modules:       Bit.AtomicWrite,
+                         Bit.Types,
                          Bit.Diff,
                          Bit.Plan,
                          Bit.Pipeline,
@@ -96,6 +100,7 @@ test-suite pipeline
                          Internal.Git,
                          Internal.Config,
                          Internal.ConfigFile
+    ghc-options:         -Wall
     build-depends:       base,
                          containers,
                          text,
@@ -119,7 +124,8 @@ test-suite generate-literate-docs
     type:                exitcode-stdio-1.0
     main-is:             GenerateLiterate.hs
     hs-source-dirs:      scripts
-    build-depends:       base, process, directory, filepath
+    ghc-options:         -Wall
+    build-depends:       base, process, directory, filepath, bytestring, text
     build-tool-depends:  bit:generate-literate
     default-language:    Haskell2010
 
@@ -127,6 +133,7 @@ test-suite lint-tests
     type:                exitcode-stdio-1.0
     main-is:             LintTestFiles.hs
     hs-source-dirs:      test
+    ghc-options:         -Wall
     build-depends:       base,
                          directory,
                          filepath,

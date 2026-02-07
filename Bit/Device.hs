@@ -40,7 +40,7 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Control.Monad (when, filterM)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import qualified System.Directory as Dir
-import System.FilePath ((</>), pathSeparator, takeDrive, dropDrive)
+import System.FilePath ((</>), pathSeparator, takeDrive)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(ExitSuccess))
 import qualified System.Info as Info
@@ -95,7 +95,7 @@ classifyRemotePath :: String -> IO RemotePathType
 classifyRemotePath path = do
   rcloneRemotes <- getRcloneRemotes
   case break (== ':') path of
-    (prefix, _:rest) | not (null prefix) -> do
+    (prefix, _:_rest) | not (null prefix) -> do
       let prefixNorm = dropWhile (== ':') prefix
       if prefixNorm `elem` rcloneRemotes
         then return (CloudRemote path)
@@ -110,9 +110,9 @@ getRcloneRemotes = do
   else return
     [ takeWhile (/= ':') (takeWhile (/= '\n') line)
     | line <- lines out
-    , not (null (trim line))
+    , not (null (trimLine line))
     ]
-  where trim = reverse . dropWhile (== ' ') . reverse . dropWhile (== ' ')
+  where trimLine = reverse . dropWhile (== ' ') . reverse . dropWhile (== ' ')
 
 -- ---------------------------------------------------------------------------
 -- Volume operations (platform-specific)
@@ -189,7 +189,7 @@ detectStorageTypeWindows volRoot = do
   let drive = take 2 (filter (`elem` ['A'..'Z'] ++ ['a'..'z'] ++ ":") volRoot)
   if null drive then return Physical  -- UNC: treat as network
   else do
-    (code, out, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
+    (_code, _out, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
       "try { (Get-PSDrive -Name " ++ [head drive] ++ " -ErrorAction SilentlyContinue).Root } catch { '' }"] ""
     (code2, out2, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
       "[int]([System.IO.DriveInfo]::new('" ++ drive ++ "').DriveType)"] ""
@@ -227,7 +227,7 @@ getHardwareSerialWindows volRoot = do
     (code, out, _) <- readProcessWithExitCode "wmic" ["diskdrive", "get", "SerialNumber,Index"] ""
     if code /= ExitSuccess then return Nothing
     else do
-      (code2, out2, _) <- readProcessWithExitCode "wmic" ["path", "win32_logicaldisk", "where", "DeviceID='" ++ drive ++ ":\\'", "get", "VolumeSerialNumber"] ""
+      (_code2, _out2, _) <- readProcessWithExitCode "wmic" ["path", "win32_logicaldisk", "where", "DeviceID='" ++ drive ++ ":\\'", "get", "VolumeSerialNumber"] ""
       -- VolumeSerialNumber is the FAT/NTFS serial, not disk serial. Use diskdrive.
       let lines' = filter (not . null . trim) (lines out)
           parseSerial = case lines' of

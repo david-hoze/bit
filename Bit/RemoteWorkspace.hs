@@ -8,10 +8,10 @@ module Bit.RemoteWorkspace
   , remoteWorkspacePath
   ) where
 
-import Bit.Types (FileEntry(..), EntryKind(..), Hash, HashAlgo(..))
-import Bit.Remote (Remote, remoteUrl, remoteName)
+import Bit.Types (FileEntry(..), EntryKind(..))
+import Bit.Remote (Remote, remoteUrl)
 import qualified Bit.Remote.Scan as Remote.Scan
-import Bit.Scan (writeMetadataFiles, hashAndClassifyFile, binaryExtensions)
+import Bit.Scan (hashAndClassifyFile, binaryExtensions)
 import qualified Internal.ConfigFile as ConfigFile
 import Internal.ConfigFile (TextConfig)
 import qualified Internal.Transport as Transport
@@ -23,7 +23,6 @@ import System.Directory
     , createDirectoryIfMissing
     , getTemporaryDirectory
     , removeDirectoryRecursive
-    , copyFileWithMetadata
     )
 import System.Exit (ExitCode(..), exitWith)
 import System.IO (hPutStrLn, stderr)
@@ -31,8 +30,7 @@ import System.Process (callProcess)
 import Control.Monad (when, forM, forM_)
 import Data.Char (toLower)
 import Data.List (partition)
-import Control.Exception (catch)
-import System.IO.Error (IOError)
+import Control.Exception (catch, SomeException)
 
 -- | A remote workspace contains metadata and git repo for a remote
 data RemoteWorkspace = RemoteWorkspace
@@ -42,7 +40,7 @@ data RemoteWorkspace = RemoteWorkspace
 
 -- | Path to the remote workspace for a given remote name
 remoteWorkspacePath :: FilePath -> String -> FilePath
-remoteWorkspacePath cwd remoteName = cwd </> ".bit" </> "remote-workspaces" </> remoteName
+remoteWorkspacePath cwd remName = cwd </> ".bit" </> "remote-workspaces" </> remName
 
 -- | Partition remote files into definitely-binary and text-candidates.
 -- A file is definitely binary if:
@@ -89,24 +87,24 @@ classifyRemoteTextCandidates remote config candidates = do
                 return fe
 
     -- Cleanup temp dir
-    removeDirectoryRecursive tempDir `catch` (\(_ :: IOError) -> return ())
+    removeDirectoryRecursive tempDir `catch` (\(_ :: SomeException) -> return ())
 
     return classifiedEntries
 
 -- | Initialize a remote workspace by scanning the remote and building metadata
 initRemoteWorkspace :: FilePath -> Remote -> String -> IO ()
-initRemoteWorkspace cwd remote remoteName = do
-    let wsPath = remoteWorkspacePath cwd remoteName
+initRemoteWorkspace cwd remote remName = do
+    let wsPath = remoteWorkspacePath cwd remName
     let wsGit = wsPath </> ".git"
 
     -- Check if workspace already exists
     exists <- doesDirectoryExist wsGit
     when exists $ do
-        hPutStrLn stderr $ "Remote workspace '" ++ remoteName ++ "' already exists."
-        hPutStrLn stderr $ "Use 'bit @" ++ remoteName ++ " status' to see its state, or delete .bit/remote-workspaces/" ++ remoteName ++ "/ to start over."
+        hPutStrLn stderr $ "Remote workspace '" ++ remName ++ "' already exists."
+        hPutStrLn stderr $ "Use 'bit @" ++ remName ++ " status' to see its state, or delete .bit/remote-workspaces/" ++ remName ++ "/ to start over."
         exitWith (ExitFailure 1)
 
-    putStrLn $ "Scanning remote '" ++ remoteName ++ "' (" ++ remoteUrl remote ++ ")..."
+    putStrLn $ "Scanning remote '" ++ remName ++ "' (" ++ remoteUrl remote ++ ")..."
 
     -- Step 1: Fetch file list from remote
     result <- Remote.Scan.fetchRemoteFiles remote
@@ -174,5 +172,5 @@ initRemoteWorkspace cwd remote remoteName = do
             let binCount = length binaryFiles
             putStrLn $ "Remote workspace initialized: " ++ show textCount ++ " text, " ++ show binCount ++ " binary files."
             putStrLn $ "Next steps:"
-            putStrLn $ "  bit @" ++ remoteName ++ " add ."
-            putStrLn $ "  bit @" ++ remoteName ++ " commit -m \"Initial commit\""
+            putStrLn $ "  bit @" ++ remName ++ " add ."
+            putStrLn $ "  bit @" ++ remName ++ " commit -m \"Initial commit\""

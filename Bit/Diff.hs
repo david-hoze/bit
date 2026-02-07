@@ -78,27 +78,27 @@ computeDiff local remote =
 
     -- 1. Modified: same path, different hash (only for file paths; directories have no hash)
     modified =
-      [ Modified (LightFileEntry path lHash)
-      | path <- Set.toList (Set.intersection lFilePaths rFilePaths)
-      , let lHash = lFiles Map.! path
-      , let rHash = rFiles Map.! path
+      [ Modified (LightFileEntry p lHash)
+      | p <- Set.toList (Set.intersection lFilePaths rFilePaths)
+      , let lHash = lFiles Map.! p
+      , let rHash = rFiles Map.! p
       , lHash /= rHash
       ]
 
     -- 2. Added: path exists only locally
     added =
-      [ Added (LightFileEntry path hash)
-      | (path, hash) <- Map.toList lFiles
-      , path `Set.notMember` rPaths
-      , not (Map.member hash remote.byHash)
+      [ Added (LightFileEntry p hsh)
+      | (p, hsh) <- Map.toList lFiles
+      , p `Set.notMember` rPaths
+      , not (Map.member hsh remote.byHash)
       ]
 
     -- 3. Deleted: path exists only remotely
     deleted =
-      [ Deleted (LightFileEntry path hash)
-      | (path, hash) <- Map.toList rFiles
-      , path `Set.notMember` lPaths
-      , not (Map.member hash local.byHash)
+      [ Deleted (LightFileEntry p hsh)
+      | (p, hsh) <- Map.toList rFiles
+      , p `Set.notMember` lPaths
+      , not (Map.member hsh local.byHash)
       ]
 
     -- 4. Renamed: same hash, different path (1:1 only; otherwise we'd emit multiple Move for same source)

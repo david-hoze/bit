@@ -8,12 +8,11 @@ import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.Tasty.HUnit
 
-import qualified Data.List as List
 import Data.List (sort, group)
 import Bit.Types
 import Bit.Diff (GitDiff(..), LightFileEntry(..), FileIndex, buildIndexFromFileEntries, computeDiff)
-import Bit.Plan (RcloneAction(..), planAction)
-import Bit.Pipeline (diffAndPlan, pushSyncFiles, pullSyncFiles)
+import Bit.Plan (RcloneAction(..))
+import Bit.Pipeline (diffAndPlan)
 import qualified Data.Text as T
 
 -- Arbitrary instances for property testing
@@ -33,9 +32,9 @@ instance Arbitrary FileEntry where
     -- Generate simple relative paths
     depth <- choose (1, 3) :: Gen Int
     segments <- vectorOf depth (vectorOf 5 (elements "abcdefghijklmnop"))
-    let path = foldl1 (\a b -> a ++ "/" ++ b) segments
+    let filePath = foldl1 (\a b -> a ++ "/" ++ b) segments
     k <- arbitrary
-    return $ FileEntry path k
+    return $ FileEntry filePath k
 
 main :: IO ()
 main = defaultMain tests

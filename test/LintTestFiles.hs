@@ -2,9 +2,9 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath ((</>), takeExtension)
-import Control.Monad (filterM, forM)
+import Control.Monad (filterM)
 import Data.Char (toLower, isSpace)
-import Data.List (isInfixOf, isPrefixOf, groupBy)
+import Data.List (isInfixOf, isPrefixOf)
 
 main :: IO ()
 main = do
@@ -124,25 +124,6 @@ dangerousPatterns =
        "Use relative paths or test-specific directories instead.")
     ]
 
--- | Classify a line within a test case
-classifyLine :: Maybe LineType -> String -> LineType
-classifyLine _ line
-    | all isSpace line = BlankLine
-    | "#" `isPrefixOf` stripped = CommentLine
-    | ">>>=" `isPrefixOf` stripped = ExitCodeDirective (drop 4 stripped)
-    | ">>>2" `isPrefixOf` stripped = StderrDirective (drop 4 stripped)
-    | ">>>" `isPrefixOf` stripped = StdoutDirective (drop 3 stripped)
-    | "<<<" `isPrefixOf` stripped = StdinDirective (drop 3 stripped)
-    | otherwise = case prevLineType of
-        Just (StdinDirective _) -> ContinuationLine line
-        Just (StdoutDirective _) -> ContinuationLine line
-        Just (StderrDirective _) -> ContinuationLine line
-        Just (ContinuationLine _) -> ContinuationLine line
-        _ -> CommandLine line
-  where
-    stripped = dropWhile isSpace line
-    prevLineType = Nothing  -- This gets tracked in the fold
-
 -- | Split file content into test cases
 splitTestCases :: [(Int, String)] -> [TestCase]
 splitTestCases linesWithNums = 
@@ -155,8 +136,8 @@ splitTestCases linesWithNums =
     -- Group consecutive non-blank lines into test cases
     groupTestCaseBlocks :: [(Int, String)] -> [[(Int, String)]]
     groupTestCaseBlocks [] = []
-    groupTestCaseBlocks lines =
-        let (block, rest) = span (not . isBlankOrComment . snd) lines
+    groupTestCaseBlocks linesWithNumbers =
+        let (block, rest) = span (not . isBlankOrComment . snd) linesWithNumbers
             rest' = dropWhile (isBlankOrComment . snd) rest
         in if null block
             then groupTestCaseBlocks rest'
@@ -210,7 +191,7 @@ checkDuplicateDirective path directiveName occurrences
 
 -- | Check for missing exit code (warning level)
 checkMissingExitCode :: FilePath -> TestCase -> [String]
-checkMissingExitCode path tc
+checkMissingExitCode _path tc
     | null (tcExitCode tc) && isActualTestCase tc = []  -- Temporarily disabled - too many false positives
     | otherwise = []
   where

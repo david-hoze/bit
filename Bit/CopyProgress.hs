@@ -12,19 +12,17 @@ module Bit.CopyProgress
 
 import System.IO
     ( withBinaryFile, IOMode(ReadMode, WriteMode)
-    , hGetBuf, hPutBuf, hFileSize, hIsEOF
-    , hIsTerminalDevice, hPutStr, hPutStrLn, hFlush, stderr
+    , hGetBuf, hPutBuf
+    , hIsTerminalDevice, hPutStrLn, stderr
     )
 import Bit.Progress (reportProgress, clearProgress)
 import System.Directory (createDirectoryIfMissing, copyFile)
 import System.FilePath (takeDirectory)
-import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef', writeIORef)
-import Control.Concurrent (forkIO, threadDelay, killThread, ThreadId)
-import Control.Exception (finally, bracket)
+import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
+import Control.Concurrent (forkIO, threadDelay, killThread)
+import Control.Exception (finally)
 import Control.Monad (when)
 import Foreign.Marshal.Alloc (allocaBytes)
-import Foreign.Ptr (Ptr)
-import Foreign.C.Types (CChar)
 import Bit.Utils (formatBytes)
 
 -- | Shared progress state for sync operations (push/pull).
@@ -77,7 +75,7 @@ copyFileWithProgress src dest fileSize progress = do
 -- | Chunked binary copy with progress updates. Uses strict IO (no lazy ByteString).
 -- Chunk size: 64KB (good balance between IO syscalls and memory usage).
 copyFileChunked :: FilePath -> FilePath -> Integer -> IORef Integer -> IO ()
-copyFileChunked src dest expectedSize bytesRef = do
+copyFileChunked src dest _expectedSize bytesRef = do
     let chunkSize = 64 * 1024  -- 64KB chunks
     allocaBytes chunkSize $ \buffer ->
         withBinaryFile src ReadMode $ \hIn ->
@@ -92,7 +90,7 @@ copyFileChunked src dest expectedSize bytesRef = do
                                 -- Update progress counter atomically
                                 atomicModifyIORef' bytesRef (\n -> (n + fromIntegral count, ()))
                                 loop newTotal
-                loop 0
+                loop (0 :: Integer)
 
 -- | Start a progress reporter thread and run an action.
 -- Automatically stops the reporter when the action completes.
@@ -125,7 +123,7 @@ syncProgressLoop progress = go
         filesCompleted <- readIORef (spFilesComplete progress)
         bytesCopied <- readIORef (spBytesCopied progress)
         totalBytes <- readIORef (spBytesTotal progress)
-        currentFile <- readIORef (spCurrentFile progress)
+        _currentFile <- readIORef (spCurrentFile progress)
         
         let filesPct = if spFilesTotal progress > 0
                        then (filesCompleted * 100) `div` spFilesTotal progress
@@ -146,7 +144,7 @@ syncProgressLoop progress = go
 
 -- | Run action with per-file print for non-TTY environments.
 actionWithPerFilePrint :: SyncProgress -> IO a -> IO a
-actionWithPerFilePrint progress action = action
+actionWithPerFilePrint _progress action = action
 -- For non-TTY, we'd print each file as it completes, but that requires
 -- hooking into each copyFileWithProgress call site. For now, just run the action.
 -- The caller can print messages manually if needed.

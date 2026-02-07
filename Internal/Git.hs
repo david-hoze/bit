@@ -50,12 +50,10 @@ module Internal.Git
     , getFilesAtCommit
     ) where
 
-import Data.List (lines)
 import Data.Maybe (mapMaybe, listToMaybe)
 
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
-import System.FilePath (takeDirectory, (</>))
 import Internal.Config
 import Data.Char (isSpace)
 import Control.Monad (when, guard)
@@ -64,19 +62,19 @@ import Data.List (isPrefixOf)
 import System.IO (hPutStr, hPutStrLn, stderr)
 import System.Environment (lookupEnv)
 
+baseFlags :: [String]
 baseFlags = ["-C", bitIndexPath]
-gitDir = ".git"
 
 -- | Represents the subset of Git functionality rgit uses
 data GitCommand
-    = Init { separateGitDir :: FilePath }
-    | Config { name :: String, value :: String }
-    | RevParse { ref :: String }
-    | CommitFile { message :: String, file :: FilePath }
-    | RevList { left :: String, right :: String }
-    | CreateBundle { createBundlePath :: FilePath }
-    | GetBundleHead { getBundleHeadPath :: FilePath }
-    | IsAncestor { ancestor :: String, descendant :: String }
+    = Init { _separateGitDir :: FilePath }
+    | Config { _configName :: String, _configValue :: String }
+    | RevParse { _revParseRef :: String }
+    | CommitFile { _commitMessage :: String, _commitFile :: FilePath }
+    | RevList { _revListLeft :: String, _revListRight :: String }
+    | CreateBundle { _createBundlePath :: FilePath }
+    | GetBundleHead { _getBundleHeadPath :: FilePath }
+    | IsAncestor { _ancestorHash :: String, _descendantHash :: String }
     | GetHead
 
 -- | Run a Git command and return (ExitCode, StdOut, StdErr)
@@ -89,7 +87,7 @@ runGit cmd = do
   where
     translateCommand :: GitCommand -> [String]
     translateCommand c = case c of
-        Init dir ->
+        Init _dir ->
             -- dir is the full path to .git directory (e.g., .rgit/index/.git)
             -- We need to change to the parent directory and run git init there
             -- Git will automatically create .git in the current directory
@@ -126,8 +124,8 @@ getLocalHead = do
     return $ (guard (code == ExitSuccess) >> Just (filter (not . isSpace) out))
 
 getHashFromBundle :: BundleName -> IO (Maybe String)
-getHashFromBundle name = do
-    let (GitRelPath relPath) = bundleGitRelPath name
+getHashFromBundle bundleName = do
+    let (GitRelPath relPath) = bundleGitRelPath bundleName
     (code, out, _) <- runGit (GetBundleHead relPath)
     return $ guard (code == ExitSuccess && not (null out)) >> listToMaybe (words out)
 
@@ -145,16 +143,19 @@ runGitCommand cmd = do
     isAncestorCommand (IsAncestor _ _) = True
     isAncestorCommand _ = False
 
-commitFile message file = runGitCommand (CommitFile message file)
+commitFile :: String -> FilePath -> IO ExitCode
+commitFile msg filePath = runGitCommand (CommitFile msg filePath)
 
+init :: FilePath -> IO ExitCode
 init dir = runGitCommand (Init dir)
 
 createBundle :: BundleName -> IO ExitCode
-createBundle name = do
-    let (GitRelPath relPath) = bundleGitRelPath name
+createBundle bundleName = do
+    let (GitRelPath relPath) = bundleGitRelPath bundleName
     runGitCommand (CreateBundle relPath)
 
-config name value = runGitCommand (Config name value)
+config :: String -> String -> IO ExitCode
+config configName configValue = runGitCommand (Config configName configValue)
 
 checkIsAhead :: String -> String -> IO Bool
 checkIsAhead rHash lHash = do
@@ -172,11 +173,6 @@ rewriteGitHints =
     replace "(use \"git " "(use \"bit "
 
 
-guardedArgs :: [String] -> IO [String]
-guardedArgs args =
-  if any (\a -> "--git-dir" `isPrefixOf` a || "--work-tree" `isPrefixOf` a || a == "-C") args
-     then fail "bit: overriding git-dir/work-tree/-C is not allowed"
-     else pure args
 
 runGitRaw :: [String] -> IO ExitCode
 runGitRaw args = do
@@ -202,32 +198,43 @@ runGitRaw args = do
 
   pure code
 
+add :: [String] -> IO ExitCode
 add     = runGitRaw . ("add" :)
+commit :: [String] -> IO ExitCode
 commit  = runGitRaw . ("commit" :)
+diff :: [String] -> IO ExitCode
 diff    = runGitRaw . ("diff" :)
+restore :: [String] -> IO ExitCode
 restore  = runGitRaw . ("restore" :)
+checkout :: [String] -> IO ExitCode
 checkout = runGitRaw . ("checkout" :)
+status :: [String] -> IO ExitCode
 status   = runGitRaw . ("status" :)
+reset :: [String] -> IO ExitCode
 reset   = runGitRaw . ("reset" :)
+rm :: [String] -> IO ExitCode
 rm      = runGitRaw . ("rm" :)
+mv :: [String] -> IO ExitCode
 mv      = runGitRaw . ("mv" :)
+branch :: [String] -> IO ExitCode
 branch  = runGitRaw . ("branch" :)
+merge :: [String] -> IO ExitCode
 merge   = runGitRaw . ("merge" :)
 
 -- | Add or update a remote (Git-style: git remote add <name> <url> / set-url if exists)
 addRemote :: String -> String -> IO ExitCode
-addRemote name url = do
-    (code, _, _) <- readProcessWithExitCode "git" (baseFlags ++ ["remote", "get-url", name]) ""
+addRemote remoteName url = do
+    (code, _, _) <- readProcessWithExitCode "git" (baseFlags ++ ["remote", "get-url", remoteName]) ""
     case code of
         ExitSuccess -> do
-            readProcessWithExitCode "git" (baseFlags ++ ["remote", "set-url", name, url]) "" >>= \(c, _, _) -> return c
+            readProcessWithExitCode "git" (baseFlags ++ ["remote", "set-url", remoteName, url]) "" >>= \(c, _, _) -> return c
         ExitFailure _ -> do
-            readProcessWithExitCode "git" (baseFlags ++ ["remote", "add", name, url]) "" >>= \(c, _, _) -> return c
+            readProcessWithExitCode "git" (baseFlags ++ ["remote", "add", remoteName, url]) "" >>= \(c, _, _) -> return c
 
 -- | Get the URL for a remote by name (git remote get-url <name>). Returns Nothing if remote missing.
 getRemoteUrl :: String -> IO (Maybe String)
-getRemoteUrl name = do
-    (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["remote", "get-url", name]) ""
+getRemoteUrl remoteName = do
+    (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["remote", "get-url", remoteName]) ""
     if code /= ExitSuccess then return Nothing
     else return (Just (filter (/= '\n') out))
 
@@ -249,8 +256,8 @@ setupRemote url = addRemote "origin" url
 -- objects and refs/remotes/origin/main exist in .rgit/index/.git. This is the "real"
 -- pull from the fetched bundle; without it, the ref would point to a hash not in the repo.
 fetchFromBundle :: BundleName -> IO ExitCode
-fetchFromBundle name = do
-    let (GitRelPath bundle) = bundleGitRelPath name
+fetchFromBundle bundleName = do
+    let (GitRelPath bundle) = bundleGitRelPath bundleName
     (code, out, err) <- readProcessWithExitCode "git"
         (baseFlags ++ ["fetch", bundle, "+refs/heads/main:refs/remotes/origin/main"]) ""
     putStr out
@@ -260,8 +267,8 @@ fetchFromBundle name = do
 -- | Update the remote tracking branch refs/remotes/origin/main to point to the hash from the bundle.
 -- Use when the objects are already in the repo (e.g. after push); for fetch/pull use fetchFromBundle.
 updateRemoteTrackingBranch :: BundleName -> IO ExitCode
-updateRemoteTrackingBranch name = do
-    maybeHash <- getHashFromBundle name
+updateRemoteTrackingBranch bundleName = do
+    maybeHash <- getHashFromBundle bundleName
     case maybeHash of
         Just hash -> do
             -- Update the remote tracking branch ref
@@ -412,16 +419,16 @@ checkoutTheirs path = do
 -- | Read file content from a Git ref (e.g., "refs/remotes/origin/main:path/to/file").
 -- Returns Nothing if file doesn't exist in that ref.
 readFileFromRef :: String -> FilePath -> IO (Maybe String)
-readFileFromRef ref path = do
-  (code, out, err) <- runGitWithOutput ["show", ref ++ ":" ++ path]
+readFileFromRef gitRef path = do
+  (code, out, _err) <- runGitWithOutput ["show", gitRef ++ ":" ++ path]
   if code == ExitSuccess && not (null out)
     then return (Just out)
     else return Nothing
 
 -- | List all files in a Git ref's tree (recursive). Returns paths relative to work tree root.
 listFilesInRef :: String -> IO [FilePath]
-listFilesInRef ref = do
-  (code, out, _) <- runGitWithOutput ["ls-tree", "-r", "--name-only", ref]
+listFilesInRef gitRef = do
+  (code, out, _) <- runGitWithOutput ["ls-tree", "-r", "--name-only", gitRef]
   if code == ExitSuccess
     then return (filter (not . null) (lines out))
     else return []
@@ -451,23 +458,23 @@ parseNameStatus :: String -> [(Char, FilePath, Maybe FilePath)]
 parseNameStatus = mapMaybe parseLine . lines
   where
     parseLine line = case line of
-        (status:rest)
-            | status == 'R' || status == 'C' ->
+        (fileStatus:rest)
+            | fileStatus == 'R' || fileStatus == 'C' ->
                 -- R100\told\tnew or Rnnn old new (tab-separated)
                 case words (dropWhile (\c -> c /= '\t' && c /= ' ') rest) of
-                    (old:new:_) -> Just (status, old, Just new)
+                    (old:new:_) -> Just (fileStatus, old, Just new)
                     _ -> Nothing
-            | status `elem` "ADM" ->
+            | fileStatus `elem` "ADM" ->
                 case words rest of
-                    (path:_) -> Just (status, path, Nothing)
+                    (path:_) -> Just (fileStatus, path, Nothing)
                     _ -> Nothing
             | otherwise -> Nothing
         _ -> Nothing
 
 -- | Get all file paths at a given commit. Used when there's no old HEAD to diff against.
 getFilesAtCommit :: String -> IO [FilePath]
-getFilesAtCommit ref = do
-    (code, out, _) <- runGitWithOutput ["ls-tree", "-r", "--name-only", ref]
+getFilesAtCommit gitRef = do
+    (code, out, _) <- runGitWithOutput ["ls-tree", "-r", "--name-only", gitRef]
     if code /= ExitSuccess then return []
     else return (filter (not . null) (lines out))
 

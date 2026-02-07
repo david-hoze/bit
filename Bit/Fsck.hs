@@ -11,7 +11,7 @@ import qualified Internal.Git as Git
 import Bit.Concurrency (Concurrency(..))
 import System.FilePath ((</>))
 import System.Exit (ExitCode(..), exitWith)
-import Control.Monad (unless, when)
+import Control.Monad (when)
 import System.IO (hPutStr, hPutStrLn, hFlush, hSetBuffering, BufferMode(..), stderr, hIsTerminalDevice)
 import Data.IORef (newIORef, readIORef, IORef)
 import Control.Concurrent (forkIO, threadDelay, killThread)

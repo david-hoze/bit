@@ -23,11 +23,3 @@ planAction (Modified f)      = Copy f.filePath f.filePath -- Upload over existin
 planAction (Renamed old new) = Move old.filePath new.filePath
 planAction (Added f)         = Copy f.filePath f.filePath
 planAction (Deleted f)       = Delete f.filePath
-
--- | Safety Planner: Logic to handle complex swaps using temporary paths
--- Thanks to ADTs, the system always knows if a temp file is required
-makeSwapPlan :: Path -> Path -> [RcloneAction]
-makeSwapPlan pathA pathB =
-    let tempPath = pathA ++ ".tmp"
-    in [ Swap tempPath pathA pathB ]
-

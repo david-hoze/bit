@@ -18,19 +18,17 @@ module Internal.Transport
     , CheckResult(..)
     ) where
 
-import System.Process (readProcessWithExitCode, readProcess, readCreateProcess, CreateProcess(..), StdStream(..), proc, waitForProcess, createProcess)
+import System.Process (readProcessWithExitCode, CreateProcess(..), StdStream(..), proc, waitForProcess, createProcess)
 import System.Exit (ExitCode(..))
-import System.Directory (removeFile, doesFileExist)
-import System.IO (hPutStrLn, stderr, hGetLine, hIsEOF, hClose, hGetContents, Handle)
+import System.IO (hGetLine, hIsEOF, hClose, Handle)
 import System.FilePath (normalise)
-import Control.Monad (when, unless, void)
+import Control.Monad (unless, void)
 import Control.Concurrent.Async (async, wait)
-import Data.List (isInfixOf, isPrefixOf)
+import Data.List (isInfixOf)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
-import Data.Maybe (fromMaybe)
 import Data.String (fromString)
 import Bit.Remote (Remote, remoteUrl)
 import Data.IORef (IORef, modifyIORef')

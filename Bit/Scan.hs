@@ -24,21 +24,17 @@ import System.Directory
       getFileSize,
       createDirectoryIfMissing,
       copyFileWithMetadata,
-      getCurrentDirectory,
       getModificationTime )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, stderr)
 import Data.List
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
-import Data.Text (unpack)
 import Control.Monad (void, when, forM_)
 import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
 import qualified Internal.ConfigFile as ConfigFile
 import Bit.Utils (atomicWriteFileStr)
 import Bit.Internal.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
-import System.Process (readProcessWithExitCode)
-import System.Exit (ExitCode(..))
 import qualified Data.Set as Set
 import qualified Crypto.Hash.MD5 as MD5
 import Data.ByteString.Base16 (encode)
@@ -255,7 +251,7 @@ scanWorkingDir root = do
       ignoredSet <- checkIgnoredFiles root filePaths
     
       -- Separate directories from files to hash
-      let (dirs, files) = partition snd allPaths
+      let (dirs, _files) = partition snd allPaths
           dirEntries = [FileEntry { path = rel, kind = Directory } | (rel, _) <- dirs]
           filesToHash = [(rel, root </> rel) | (rel, False) <- allPaths
                                              , not (Set.member (normalizePath rel) ignoredSet)]
@@ -387,6 +383,7 @@ writeMetadataFiles root entries = do
                       atomicModifyIORef' skipped (\n -> (n + 1, ()))
                       atomicModifyIORef' counter (\n -> (n + 1, ()))
                 Directory -> return ()  -- Already handled in first pass
+                Symlink _ -> return ()  -- Symlinks handled separately
     
       finally
           (void $ mapConcurrentlyBounded concurrency writeWithProgress files)

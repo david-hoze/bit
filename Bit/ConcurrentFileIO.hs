@@ -32,7 +32,7 @@ module Bit.ConcurrentFileIO
   , T.Text
   ) where
 
-import Prelude (FilePath, IO, Maybe(..), Either(..), String, pure, ($), (.))
+import Prelude (FilePath, Maybe(..), Either(..), pure, ($), (.))
 import Control.Exception (try, SomeException, throwIO)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.ByteString as BS

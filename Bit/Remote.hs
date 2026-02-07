@@ -12,10 +12,6 @@ module Bit.Remote
 
 import qualified Internal.Git as Git
 import qualified Bit.Device as Device
-import Internal.Config (bitRemotesDir)
-import System.FilePath ((</>))
-import System.Directory (doesFileExist)
-import Data.Maybe (fromMaybe)
 
 -- | A resolved remote. Bit.hs works with this; only Transport sees the url.
 data Remote = Remote

@@ -31,12 +31,12 @@ module Bit.Process
   , ExitCode(..)
   ) where
 
-import Prelude (FilePath, IO, String, Maybe(..), Either(..), ($), (.), (<$>), pure, return, either, id, const, error)
-import Control.Concurrent.Async (async, wait, waitCatch)
-import Control.Exception (bracket, try, SomeException, throwIO)
+import Prelude (FilePath, IO, String, Maybe(..), Either(..), ($), pure, return, error)
+import Control.Concurrent.Async (async, wait)
+import Control.Exception (bracket, try, SomeException)
 import Control.Monad (void)
 import System.Exit (ExitCode(..))
-import System.IO (Handle, hClose)
+import System.IO (hClose)
 import System.Process
   ( CreateProcess(..)
   , StdStream(..)
@@ -78,8 +78,8 @@ readProcessStrict cmd args = do
         , std_in  = CreatePipe
         }
   
-  bracket (createProcess cp) cleanupProcess $ \(mStdin, mStdout, mStderr, ph) -> do
-    case (mStdin, mStdout, mStderr) of
+  bracket (createProcess cp) cleanupProcess $ \(mStdin, mStdout, _mStderr, ph) -> do
+    case (mStdin, mStdout, _mStderr) of
       (Just hIn, Just hOut, Just hErr) -> do
         -- Close stdin immediately (we don't send input)
         hClose hIn
@@ -101,7 +101,7 @@ readProcessStrict cmd args = do
       
       _ -> error "Bit.Process.readProcessStrict: failed to create pipes"
   where
-    cleanupProcess (mStdin, mStdout, mStderr, ph) = do
+    cleanupProcess (mStdin, mStdout, _mStderr, ph) = do
       -- Try to close any handles that are still open
       -- (BS.hGetContents closes the handle, but we need cleanup for stdin)
       case mStdin of
@@ -112,7 +112,7 @@ readProcessStrict cmd args = do
         Just h -> void (try (hClose h) :: IO (Either SomeException ()))
         Nothing -> pure ()
       
-      case mStderr of
+      case _mStderr of
         Just h -> void (try (hClose h) :: IO (Either SomeException ()))
         Nothing -> pure ()
       
@@ -143,7 +143,7 @@ readProcessStrictWithStderr cmd args = do
         , std_in  = CreatePipe
         }
   
-  bracket (createProcess cp) cleanupProcess $ \(mStdin, mStdout, mStderr, ph) -> do
+  bracket (createProcess cp) cleanupProcess $ \(mStdin, mStdout, _mStderr, ph) -> do
     case (mStdin, mStdout) of
       (Just hIn, Just hOut) -> do
         -- Close stdin immediately (we don't send input)
@@ -161,7 +161,7 @@ readProcessStrictWithStderr cmd args = do
       
       _ -> error "Bit.Process.readProcessStrictWithStderr: failed to create pipes"
   where
-    cleanupProcess (mStdin, mStdout, mStderr, ph) = do
+    cleanupProcess (mStdin, mStdout, _mStderr, ph) = do
       -- Try to close any handles that are still open
       case mStdin of
         Just h -> void (try (hClose h) :: IO (Either SomeException ()))

@@ -99,8 +99,8 @@ atomicWriteFileStr path str = atomicWriteFile path (encodeUtf8 (pack str))
 -- level rather than the file level.
 data DirWriteLock = DirWriteLock
   { dwlMVar    :: MVar ()     -- ^ Thread-level coordination
-  , dwlDir     :: FilePath    -- ^ Directory being protected
-  , dwlLockFile :: FilePath   -- ^ Path to .lock file (for future file locking)
+  , _dwlDir     :: FilePath    -- ^ Directory being protected
+  , _dwlLockFile :: FilePath   -- ^ Path to .lock file (for future file locking)
   }
 
 -- | Create a new directory write lock.

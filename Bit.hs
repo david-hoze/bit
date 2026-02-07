@@ -7,6 +7,7 @@ import System.Process (callCommand)
 import Control.Exception (catch, SomeException)
 import Control.Monad (when)
 
+main :: IO ()
 main = do
     -- Set console to UTF-8 on Windows (only when interactive)
     -- Skip during automated tests to avoid git binary file issues
