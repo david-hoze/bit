@@ -8,7 +8,7 @@ module Bit.Verify
   , verifyLocalAt
   , verifyRemote
   , VerifyIssue(..)
-  , loadMetadataIndex
+  , loadBinaryMetadata
   , loadMetadataFromBundle
   , MetadataEntry(..)
   , MetadataSource(..)
@@ -159,11 +159,10 @@ readEntryFromCommit commitHash relPath = do
       Nothing ->
         return (TextEntry relPath)  -- text file: content IS the data, skip hash verify
 
--- | Load all metadata from .rgit/index: list of (relative path, expected hash, expected size).
--- Returns only binary entries as (path, hash, size) triples for backward compatibility.
--- Callers that need text-file awareness should use loadMetadata directly.
-loadMetadataIndex :: FilePath -> Concurrency -> IO [(Path, Hash 'MD5, Integer)]
-loadMetadataIndex indexDir concurrency =
+-- | Load only binary (hash-verifiable) metadata entries from the index.
+-- Text files are excluded. If you need all entries, use 'loadMetadata' directly.
+loadBinaryMetadata :: FilePath -> Concurrency -> IO [(Path, Hash 'MD5, Integer)]
+loadBinaryMetadata indexDir concurrency =
   binaryEntries <$> loadMetadata (FromFilesystem indexDir) concurrency
 
 -- | Verify working tree at an arbitrary root path against metadata at that path.

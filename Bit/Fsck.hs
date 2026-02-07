@@ -30,7 +30,7 @@ doFsck cwd concurrency = do
   -- [1/2] Working tree vs local metadata
   -- Get file count first
   let indexDir = cwd </> ".bit/index"
-  meta <- Verify.loadMetadataIndex indexDir concurrency
+  meta <- Verify.loadBinaryMetadata indexDir concurrency
   let fileCount = length meta
   
   -- Run verification with progress if enough files

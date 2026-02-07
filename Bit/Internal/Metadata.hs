@@ -88,7 +88,7 @@ parseMetadataFile fp = do
 
 -- | Read a metadata file OR (if it's a text file whose content is stored directly)
 -- compute hash/size from the file bytes. This is the replacement for the fallback
--- logic in Rgit.Scan.readMetadataFile and Rgit.Verify.loadMetadataIndex.
+-- logic in Rgit.Scan.readMetadataFile and Rgit.Verify.loadBinaryMetadata.
 readMetadataOrComputeHash :: FilePath -> IO (Maybe MetaContent)
 readMetadataOrComputeHash fp = do
   exists <- doesFileExist fp

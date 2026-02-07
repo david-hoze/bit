@@ -544,7 +544,7 @@ verify isRemote concurrency
       cwd <- asks envCwd
       -- Get file count first by loading metadata
       let indexDir = cwd </> ".bit/index"
-      meta <- liftIO $ Verify.loadMetadataIndex indexDir concurrency
+      meta <- liftIO $ Verify.loadBinaryMetadata indexDir concurrency
       let fileCount = length meta
       
       -- Setup progress tracking if we have enough files
@@ -2034,7 +2034,7 @@ pullManualMergeImpl remote = do
                 Left _ -> lift $ tellErr "Error: Could not fetch remote file list."
                 Right remoteFiles -> do
                     let filteredRemoteFiles = filterOutBitPaths remoteFiles
-                    localMeta <- lift $ Verify.loadMetadataIndex (cwd </> bitIndexPath) (Parallel 0)
+                    localMeta <- lift $ Verify.loadBinaryMetadata (cwd </> bitIndexPath) (Parallel 0)
 
                     let remoteFileMap = Map.fromList
                           [ (normalise e.path, (h, e.kind))
