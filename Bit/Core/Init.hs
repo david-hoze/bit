@@ -65,7 +65,7 @@ initializeRepoAt targetDir = do
     -- 5. Rename the initial branch to "main" if it's "master"
     (code, _, _) <- Git.runGitAt targetBitIndexPath ["branch", "-m", "master", "main"]
     when (code /= ExitSuccess) $
-        return ()
+        pure ()
 
     -- 6. Create other .bit subdirectories
     Dir.createDirectoryIfMissing True targetBitDevicesDir

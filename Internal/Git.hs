@@ -121,13 +121,13 @@ runGit cmd = do
 getLocalHead :: IO (Maybe String)
 getLocalHead = do
     (code, out, _) <- runGit GetHead
-    return $ (guard (code == ExitSuccess) >> Just (filter (not . isSpace) out))
+    pure (guard (code == ExitSuccess) >> Just (filter (not . isSpace) out))
 
 getHashFromBundle :: BundleName -> IO (Maybe String)
 getHashFromBundle bundleName = do
     let (GitRelPath relPath) = bundleGitRelPath bundleName
     (code, out, _) <- runGit (GetBundleHead relPath)
-    return $ guard (code == ExitSuccess && not (null out)) >> listToMaybe (words out)
+    pure (guard (code == ExitSuccess && not (null out)) >> listToMaybe (words out))
 
 runGitCommand :: GitCommand -> IO ExitCode
 runGitCommand cmd = do
@@ -138,7 +138,7 @@ runGitCommand cmd = do
         hPutStrLn stderr ("bit: git command failed: " ++ e)
     putStr o
     hPutStr stderr e
-    return c
+    pure c
   where
     isAncestorCommand (IsAncestor _ _) = True
     isAncestorCommand _ = False
@@ -160,7 +160,7 @@ config configName configValue = runGitCommand (Config configName configValue)
 checkIsAhead :: String -> String -> IO Bool
 checkIsAhead rHash lHash = do
     code <- runGitCommand (IsAncestor rHash lHash)
-    return (code == ExitSuccess)
+    pure (code == ExitSuccess)
 
 replace :: String -> String -> String -> String
 replace _ _ [] = []
@@ -227,16 +227,16 @@ addRemote remoteName url = do
     (code, _, _) <- readProcessWithExitCode "git" (baseFlags ++ ["remote", "get-url", remoteName]) ""
     case code of
         ExitSuccess -> do
-            readProcessWithExitCode "git" (baseFlags ++ ["remote", "set-url", remoteName, url]) "" >>= \(c, _, _) -> return c
+            readProcessWithExitCode "git" (baseFlags ++ ["remote", "set-url", remoteName, url]) "" >>= \(c, _, _) -> pure c
         ExitFailure _ -> do
-            readProcessWithExitCode "git" (baseFlags ++ ["remote", "add", remoteName, url]) "" >>= \(c, _, _) -> return c
+            readProcessWithExitCode "git" (baseFlags ++ ["remote", "add", remoteName, url]) "" >>= \(c, _, _) -> pure c
 
 -- | Get the URL for a remote by name (git remote get-url <name>). Returns Nothing if remote missing.
 getRemoteUrl :: String -> IO (Maybe String)
 getRemoteUrl remoteName = do
     (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["remote", "get-url", remoteName]) ""
-    if code /= ExitSuccess then return Nothing
-    else return (Just (filter (/= '\n') out))
+    if code /= ExitSuccess then pure Nothing
+    else pure (Just (filter (/= '\n') out))
 
 -- | Get the remote name that the current branch tracks (branch.main.remote).
 -- Falls back to "origin" if not configured — this means commands work with
@@ -245,8 +245,8 @@ getRemoteUrl remoteName = do
 getTrackedRemoteName :: IO String
 getTrackedRemoteName = do
     (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["config", "--get", "branch.main.remote"]) ""
-    if code /= ExitSuccess then return "origin"
-    else return (filter (/= '\n') out)
+    if code /= ExitSuccess then pure "origin"
+    else pure (filter (/= '\n') out)
 
 -- | Set up a git remote named "origin" pointing to the given URL (legacy / internal use)
 setupRemote :: String -> IO ExitCode
@@ -262,7 +262,7 @@ fetchFromBundle bundleName = do
         (baseFlags ++ ["fetch", bundle, "+refs/heads/main:refs/remotes/origin/main"]) ""
     putStr out
     hPutStr stderr err
-    return code
+    pure code
 
 -- | Update the remote tracking branch refs/remotes/origin/main to point to the hash from the bundle.
 -- Use when the objects are already in the repo (e.g. after push); for fetch/pull use fetchFromBundle.
@@ -274,13 +274,13 @@ updateRemoteTrackingBranch bundleName = do
             -- Update the remote tracking branch ref
             -- Use update-ref to create or update refs/remotes/origin/main
             updateRemoteTrackingBranchToHash hash
-        Nothing -> return (ExitFailure 1)
+        Nothing -> pure (ExitFailure 1)
 
 -- | Set refs/remotes/origin/main to a specific hash. Use after a successful pull so status shows
 -- "up to date with 'origin/main'" instead of "ahead by N commits".
 updateRemoteTrackingBranchToHash :: String -> IO ExitCode
 updateRemoteTrackingBranchToHash hash =
-    readProcessWithExitCode "git" (baseFlags ++ ["update-ref", "refs/remotes/origin/main", hash]) "" >>= \(c, _, _) -> return c
+    readProcessWithExitCode "git" (baseFlags ++ ["update-ref", "refs/remotes/origin/main", hash]) "" >>= \(c, _, _) -> pure c
 
 -- | Set refs/remotes/origin/main to current HEAD.
 -- WARNING: Only correct after PUSH (where remote now matches local HEAD).
@@ -293,7 +293,7 @@ updateRemoteTrackingBranchToHead = do
     case filter (/= '\n') out of
         hash | code == ExitSuccess && not (null hash) ->
             updateRemoteTrackingBranchToHash hash
-        _ -> return (ExitFailure 1)
+        _ -> pure (ExitFailure 1)
 
 -- | Set up the local branch to track a specific remote
 -- Configures branch.main.remote and branch.main.merge
@@ -304,8 +304,8 @@ setupBranchTrackingFor remoteName = do
     (code2, _, _) <- readProcessWithExitCode "git"
         (baseFlags ++ ["config", "branch.main.merge", "refs/heads/main"]) ""
     case (code1, code2) of
-        (ExitSuccess, ExitSuccess) -> return ExitSuccess
-        _ -> return (ExitFailure 1)
+        (ExitSuccess, ExitSuccess) -> pure ExitSuccess
+        _ -> pure (ExitFailure 1)
 
 -- | Set up the local branch to track origin/main
 -- This configures branch.main.remote and branch.main.merge so git status knows what to compare
@@ -316,7 +316,7 @@ setupBranchTracking = setupBranchTrackingFor "origin"
 unsetBranchUpstream :: IO ExitCode
 unsetBranchUpstream = do
     (code, _, _) <- readProcessWithExitCode "git" (baseFlags ++ ["branch", "--unset-upstream"]) ""
-    return code
+    pure code
 
 -- | Merge refs/remotes/origin/main into the current branch (HEAD).
 -- Used by rgit pull after fetching the remote bundle.
@@ -343,13 +343,13 @@ mergeAbort = do
   (code, out, err) <- runGitWithOutput ["merge", "--abort"]
   putStr (rewriteGitHints out)
   hPutStr stderr (rewriteGitHints err)
-  return code
+  pure code
 
 -- | True if a merge is in progress (MERGE_HEAD exists).
 isMergeInProgress :: IO Bool
 isMergeInProgress = do
   (code, _, _) <- runGitWithOutput ["rev-parse", "--verify", "MERGE_HEAD"]
-  return (code == ExitSuccess)
+  pure (code == ExitSuccess)
 
 -- | Checkout refs/remotes/origin/main as the local main branch.
 -- Used on first pull when there are no local commits (unborn branch).
@@ -366,13 +366,13 @@ checkoutRemoteAsMain = do
   -- Use -f to force overwrite of any local files (like .gitattributes from init)
   -- Use --no-track to prevent auto-setting branch.main.remote (git-standard: require explicit -u)
   (code, _, _) <- runGitWithOutput ["checkout", "-f", "-B", "main", "--no-track", "refs/remotes/origin/main"]
-  return code
+  pure code
 
 -- | Paths relative to work tree (index/...) that are unmerged.
 getConflictedFiles :: IO [FilePath]
 getConflictedFiles = do
   (code, out, _) <- runGitWithOutput ["diff", "--name-only", "--diff-filter=U"]
-  if code /= ExitSuccess then return [] else return (filter (not . null) (lines out))
+  if code /= ExitSuccess then pure [] else pure (filter (not . null) (lines out))
 
 -- | Conflict type for Git-like messages. Path is work-tree relative (e.g. index/src/model.bin).
 data ConflictType
@@ -394,11 +394,11 @@ getConflictType path = do
   let has1 = 1 `elem` stageNums
   let has2 = 2 `elem` stageNums
   let has3 = 3 `elem` stageNums
-  if has2 && has3 && has1 then return (ContentConflict path)
-  else if has2 && has3 && not has1 then return (AddAdd path)
-  else if has2 && not has3 then return (ModifyDelete path False)  -- deleted in theirs
-  else if has3 && not has2 then return (ModifyDelete path True)   -- deleted in ours (HEAD)
-  else return (ContentConflict path)
+  if has2 && has3 && has1 then pure (ContentConflict path)
+  else if has2 && has3 && not has1 then pure (AddAdd path)
+  else if has2 && not has3 then pure (ModifyDelete path False)  -- deleted in theirs
+  else if has3 && not has2 then pure (ModifyDelete path True)   -- deleted in ours (HEAD)
+  else pure (ContentConflict path)
 
 -- | Check out our version for path (work-tree path under .rgit/index).
 checkoutOurs :: FilePath -> IO ExitCode
@@ -406,7 +406,7 @@ checkoutOurs path = do
   (code, out, err) <- runGitWithOutput ["checkout", "--ours", "--", path]
   putStr (rewriteGitHints out)
   hPutStr stderr (rewriteGitHints err)
-  return code
+  pure code
 
 -- | Check out their version for path.
 checkoutTheirs :: FilePath -> IO ExitCode
@@ -414,7 +414,7 @@ checkoutTheirs path = do
   (code, out, err) <- runGitWithOutput ["checkout", "--theirs", "--", path]
   putStr (rewriteGitHints out)
   hPutStr stderr (rewriteGitHints err)
-  return code
+  pure code
 
 -- | Read file content from a Git ref (e.g., "refs/remotes/origin/main:path/to/file").
 -- Returns Nothing if file doesn't exist in that ref.
@@ -422,16 +422,16 @@ readFileFromRef :: String -> FilePath -> IO (Maybe String)
 readFileFromRef gitRef path = do
   (code, out, _err) <- runGitWithOutput ["show", gitRef ++ ":" ++ path]
   if code == ExitSuccess && not (null out)
-    then return (Just out)
-    else return Nothing
+    then pure (Just out)
+    else pure Nothing
 
 -- | List all files in a Git ref's tree (recursive). Returns paths relative to work tree root.
 listFilesInRef :: String -> IO [FilePath]
 listFilesInRef gitRef = do
   (code, out, _) <- runGitWithOutput ["ls-tree", "-r", "--name-only", gitRef]
   if code == ExitSuccess
-    then return (filter (not . null) (lines out))
-    else return []
+    then pure (filter (not . null) (lines out))
+    else pure []
 
 -- | Run git fsck to check metadata history integrity.
 -- Returns (exitCode, output, errorOutput).
@@ -443,7 +443,7 @@ fsck = runGitWithOutput ["fsck"]
 hasStagedChanges :: IO Bool
 hasStagedChanges = do
   (code, _, _) <- runGitWithOutput ["diff", "--cached", "--quiet"]
-  return (code == ExitFailure 1)  -- git diff --cached --quiet exits with 1 if there are changes
+  pure (code == ExitFailure 1)  -- git diff --cached --quiet exits with 1 if there are changes
 
 -- | Get the list of file changes between two commits.
 -- Returns list of (status, path, maybe-new-path-for-renames).
@@ -451,8 +451,8 @@ hasStagedChanges = do
 getDiffNameStatus :: String -> String -> IO [(Char, FilePath, Maybe FilePath)]
 getDiffNameStatus oldHead newHead = do
     (code, out, _) <- runGitWithOutput ["diff", "--name-status", oldHead, newHead]
-    if code /= ExitSuccess then return []
-    else return (parseNameStatus out)
+    if code /= ExitSuccess then pure []
+    else pure (parseNameStatus out)
 
 parseNameStatus :: String -> [(Char, FilePath, Maybe FilePath)]
 parseNameStatus = mapMaybe parseLine . lines
@@ -475,8 +475,8 @@ parseNameStatus = mapMaybe parseLine . lines
 getFilesAtCommit :: String -> IO [FilePath]
 getFilesAtCommit gitRef = do
     (code, out, _) <- runGitWithOutput ["ls-tree", "-r", "--name-only", gitRef]
-    if code /= ExitSuccess then return []
-    else return (filter (not . null) (lines out))
+    if code /= ExitSuccess then pure []
+    else pure (filter (not . null) (lines out))
 
 -- | Run a git command targeting a specific index path (for filesystem remotes).
 -- This is used when operating on a remote filesystem repo directly.

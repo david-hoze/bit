@@ -13,7 +13,7 @@ main = do
     -- Skip during automated tests to avoid git binary file issues
     isTerminal <- hIsTerminalDevice stdout
     when (os == "mingw32" && isTerminal) $
-        callCommand "chcp 65001 > nul 2>&1" `catch` \(_ :: SomeException) -> return ()
+        callCommand "chcp 65001 > nul 2>&1" `catch` \(_ :: SomeException) -> pure ()
     
     -- Set UTF-8 for stdout/stderr to properly display Unicode characters
     hSetEncoding stdout utf8

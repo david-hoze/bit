@@ -41,7 +41,7 @@ newSyncProgress total = do
     bytesTotal <- newIORef 0
     bytesCopied <- newIORef 0
     currentFile <- newIORef ""
-    return SyncProgress
+    pure SyncProgress
         { spFilesTotal = total
         , spFilesComplete = complete
         , spBytesTotal = bytesTotal
@@ -83,7 +83,7 @@ copyFileChunked src dest _expectedSize bytesRef = do
                 let loop !bytesSoFar = do
                         count <- hGetBuf hIn buffer chunkSize
                         if count == 0
-                            then return ()  -- EOF
+                            then pure ()  -- EOF
                             else do
                                 hPutBuf hOut buffer count
                                 let newTotal = bytesSoFar + fromIntegral count

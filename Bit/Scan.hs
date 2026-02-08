@@ -26,7 +26,7 @@ import System.Directory
       copyFileWithMetadata,
       getModificationTime )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, stderr)
-import Data.List
+import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf, lines, dropWhile, drop, filter, map, concat, partition, null)
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
 import Control.Monad (void, when, forM_)
@@ -62,7 +62,7 @@ hashAndClassifyFile filePath size config = do
     if size >= ConfigFile.textSizeLimit config || ext `elem` binaryExtensions
         then do
             h <- streamHash filePath
-            return (h, False)
+            pure (h, False)
         else
             -- Single-pass: read first 8KB for classification, continue streaming for hash
             withFile filePath ReadMode $ \handle -> do
@@ -78,14 +78,14 @@ hashAndClassifyFile filePath size config = do
                         if eof
                             then do
                                 let md5hex = decodeUtf8 (encode (MD5.finalize ctx))
-                                return (Hash (T.pack "md5:" <> md5hex))
+                                pure (Hash (T.pack "md5:" <> md5hex))
                             else do
                                 chunk <- BS.hGet handle 65536
                                 loop (MD5.update ctx chunk)
                 
                 -- Start with first chunk already included
                 h <- loop (MD5.update MD5.init firstChunk)
-                return (h, isText)
+                pure (h, isText)
   where
     -- Stream hash for files we're not classifying
     streamHash fp = withFile fp ReadMode $ \h -> do
@@ -94,7 +94,7 @@ hashAndClassifyFile filePath size config = do
                 if eof
                     then do
                         let md5hex = decodeUtf8 (encode (MD5.finalize ctx))
-                        return (Hash (T.pack "md5:" <> md5hex))
+                        pure (Hash (T.pack "md5:" <> md5hex))
                     else do
                         chunk <- BS.hGet h 65536
                         loop (MD5.update ctx chunk)
@@ -141,7 +141,7 @@ parseCacheEntry content = do
       , ceIsText = isText
       }
   where
-    trim = dropWhile isSpaceChar . reverse . dropWhile isSpaceChar . reverse
+    trim = dropWhileEnd isSpaceChar . dropWhile isSpaceChar
     isSpaceChar c = c == ' ' || c == '\t' || c == '\r' || c == '\n'
     readMaybeInt s = case reads s of
       [(n, "")] -> Just n
@@ -158,13 +158,13 @@ loadCacheEntry root relPath = do
   let cachePath = root </> ".bit" </> "cache" </> relPath
   exists <- doesFileExist cachePath
   if not exists
-    then return Nothing
+    then pure Nothing
     else do
       -- Use strict bytestring reading to avoid lazy file handle issues on Windows
       bs <- BS.readFile cachePath
       case decodeUtf8' bs of
-        Left _ -> return Nothing
-        Right txt -> return (parseCacheEntry (T.unpack txt))
+        Left _ -> pure Nothing
+        Right txt -> pure (parseCacheEntry (T.unpack txt))
 
 -- | Save cache entry for a file (non-atomic write, cache corruption is acceptable)
 saveCacheEntry :: FilePath -> FilePath -> CacheEntry -> IO ()
@@ -202,7 +202,7 @@ checkIgnoredFiles root paths = do
     let gitignorePath = root </> ".bit" </> "index" </> ".gitignore"
     exists <- doesFileExist gitignorePath
     if not exists
-        then return Set.empty
+        then pure Set.empty
         else do
             -- Use strict ByteString reading to avoid lazy file handle issues on Windows
             bs <- BS.readFile gitignorePath
@@ -214,7 +214,7 @@ checkIgnoredFiles root paths = do
                            filter (not . ("#" `isPrefixOf`)) $  -- Skip comments
                            map (filter (`notElem` whitespace)) (lines content)
             let isIgnored p = any (`matchesPattern` p) patterns
-            return $ Set.fromList $ filter isIgnored paths
+            pure $ Set.fromList $ filter isIgnored paths
 
 -- | Bounded parallel map: runs up to @bound@ actions concurrently.
 mapConcurrentlyBounded :: Int -> (a -> IO b) -> [a] -> IO [b]
@@ -238,7 +238,7 @@ scanWorkingDir :: FilePath -> IO [FileEntry]
 scanWorkingDir root = do
     let bitRoot = root </> ".bit"
     bitExists <- doesDirectoryExist bitRoot
-    if not bitExists then return []
+    if not bitExists then pure []
     else do
       -- Read config once for all files
       config <- ConfigFile.readTextConfig
@@ -273,7 +273,7 @@ scanWorkingDir root = do
                 Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
                   -- Cache hit: reuse hash and isText
                   atomicModifyIORef' counter (\n -> (n + 1, ()))
-                  return $ FileEntry
+                  pure $ FileEntry
                       { path = rel
                       , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fIsText = ceIsText ce }
                       }
@@ -282,7 +282,7 @@ scanWorkingDir root = do
                   (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
                   saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h isText)
                   atomicModifyIORef' counter (\n -> (n + 1, ()))
-                  return $ FileEntry
+                  pure $ FileEntry
                       { path = rel
                       , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
                       }
@@ -302,7 +302,7 @@ scanWorkingDir root = do
               -- No progress for small scans
               hashingAction
     
-      return $ dirEntries ++ fileEntries
+      pure $ dirEntries ++ fileEntries
   where
     collectPaths :: FilePath -> IO [(FilePath, Bool)]
     collectPaths path = do
@@ -355,7 +355,7 @@ writeMetadataFiles root entries = do
       let shouldShowProgress = isTTY && total > 10
       reporterThread <- if shouldShowProgress
           then Just <$> forkIO (writeProgressLoop counter skipped total)
-          else return Nothing
+          else pure Nothing
     
       -- Third pass: write files in parallel (bounded concurrency)
       caps <- getNumCapabilities
@@ -382,14 +382,14 @@ writeMetadataFiles root entries = do
                     else do
                       atomicModifyIORef' skipped (\n -> (n + 1, ()))
                       atomicModifyIORef' counter (\n -> (n + 1, ()))
-                Directory -> return ()  -- Already handled in first pass
-                Symlink _ -> return ()  -- Symlinks handled separately
+                Directory -> pure ()  -- Already handled in first pass
+                Symlink _ -> pure ()  -- Symlinks handled separately
     
       finally
           (void $ mapConcurrentlyBounded concurrency writeWithProgress files)
           (do
               -- Clean up: kill reporter thread and finalize progress line
-              maybe (return ()) killThread reporterThread
+              maybe (pure ()) killThread reporterThread
               when shouldShowProgress $ do
                   n <- readIORef counter
                   s <- readIORef skipped
@@ -425,7 +425,7 @@ shouldWriteFile :: FilePath -> FilePath -> FileEntry -> Hash 'MD5 -> Integer -> 
 shouldWriteFile root metaPath entry fHash fSize fIsText = do
   exists <- doesFileExist metaPath
   if not exists
-    then return True  -- File doesn't exist, must write
+    then pure True  -- File doesn't exist, must write
     else if fIsText
       then do
         -- For text files: compare mtime and size of source vs destination
@@ -435,15 +435,15 @@ shouldWriteFile root metaPath entry fHash fSize fIsText = do
         destMtime <- getModificationTime metaPath
         destSize <- getFileSize metaPath
         -- Write if mtime or size differs
-        return (sourceMtime /= destMtime || sourceSize /= destSize)
+        pure (sourceMtime /= destMtime || sourceSize /= destSize)
       else do
         -- For binary files: read existing metadata and compare hash/size
         existing <- readMetadataOrComputeHash metaPath
         case existing of
-          Nothing -> return True  -- Failed to read, must write
+          Nothing -> pure True  -- Failed to read, must write
           Just (MetaContent existingHash existingSize) ->
             -- Write if hash or size differs
-            return (existingHash /= fHash || existingSize /= fSize)
+            pure (existingHash /= fHash || existingSize /= fSize)
 
 -- | Parse a metadata file (hash/size lines) or read a text file and compute hash/size.
 -- Returns Nothing if file is missing or invalid.
@@ -466,15 +466,15 @@ listMetadataPaths indexRoot = go indexRoot ""
           concat <$> mapM (\(p, r) -> go p r) children
         else do
           isFile <- doesFileExist full
-          return (if isFile then [rel] else [])
+          pure (if isFile then [rel] else [])
 
 -- | Get hash and size of a file. Returns Nothing if file is missing or not a regular file.
 getFileHashAndSize :: FilePath -> FilePath -> IO (Maybe (Hash 'MD5, Integer))
 getFileHashAndSize root relPath = do
   let full = root </> relPath
   exists <- doesFileExist full
-  if not exists then return Nothing
+  if not exists then pure Nothing
   else do
     h <- hashFile full
     sz <- getFileSize full
-    return (Just (h, fromIntegral sz))
+    pure (Just (h, fromIntegral sz))

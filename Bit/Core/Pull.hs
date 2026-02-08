@@ -144,7 +144,7 @@ filesystemPull cwd remote opts = do
             then putStrLn $ "Verified " ++ show remoteCount ++ " remote files."
             else do
                 hPutStrLn stderr $ "error: Remote working tree does not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
-                mapM_ (printVerifyIssue (\s -> s)) remoteIssues
+                mapM_ (printVerifyIssue id) remoteIssues
                 hPutStrLn stderr "hint: Run 'bit verify' in the remote repo to see all mismatches."
                 hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
                 hPutStrLn stderr "hint: Run 'bit push --force' to overwrite remote with local state."
@@ -188,7 +188,7 @@ filesystemPullLogicImpl transport _remote remoteHash = do
                 then do
                     putStrLn "Merging unrelated histories..."
                     Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
-                else return (mergeCode, mergeOut, mergeErr)
+                else pure (mergeCode, mergeOut, mergeErr)
             
             if finalMergeCode == ExitSuccess
                 then do
@@ -227,7 +227,7 @@ filesystemPullLogicImpl transport _remote remoteHash = do
                             lift $ applyMergeToWorkingDir transport cwd localHash
                             lift $ putStrLn "Syncing binaries... done."
                             lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
-                        else return ()
+                        else pure ()
 
 -- | Filesystem pull --accept-remote implementation
 filesystemPullAcceptRemoteImpl :: FileTransport -> String -> BitM ()
@@ -288,7 +288,7 @@ pullAcceptRemoteImpl transport remote = do
                     maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
                     case maybeRemoteHash of
                         Just rHash -> lift $ void $ Git.updateRemoteTrackingBranchToHash rHash
-                        Nothing    -> return ()
+                        Nothing    -> pure ()
 
                     lift $ tell "Pull with --accept-remote completed."
 
@@ -337,7 +337,7 @@ pullManualMergeImpl remote = do
                             (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", "refs/remotes/origin/main"]
                             (_finalMergeCode, _, _) <- lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
                                 then do tell "Merging unrelated histories (e.g. first pull)..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
-                                else return (mergeCode, mergeOut, mergeErr)
+                                else pure (mergeCode, mergeOut, mergeErr)
 
                             createConflictDirectories remote divergentFiles remoteFileMap remoteMetaMap localMetaMap
 
@@ -365,14 +365,14 @@ pullWithCleanup transport remote opts = do
                     lift $ void $ gitRaw ["merge", "--abort"]
                     lift $ tell "Merge aborted. Your working tree is unchanged."
                 else lift $ throwIO ex
-        Right _ -> return ()
+        Right _ -> pure ()
 
 pullLogic :: FileTransport -> Remote -> PullOptions -> BitM ()
 pullLogic transport remote opts = do
     cwd <- asks envCwd
     maybeBundlePath <- lift $ fetchRemoteBundle remote
     case maybeBundlePath of
-        Nothing -> return ()
+        Nothing -> pure ()
         Just bPath -> do
             lift $ saveFetchedBundle remote (Just bPath)
             (_, countOut, _) <- lift $ gitQuery ["rev-list", "--count", "refs/remotes/origin/main"]
@@ -387,7 +387,7 @@ pullLogic transport remote opts = do
                     then lift $ putStrLn $ "Verified " ++ show remoteFileCount ++ " remote files."
                     else do
                         lift $ hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
-                        lift $ mapM_ (printVerifyIssue (\s -> s)) remoteIssues
+                        lift $ mapM_ (printVerifyIssue id) remoteIssues
                         lift $ hPutStrLn stderr "hint: Run 'bit verify --remote' to see all mismatches."
                         lift $ hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
                         lift $ hPutStrLn stderr "hint: Run 'bit push --force' to overwrite remote with local state."
@@ -413,7 +413,7 @@ pullLogic transport remote opts = do
                     (finalMergeCode, finalMergeOut, finalMergeErr) <-
                         lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
                         then do tell "Merging unrelated histories..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
-                        else return (mergeCode, mergeOut, mergeErr)
+                        else pure (mergeCode, mergeOut, mergeErr)
 
                     if finalMergeCode == ExitSuccess
                     then do
@@ -426,7 +426,7 @@ pullLogic transport remote opts = do
                         maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
                         case maybeRemoteHash of
                             Just rHash -> lift $ void $ Git.updateRemoteTrackingBranchToHash rHash
-                            Nothing    -> return ()
+                            Nothing    -> pure ()
                     else do
                         lift $ tell finalMergeOut
                         lift $ tellErr finalMergeErr
@@ -453,7 +453,7 @@ pullLogic transport remote opts = do
                                 lift $ applyMergeToWorkingDir transport cwd localHead
                                 lift $ tell "Syncing binaries... done."
                                 lift $ void $ Git.updateRemoteTrackingBranchToHash newHash
-                            else return ()
+                            else pure ()
 
 -- ============================================================================
 -- Helper functions

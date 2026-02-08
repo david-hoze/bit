@@ -63,7 +63,7 @@ classifyRemoteTextCandidates remote config candidates = do
     tempDir <- getTemporaryDirectory >>= \t -> do
         let d = t </> "bit-classify-remote"
         createDirectoryIfMissing True d
-        return d
+        pure d
 
     -- Download and classify each candidate file
     classifiedEntries <- forM candidates $ \fe -> do
@@ -79,17 +79,17 @@ classifyRemoteTextCandidates remote config candidates = do
                 case kind fe of
                     File{fSize} -> do
                         (h, isText) <- hashAndClassifyFile localPath fSize config
-                        return fe { kind = File { fHash = h, fSize = fSize, fIsText = isText } }
-                    _ -> return fe
+                        pure fe { kind = File { fHash = h, fSize = fSize, fIsText = isText } }
+                    _ -> pure fe
             _ -> do
                 -- Download failed — treat as binary, keep rclone hash
                 hPutStrLn stderr $ "Warning: Could not download " ++ path fe ++ " for classification, treating as binary."
-                return fe
+                pure fe
 
     -- Cleanup temp dir
-    removeDirectoryRecursive tempDir `catch` (\(_ :: SomeException) -> return ())
+    removeDirectoryRecursive tempDir `catch` (\(_ :: SomeException) -> pure ())
 
-    return classifiedEntries
+    pure classifiedEntries
 
 -- | Initialize a remote workspace by scanning the remote and building metadata
 initRemoteWorkspace :: FilePath -> Remote -> String -> IO ()
@@ -125,7 +125,7 @@ initRemoteWorkspace cwd remote remName = do
 
             -- Step 3: Download text candidates to temp dir and classify
             classifiedFiles <- if null textCandidates
-                then return []
+                then pure []
                 else classifyRemoteTextCandidates remote config textCandidates
 
             -- Step 4: Merge results
@@ -161,7 +161,7 @@ initRemoteWorkspace cwd remote remName = do
                 case kind fe of
                     File{fHash, fSize} ->
                         atomicWriteFileStr metaPath (serializeMetadata (MetaContent fHash fSize))
-                    _ -> return ()
+                    _ -> pure ()
 
             -- Step 6: Initialize git repo in workspace
             putStrLn "Initializing git repository..."

@@ -31,7 +31,7 @@ module Bit.Process
   , ExitCode(..)
   ) where
 
-import Prelude (FilePath, IO, String, Maybe(..), Either(..), ($), pure, return, error)
+import Prelude (FilePath, IO, String, Maybe(..), Either(..), ($), pure, error)
 import Control.Concurrent.Async (async, wait)
 import Control.Exception (bracket, try, SomeException)
 import Control.Monad (void)
@@ -97,7 +97,7 @@ readProcessStrict cmd args = do
         -- Now it's safe to wait for the process
         exitCode <- waitForProcess ph
         
-        return (exitCode, out, err)
+        pure (exitCode, out, err)
       
       _ -> error "Bit.Process.readProcessStrict: failed to create pipes"
   where
@@ -157,7 +157,7 @@ readProcessStrictWithStderr cmd args = do
         -- Now it's safe to wait for the process
         exitCode <- waitForProcess ph
         
-        return (exitCode, out)
+        pure (exitCode, out)
       
       _ -> error "Bit.Process.readProcessStrictWithStderr: failed to create pipes"
   where

@@ -65,7 +65,9 @@ parseMetadata content = do
       | "Hash \"" `isPrefixOf` s =
           let rest = drop (length ("Hash \"" :: String)) s
           in if not (null rest) && last rest == '"' then init rest else rest
-      | length s >= 2 && head s == '"' && last s == '"' = init (tail s)
+      | ('"':rest) <- s = case reverse rest of
+          ('"':middle) -> reverse middle
+          _ -> s
       | otherwise = s
     trim = dropWhile isSpaceChar . reverse . dropWhile isSpaceChar . reverse
     isSpaceChar c = c == ' ' || c == '\t'
@@ -133,7 +135,7 @@ hashFile fp = withFile fp ReadMode $ \handle -> do
         if eof
           then do
             let md5hex = decodeUtf8 (encode (MD5.finalize ctx))
-            return (Hash (T.pack "md5:" <> md5hex))
+            pure (Hash (T.pack "md5:" <> md5hex))
           else do
             chunk <- BS.hGet handle 65536  -- 64KB chunks
             loop (MD5.update ctx chunk)
@@ -148,8 +150,8 @@ hasConflictMarkers :: FilePath -> IO Bool
 hasConflictMarkers path = do
   bs <- BS.readFile path
   case decodeUtf8' bs of
-    Left _ -> return False  -- Binary file, no conflict markers possible
-    Right txt -> return $ any (\m -> m `isInfixOf` T.unpack txt) conflictMarkers
+    Left _ -> pure False  -- Binary file, no conflict markers possible
+    Right txt -> pure $ any (`isInfixOf` T.unpack txt) conflictMarkers
 
 listAllFiles :: FilePath -> IO [FilePath]
 listAllFiles dir = do
@@ -159,7 +161,7 @@ listAllFiles dir = do
     isDir <- doesDirectoryExist full
     if isDir then listAllFiles full else do
       isFile <- doesFileExist full
-      return (if isFile then [full] else [])) entries
+      pure (if isFile then [full] else [])) entries
 
 validateMetadataDir :: FilePath -> IO [FilePath]
 validateMetadataDir dir = do

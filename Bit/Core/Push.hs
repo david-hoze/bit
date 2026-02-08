@@ -72,7 +72,7 @@ push = withRemote $ \remote -> do
             then liftIO $ putStrLn $ "Verified " ++ show fileCount ++ " files. All match metadata."
             else do
                 liftIO $ hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length issues) ++ " issues)."
-                liftIO $ mapM_ (printVerifyIssue (\s -> s)) issues  -- full hash, no truncation
+                liftIO $ mapM_ (printVerifyIssue id) issues  -- full hash, no truncation
                 liftIO $ hPutStrLn stderr "hint: Run 'bit verify' to see all mismatches."
                 liftIO $ hPutStrLn stderr "hint: Run 'bit add' to update metadata, or 'bit restore' to restore files."
                 liftIO $ hPutStrLn stderr "hint: Run 'bit push --force' to push anyway (unsafe)."
@@ -171,7 +171,7 @@ filesystemPush cwd remote = do
                 hPutStrLn stderr "error: Remote has local commits that you don't have."
                 hPutStrLn stderr "hint: Run 'bit pull' to merge remote changes first, then push again."
                 exitWith (ExitFailure 1)
-        Nothing -> return ()  -- First push, no check needed
+        Nothing -> pure ()  -- First push, no check needed
     
     -- 5. Merge at remote (ff-only)
     putStrLn "Merging at remote (fast-forward only)..."

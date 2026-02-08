@@ -45,7 +45,7 @@ data Concurrency
 ioConcurrency :: IO Int
 ioConcurrency = do
     caps <- getNumCapabilities
-    return (max 4 (caps * 4))
+    pure (max 4 (caps * 4))
 
 -- | Lower concurrency for network/subprocess operations.
 --
@@ -59,7 +59,7 @@ ioConcurrency = do
 networkConcurrency :: IO Int
 networkConcurrency = do
     caps <- getNumCapabilities
-    return (min 8 (max 2 (caps * 2)))
+    pure (min 8 (max 2 (caps * 2)))
 
 -- | Run an action over a list with the specified concurrency level.
 --

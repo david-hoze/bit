@@ -16,6 +16,7 @@ import Data.Maybe (fromMaybe)
 import System.Exit (exitWith, ExitCode(ExitFailure))
 import Control.Monad (when, unless)
 import Data.Char (isSpace)
+import Data.List (dropWhileEnd)
 
 -- | Source of user input for device name.
 data InputSource
@@ -36,7 +37,7 @@ isValidDeviceName :: String -> Bool
 isValidDeviceName s = not (null s) && all (\c -> c `elem` (['a'..'z']++['A'..'Z']++['0'..'9']++"_-")) s
 
 trim :: String -> String
-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
+trim = dropWhileEnd isSpace . dropWhile isSpace
 
 -- | Acquire device name from the given input source.
 -- Applies sanitization to user input. Empty/whitespace input uses default.
@@ -49,7 +50,7 @@ acquireDeviceName inputSource mLabel nameExists = do
   let rawDefault = fromMaybe "device" mLabel
       defaultName = sanitizeDeviceName rawDefault
   finalName <- case inputSource of
-    NonInteractive -> return defaultName
+    NonInteractive -> pure defaultName
     Interactive ask -> do
       putStrLn "This path is on a storage device."
       putStrLn "bit identifies devices, not drive letters. The remote will stay linked"
@@ -59,7 +60,7 @@ acquireDeviceName inputSource mLabel nameExists = do
       hFlush stdout
       line <- ask
       let name = trim line
-      return $ if null name then defaultName else sanitizeDeviceName name
+      pure $ if null name then defaultName else sanitizeDeviceName name
   unless (isValidDeviceName finalName) $ do
     hPutStrLn stderr "fatal: Device name must be alphanumeric with underscores/hyphens only."
     exitWith (ExitFailure 1)
@@ -67,7 +68,7 @@ acquireDeviceName inputSource mLabel nameExists = do
   when exists $ do
     hPutStrLn stderr ("fatal: Device '" ++ finalName ++ "' already exists.")
     exitWith (ExitFailure 1)
-  return finalName
+  pure finalName
 
 -- | Production entry point: detects TTY or BIT_USE_STDIN for testing.
 acquireDeviceNameAuto

@@ -10,6 +10,7 @@ module Internal.ConfigFile
 import System.FilePath ((</>))
 import System.Directory (doesFileExist)
 import Data.Char (isSpace)
+import Data.List (dropWhileEnd)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -40,13 +41,13 @@ readTextConfig :: IO TextConfig
 readTextConfig = do
   exists <- doesFileExist configPath
   if not exists
-    then return defaultTextConfig
+    then pure defaultTextConfig
     else do
       bs <- BS.readFile configPath
       let content = case T.decodeUtf8' bs of
             Left _ -> T.empty  -- Invalid UTF-8, use defaults
             Right txt -> txt
-      return $ parseConfig content
+      pure $ parseConfig content
 
 -- | Read config file (for future expansion)
 readConfig :: IO TextConfig
@@ -65,8 +66,8 @@ parseConfig content =
   in TextConfig { textSizeLimit = sizeLimit, textExtensions = extensions }
 
 -- | Find index of first element matching predicate
-findIndex :: (a -> Bool) -> [a] -> Maybe Int
-findIndex p xs = case [i | (i, x) <- zip [0..] xs, p x] of
+findIndex' :: (a -> Bool) -> [a] -> Maybe Int
+findIndex' p xs = case [i | (i, x) <- zip [0..] xs, p x] of
   [] -> Nothing
   (i:_) -> Just i
 
@@ -75,11 +76,11 @@ extractSection :: String -> [T.Text] -> [T.Text]
 extractSection sectionName linesOfText =
   let sectionHeader = "[" ++ sectionName ++ "]"
       -- Find start of section
-      startIdx = case findIndex (\l -> T.strip l == T.pack sectionHeader) linesOfText of
+      startIdx = case findIndex' (\l -> T.strip l == T.pack sectionHeader) linesOfText of
         Nothing -> length linesOfText  -- Section not found
         Just idx -> idx + 1
       -- Find end of section (next [section] or EOF)
-      endIdx = case findIndex (\l -> T.stripStart l `T.isPrefixOf` T.pack "[") (drop startIdx linesOfText) of
+      endIdx = case findIndex' (\l -> T.stripStart l `T.isPrefixOf` T.pack "[") (drop startIdx linesOfText) of
         Nothing -> length linesOfText
         Just idx -> startIdx + idx
   in map T.strip $ take (endIdx - startIdx) (drop startIdx linesOfText)
@@ -117,6 +118,3 @@ parseExtensions linesOfText =
     splitComma s = case break (== ',') s of
       (part, "") -> [part]
       (part, _:rest) -> part : splitComma rest
-
-dropWhileEnd :: (a -> Bool) -> [a] -> [a]
-dropWhileEnd p = reverse . dropWhile p . reverse

@@ -90,8 +90,8 @@ classifyRemoteState :: Remote -> IO RemoteState
 classifyRemoteState remote = do
     result <- Transport.listRemoteItems remote 1
     case result of
-        Left err -> return (StateNetworkError err)
-        Right items -> return (interpretRemoteItems items)
+        Left err -> pure (StateNetworkError err)
+        Right items -> pure (interpretRemoteItems items)
 
 -- | Pure interpretation of remote items into domain state
 interpretRemoteItems :: [Transport.TransportItem] -> RemoteState
@@ -108,11 +108,11 @@ fetchBundle remote = do
     
     result <- Transport.copyFromRemoteDetailed remote ".bit/bit.bundle" localDest
     case result of
-        Transport.CopySuccess -> return (BundleFound localDest)
-        Transport.CopyNotFound -> return RemoteEmpty
+        Transport.CopySuccess -> pure (BundleFound localDest)
+        Transport.CopyNotFound -> pure RemoteEmpty
         Transport.CopyNetworkError _ -> 
-            return (NetworkError "Network unreachable: Check your internet connection or remote name.")
-        Transport.CopyOtherError err -> return (NetworkError err)
+            pure (NetworkError "Network unreachable: Check your internet connection or remote name.")
+        Transport.CopyOtherError err -> pure (NetworkError err)
 
 -- | Fetch the remote bundle, classify its state, and return path or Nothing on error.
 fetchRemoteBundle :: Remote -> IO (Maybe FilePath)
@@ -123,7 +123,7 @@ fetchRemoteBundle remote = do
     case remoteState of
         StateEmpty -> do
             hPutStrLn stderr "Aborting: Remote is empty. Run 'bit push' first."
-            return Nothing
+            pure Nothing
         
         StateNonRgitOccupied items -> do
             let itemList = unlines $ map ("    " ++) items
@@ -136,12 +136,12 @@ fetchRemoteBundle remote = do
                 , "To use a new bit remote, either choose an empty location or push"
                 , "to initialize a bit repository at the remote location first."
                 ]
-            return Nothing
+            pure Nothing
 
         StateValidRgit -> do
             fetchResult <- fetchBundle remote
             case fetchResult of
-                BundleFound bPath -> return $ Just bPath
+                BundleFound bPath -> pure $ Just bPath
                 _ -> do
                     hPutStrLn stderr $ unlines
                         [ "fatal: Could not read from remote repository."
@@ -149,17 +149,17 @@ fetchRemoteBundle remote = do
                         , "Please make sure you have the correct access rights"
                         , "and the repository exists."
                         ]
-                    return Nothing
+                    pure Nothing
 
         StateNetworkError err ->
             do
                 hPutStrLn stderr $ "Aborting: Network error -> " ++ err
-                return Nothing
+                pure Nothing
 
         StateCorruptedRgit msg ->
             do
                 hPutStrLn stderr $ "Aborting: [X] Corrupted remote -> " ++ msg
-                return Nothing
+                pure Nothing
 
 saveFetchedBundle :: Remote -> Maybe FilePath -> IO ()
 saveFetchedBundle _remote Nothing = pure ()
@@ -168,7 +168,7 @@ saveFetchedBundle remote (Just bPath) = do
     hadPrevious <- Dir.doesFileExist fetchedPath
     maybeOldHash <- if hadPrevious
         then Git.getHashFromBundle fetchedBundle
-        else return Nothing
+        else pure Nothing
 
     -- Copy FIRST, then read hash from the correct location
     copyFile bPath fetchedPath

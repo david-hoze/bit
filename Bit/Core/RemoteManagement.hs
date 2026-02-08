@@ -26,7 +26,7 @@ import Control.Exception (try, IOException)
 import Control.Concurrent (forkIO, threadDelay, killThread)
 import Data.IORef (IORef, newIORef, readIORef)
 import System.IO (hIsTerminalDevice)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Internal.Config (bitDevicesDir, bitRemotesDir, bitDir, fetchedBundle, bundleCwdPath, fromCwdPath, BundleName(..))
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
@@ -73,7 +73,7 @@ addRemoteFilesystem cwd name filePath = do
     mStoreUuid <- Device.readBitStore volRoot
     mExistingDevice <- case mStoreUuid of
         Just u -> Device.findDeviceByUuid cwd u
-        Nothing -> return Nothing
+        Nothing -> pure Nothing
     result <- try @IOException $ case (mStoreUuid, mExistingDevice) of
         (Just _u, Just dev) -> do
             putStrLn $ "Using existing device '" ++ dev ++ "'."
@@ -81,19 +81,19 @@ addRemoteFilesystem cwd name filePath = do
             Device.writeRemoteFile cwd name (Device.TargetDevice dev relPath)
             putStrLn $ "Remote '" ++ name ++ "' → " ++ dev ++ ":" ++ relPath
             putStrLn $ "(using existing device '" ++ dev ++ "')"
-            return ()
+            pure ()
         (Just u, Nothing) -> do
             mLabel <- Device.getVolumeLabel volRoot
             deviceName' <- promptDeviceName cwd volRoot mLabel
             storeType' <- Device.detectStorageType volRoot
             mSerial <- case storeType' of
                 Device.Physical -> Device.getHardwareSerial volRoot
-                Device.Network -> return Nothing
+                Device.Network -> pure Nothing
             Device.writeDeviceFile cwd deviceName' (Device.DeviceInfo u storeType' mSerial)
             Device.writeRemoteFile cwd name (Device.TargetDevice deviceName' relPath)
             putStrLn $ "Remote '" ++ name ++ "' → " ++ deviceName' ++ ":" ++ relPath
             putStrLn $ "Device '" ++ deviceName' ++ "' registered (" ++ (case storeType' of Device.Physical -> "physical"; Device.Network -> "network") ++ ")."
-            return ()
+            pure ()
         (Nothing, _) -> do
             mLabel <- Device.getVolumeLabel volRoot
             deviceName' <- promptDeviceName cwd volRoot mLabel
@@ -102,14 +102,14 @@ addRemoteFilesystem cwd name filePath = do
             storeType' <- Device.detectStorageType volRoot
             mSerial <- case storeType' of
                 Device.Physical -> Device.getHardwareSerial volRoot
-                Device.Network -> return Nothing
+                Device.Network -> pure Nothing
             Device.writeDeviceFile cwd deviceName' (Device.DeviceInfo u storeType' mSerial)
             Device.writeRemoteFile cwd name (Device.TargetDevice deviceName' relPath)
             putStrLn $ "Remote '" ++ name ++ "' → " ++ deviceName' ++ ":" ++ relPath
             putStrLn $ "Device '" ++ deviceName' ++ "' registered (" ++ (case storeType' of Device.Physical -> "physical"; Device.Network -> "network") ++ ")."
-            return ()
+            pure ()
     case result of
-        Right () -> return ()
+        Right () -> pure ()
         Left _err -> do
             -- Cannot create .bit-store at volume root (e.g. permission denied on C:\)
             -- Fall back to path-based storage for local directories
@@ -154,7 +154,7 @@ remoteShow mRemoteName = do
             mTarget <- liftIO $ Device.readRemoteFile cwd name
             display <- liftIO $ case mTarget of
                 Just _ -> formatRemoteDisplay cwd name mTarget
-                Nothing -> return (name ++ " → " ++ maybe "(not configured)" displayRemote mRemote)
+                Nothing -> pure (name ++ " → " ++ maybe "(not configured)" displayRemote mRemote)
             case mRemote of
                 Nothing -> liftIO $ putStrLn "No remotes configured. Use 'bit remote add <name> <url>' to add one."
                 Just remote -> do
@@ -189,13 +189,13 @@ remoteCheck mName = do
         Nothing -> do
             name <- Git.getTrackedRemoteName
             mRemote <- resolveRemote cwd name
-            return (mRemote, name)
+            pure (mRemote, name)
         Just name -> do
             mRemote <- resolveRemote cwd name
-            return (mRemote, name)
+            pure (mRemote, name)
     case mRemote of
         Nothing -> do
-            liftIO $ if maybe True (const False) mName
+            liftIO $ if isNothing mName
                 then hPutStrLn stderr "fatal: No remote configured."
                 else hPutStrLn stderr $ "fatal: '" ++ fromMaybe "" mName ++ "' does not appear to be a git remote."
             liftIO $ hPutStrLn stderr "hint: Set remote with 'bit remote add <name> <url>'"
@@ -219,11 +219,11 @@ remoteCheck mName = do
                             Just <$> forkIO (checkProgressLoop counter fileCount)
                         else do
                             putStrLn "Running remote check..."
-                            return Nothing
+                            pure Nothing
 
                     res <- try @IOException (Transport.checkRemote cwd remote (Just counter))
 
-                    maybe (return ()) killThread reporterThread
+                    maybe (pure ()) killThread reporterThread
                     when shouldShowProgress clearProgress
 
                     case res of
@@ -265,10 +265,10 @@ remoteCheck mName = do
                 exitWith (ExitFailure 1)
             else do
                 putStrLn ""
-                when (not (null differs)) $ mapM_ putStrLn ("  content differs:" : formatPathList differs)
-                when (not (null missingDest)) $ mapM_ putStrLn ("  local only (not on remote):" : formatPathList missingDest)
-                when (not (null missingSrc)) $ mapM_ putStrLn ("  remote only (not in local):" : formatPathList missingSrc)
-                when (not (null errs)) $ mapM_ putStrLn ("  errors:" : formatPathList errs)
+                unless (null differs) $ mapM_ putStrLn ("  content differs:" : formatPathList differs)
+                unless (null missingDest) $ mapM_ putStrLn ("  local only (not on remote):" : formatPathList missingDest)
+                unless (null missingSrc) $ mapM_ putStrLn ("  remote only (not in local):" : formatPathList missingSrc)
+                unless (null errs) $ mapM_ putStrLn ("  errors:" : formatPathList errs)
                 let errWord = if length errs == 1 then "1 error" else show (length errs) ++ " errors"
                 putStrLn $ show (length differs + length missingDest + length missingSrc) ++ " differences, "
                     ++ errWord ++ ". " ++ show nMatch ++ " files matched."
@@ -281,16 +281,16 @@ remoteCheck mName = do
 -- | Format remote display line (e.g. "origin → black_usb:Backup (physical, connected at E:\)")
 formatRemoteDisplay :: FilePath -> String -> Maybe Device.RemoteTarget -> IO String
 formatRemoteDisplay cwd name mTarget = case mTarget of
-    Just (Device.TargetLocalPath p) -> return (name ++ " → " ++ p ++ " (local path)")
+    Just (Device.TargetLocalPath p) -> pure (name ++ " → " ++ p ++ " (local path)")
     Just (Device.TargetDevice dev devPath) -> do
         res <- Device.resolveRemoteTarget cwd (Device.TargetDevice dev devPath)
         mInfo <- Device.readDeviceFile cwd dev
         let typ = maybe "unknown" (\i -> case Device.deviceType i of Device.Physical -> "physical"; Device.Network -> "network") mInfo
         case res of
-            Device.Resolved mount -> return (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", connected at " ++ mount ++ ")")
-            Device.NotConnected _ -> return (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", NOT CONNECTED)")
-    Just (Device.TargetCloud u) -> return (name ++ " → " ++ u ++ " (cloud)")
-    Nothing -> return (name ++ " → (no target)")
+            Device.Resolved mount -> pure (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", connected at " ++ mount ++ ")")
+            Device.NotConnected _ -> pure (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", NOT CONNECTED)")
+    Just (Device.TargetCloud u) -> pure (name ++ " → " ++ u ++ " (cloud)")
+    Nothing -> pure (name ++ " → (no target)")
 
 showRemoteStatusFromBundle :: String -> Maybe String -> IO ()
 showRemoteStatusFromBundle name mUrl = do
@@ -338,4 +338,4 @@ compareHistory maybeLocal bundleName = do
                         (False, True) -> putStrLn "    main pushes to main (local out of date)"
                         (False, False) -> putStrLn "    main pushes to main (local out of date)"
                         (True, True)   -> putStrLn "    main pushes to main (up to date)"
-        _ -> return ()
+        _ -> pure ()

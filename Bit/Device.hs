@@ -37,7 +37,7 @@ module Bit.Device
 
 import Data.List (isPrefixOf, intercalate)
 import Data.Maybe (fromMaybe, listToMaybe)
-import Control.Monad (when, filterM)
+import Control.Monad (when, filterM, join)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import qualified System.Directory as Dir
 import System.FilePath ((</>), pathSeparator, takeDrive)
@@ -98,16 +98,16 @@ classifyRemotePath path = do
     (prefix, _:_rest) | not (null prefix) -> do
       let prefixNorm = dropWhile (== ':') prefix
       if prefixNorm `elem` rcloneRemotes
-        then return (CloudRemote path)
-        else return (FilesystemPath path)
-    _ -> return (FilesystemPath path)
+        then pure (CloudRemote path)
+        else pure (FilesystemPath path)
+    _ -> pure (FilesystemPath path)
 
 -- | Get list of configured rclone remote names (without trailing colon)
 getRcloneRemotes :: IO [String]
 getRcloneRemotes = do
   (code, out, _) <- readProcessWithExitCode "rclone" ["listremotes"] ""
-  if code /= ExitSuccess then return []
-  else return
+  if code /= ExitSuccess then pure []
+  else pure
     [ takeWhile (/= ':') (takeWhile (/= '\n') line)
     | line <- lines out
     , not (null (trimLine line))
@@ -122,7 +122,7 @@ getRcloneRemotes = do
 getVolumeRoot :: FilePath -> IO FilePath
 getVolumeRoot path = do
   absPath <- Dir.makeAbsolute path
-  if isWindows then return (winVolumeRoot absPath)
+  if isWindows then pure (winVolumeRoot absPath)
   else linuxVolumeRootIO absPath
 
 isWindows :: Bool
@@ -147,13 +147,15 @@ linuxVolumeRootIO :: FilePath -> IO FilePath
 linuxVolumeRootIO path = do
   (code, out, _) <- readProcessWithExitCode "sh" ["-c", "findmnt -n -o TARGET -T " ++ shellEscape path ++ " 2>/dev/null || echo " ++ shellEscape path] ""
   if code == ExitSuccess && not (null (trim out))
-    then return (trim out)
-    else return path
+    then pure (trim out)
+    else pure path
   where
     shellEscape s = "'" ++ concatMap (\c -> if c == '\'' then "'\\''" else [c]) s ++ "'"
 
 addTrailingSep :: FilePath -> FilePath
-addTrailingSep p = if not (null p) && last p == pathSeparator then p else p ++ [pathSeparator]
+addTrailingSep p = case reverse p of
+  (c:_) | c == pathSeparator -> p
+  _ -> p ++ [pathSeparator]
 
 splitPathOnSep :: FilePath -> [String]
 splitPathOnSep = splitOn (== pathSeparator)
@@ -187,17 +189,18 @@ detectStorageType volumeRoot
 detectStorageTypeWindows :: FilePath -> IO StorageType
 detectStorageTypeWindows volRoot = do
   let drive = take 2 (filter (`elem` ['A'..'Z'] ++ ['a'..'z'] ++ ":") volRoot)
-  if null drive then return Physical  -- UNC: treat as network
-  else do
-    (_code, _out, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
-      "try { (Get-PSDrive -Name " ++ [head drive] ++ " -ErrorAction SilentlyContinue).Root } catch { '' }"] ""
-    (code2, out2, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
-      "[int]([System.IO.DriveInfo]::new('" ++ drive ++ "').DriveType)"] ""
-    if code2 == ExitSuccess
-      then case trim out2 of
-        "4" -> return Network  -- DriveType.Network
-        _   -> return Physical
-      else return Physical
+  case drive of
+    [] -> pure Physical  -- UNC: treat as network
+    (d:_) -> do
+      (_code, _out, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
+        "try { (Get-PSDrive -Name " ++ [d] ++ " -ErrorAction SilentlyContinue).Root } catch { '' }"] ""
+      (code2, out2, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
+        "[int]([System.IO.DriveInfo]::new('" ++ drive ++ "').DriveType)"] ""
+      if code2 == ExitSuccess
+        then case trim out2 of
+          "4" -> pure Network  -- DriveType.Network
+          _   -> pure Physical
+        else pure Physical
 
 detectStorageTypeLinux :: FilePath -> IO StorageType
 detectStorageTypeLinux _ = do
@@ -205,9 +208,9 @@ detectStorageTypeLinux _ = do
   (code, out, _) <- readProcessWithExitCode "findmnt" ["-n", "-o", "FSTYPE", "-T", "/"] ""
   if code == ExitSuccess
     then let fstype = trim out
-         in return $ if fstype `elem` ["nfs", "nfs4", "cifs", "smb", "smbfs", "sshfs"]
+         in pure $ if fstype `elem` ["nfs", "nfs4", "cifs", "smb", "smbfs", "sshfs"]
                     then Network else Physical
-    else return Physical
+    else pure Physical
 
 trim :: String -> String
 trim = reverse . dropWhile (== ' ') . reverse . dropWhile (== ' ')
@@ -221,11 +224,11 @@ getHardwareSerial volumeRoot
 getHardwareSerialWindows :: FilePath -> IO (Maybe String)
 getHardwareSerialWindows volRoot = do
   let drive = take 1 (filter (`elem` ['A'..'Z'] ++ ['a'..'z']) volRoot)
-  if null drive then return Nothing
+  if null drive then pure Nothing
   else do
     -- Map partition to physical disk via partition number, then get disk serial
     (code, out, _) <- readProcessWithExitCode "wmic" ["diskdrive", "get", "SerialNumber,Index"] ""
-    if code /= ExitSuccess then return Nothing
+    if code /= ExitSuccess then pure Nothing
     else do
       (_code2, _out2, _) <- readProcessWithExitCode "wmic" ["path", "win32_logicaldisk", "where", "DeviceID='" ++ drive ++ ":\\'", "get", "VolumeSerialNumber"] ""
       -- VolumeSerialNumber is the FAT/NTFS serial, not disk serial. Use diskdrive.
@@ -233,14 +236,14 @@ getHardwareSerialWindows volRoot = do
           parseSerial = case lines' of
             _:rest -> listToMaybe [ trim (drop 12 l) | l <- rest, length l > 12 ]
             _      -> Nothing
-      return (parseSerial)
+      pure (parseSerial)
 
 getHardwareSerialLinux :: FilePath -> IO (Maybe String)
 getHardwareSerialLinux _ = do
   (code, out, _) <- readProcessWithExitCode "sh" ["-c", "lsblk -o SERIAL,MOUNTPOINT -n 2>/dev/null | head -20"] ""
   if code == ExitSuccess
-    then return (listToMaybe [ trim (takeWhile (/= ' ') l) | l <- lines out, "/" `isPrefixOf` (drop 20 l) ])
-    else return Nothing
+    then pure (listToMaybe [ trim (takeWhile (/= ' ') l) | l <- lines out, "/" `isPrefixOf` (drop 20 l) ])
+    else pure Nothing
 
 -- | Get volume label for device name suggestion
 getVolumeLabel :: FilePath -> IO (Maybe String)
@@ -251,15 +254,15 @@ getVolumeLabel volumeRoot
 getVolumeLabelWindows :: FilePath -> IO (Maybe String)
 getVolumeLabelWindows volRoot = do
   let drive = take 2 (filter (`elem` ['A'..'Z'] ++ ['a'..'z'] ++ ":\\") volRoot)
-  if length drive < 2 then return Nothing
+  if length drive < 2 then pure Nothing
   else do
     -- vol is a cmd built-in, not an executable; run via cmd /c
     (code, out, _) <- readProcessWithExitCode "cmd" ["/c", "vol", drive] ""
-    if code /= ExitSuccess then return Nothing
+    if code /= ExitSuccess then pure Nothing
     else
       let lines' = lines out
           volLine = listToMaybe [ l | l <- lines', "Volume" `isPrefixOf` l ]
-      in return $ case volLine of
+      in pure $ case volLine of
         Just l -> let after = dropWhile (/= ' ') (drop 6 l) in Just (trim after)
         _      -> Nothing
 
@@ -267,8 +270,8 @@ getVolumeLabelLinux :: FilePath -> IO (Maybe String)
 getVolumeLabelLinux _ = do
   (code, out, _) <- readProcessWithExitCode "sh" ["-c", "lsblk -o LABEL,MOUNTPOINT -n 2>/dev/null | head -5"] ""
   if code == ExitSuccess
-    then return (listToMaybe [ trim (takeWhile (/= ' ') l) | l <- lines out, not (null (trim l)) ])
-    else return Nothing
+    then pure (listToMaybe [ trim (takeWhile (/= ' ') l) | l <- lines out, not (null (trim l)) ])
+    else pure Nothing
 
 -- ---------------------------------------------------------------------------
 -- .bit-store (on device at volume root)
@@ -281,19 +284,18 @@ readBitStore :: FilePath -> IO (Maybe UUID)
 readBitStore volumeRoot = do
   let storePath = volumeRoot </> bitStoreFileName
   exists <- Dir.doesFileExist storePath
-  if not exists then return Nothing
+  if not exists then pure Nothing
   else do
     -- Use strict ByteString reading to avoid Windows file locking issues
     bs <- BS.readFile storePath
     let content = case decodeUtf8' bs of
           Left _ -> ""
           Right txt -> T.unpack txt
-    return (parseBitStoreUuid content)
+    pure (parseBitStoreUuid content)
 
 parseBitStoreUuid :: String -> Maybe UUID
 parseBitStoreUuid content =
-  listToMaybe [ fromString (trim (drop 5 line)) | line <- lines content, "uuid:" `isPrefixOf` line ]
-  >>= id  -- join: Maybe (Maybe UUID) -> Maybe UUID
+  join (listToMaybe [ fromString (trim (drop 5 line)) | line <- lines content, "uuid:" `isPrefixOf` line ])
 
 writeBitStore :: FilePath -> UUID -> IO ()
 writeBitStore volumeRoot u = do
@@ -311,7 +313,7 @@ writeBitStore volumeRoot u = do
 setHidden :: FilePath -> IO ()
 setHidden path = do
   (_, _, _) <- readProcessWithExitCode "attrib" ["+H", path] ""
-  return ()
+  pure ()
 
 generateStoreUuid :: IO UUID
 generateStoreUuid = nextRandom
@@ -336,14 +338,14 @@ readDeviceFile :: FilePath -> String -> IO (Maybe DeviceInfo)
 readDeviceFile repoRoot deviceName = do
   let path = repoRoot </> bitDevicesDir </> deviceName
   exists <- Dir.doesFileExist path
-  if not exists then return Nothing
+  if not exists then pure Nothing
   else do
     -- Use strict ByteString reading to avoid Windows file locking issues
     bs <- BS.readFile path
     let content = case decodeUtf8' bs of
           Left _ -> ""
           Right txt -> T.unpack txt
-    return (parseDeviceFile content)
+    pure (parseDeviceFile content)
 
 writeDeviceFile :: FilePath -> String -> DeviceInfo -> IO ()
 writeDeviceFile repoRoot deviceName info = do
@@ -360,18 +362,18 @@ listDeviceNames :: FilePath -> IO [String]
 listDeviceNames repoRoot = do
   let dir = repoRoot </> bitDevicesDir
   exists <- Dir.doesDirectoryExist dir
-  if not exists then return []
+  if not exists then pure []
   else filter (not . null) <$> Dir.listDirectory dir
 
 findDeviceByUuid :: FilePath -> UUID -> IO (Maybe String)
 findDeviceByUuid repoRoot targetUuid = do
   names <- listDeviceNames repoRoot
-  foldr go (return Nothing) names
+  foldr go (pure Nothing) names
   where
     go name acc = do
       mInfo <- readDeviceFile repoRoot name
       case mInfo of
-        Just info | deviceUuid info == targetUuid -> return (Just name)
+        Just info | deviceUuid info == targetUuid -> pure (Just name)
         _ -> acc
 
 -- ---------------------------------------------------------------------------
@@ -396,7 +398,7 @@ readRemoteFile :: FilePath -> String -> IO (Maybe RemoteTarget)
 readRemoteFile repoRoot remoteName = do
   let path = repoRoot </> bitRemotesDir </> remoteName
   exists <- Dir.doesFileExist path
-  if not exists then return Nothing
+  if not exists then pure Nothing
   else do
     -- Use strict ByteString reading to avoid Windows file locking issues
     bs <- BS.readFile path
@@ -405,12 +407,12 @@ readRemoteFile repoRoot remoteName = do
           Right txt -> T.unpack txt
     let raw = parseRemoteFile content
     case raw of
-      Nothing -> return Nothing
-      Just (ParsedLocal p) -> return (Just (TargetLocalPath p))
-      Just (ParsedCloud url) -> return (Just (TargetCloud url))
+      Nothing -> pure Nothing
+      Just (ParsedLocal p) -> pure (Just (TargetLocalPath p))
+      Just (ParsedCloud url) -> pure (Just (TargetCloud url))
       Just (ParsedDevice device relPath) -> do
         mDev <- readDeviceFile repoRoot device
-        return $ Just $ case mDev of
+        pure $ Just $ case mDev of
           Just _ -> TargetDevice device relPath
           Nothing -> TargetCloud (device ++ ":" ++ relPath)
 
@@ -436,19 +438,19 @@ parseRemoteTarget s = case break (== ':') s of
 -- ---------------------------------------------------------------------------
 
 resolveRemoteTarget :: FilePath -> RemoteTarget -> IO ResolveResult
-resolveRemoteTarget _repoRoot (TargetCloud url) = return (Resolved url)
-resolveRemoteTarget _repoRoot (TargetLocalPath p) = return (Resolved p)
+resolveRemoteTarget _repoRoot (TargetCloud url) = pure (Resolved url)
+resolveRemoteTarget _repoRoot (TargetLocalPath p) = pure (Resolved p)
 resolveRemoteTarget repoRoot (TargetDevice deviceName relPath) = do
   mInfo <- readDeviceFile repoRoot deviceName
   case mInfo of
-    Nothing -> return (NotConnected ("Device '" ++ deviceName ++ "' not found in .rgit/devices/"))
+    Nothing -> pure (NotConnected ("Device '" ++ deviceName ++ "' not found in .rgit/devices/"))
     Just info -> do
       mMount <- resolveDevice info
       case mMount of
-        Nothing -> return (NotConnected ("Device '" ++ deviceName ++ "' is not connected"))
+        Nothing -> pure (NotConnected ("Device '" ++ deviceName ++ "' is not connected"))
         Just mountRoot -> do
           let fullPath = mountRoot </> relPath
-          return (Resolved fullPath)
+          pure (Resolved fullPath)
 
 -- | Search for a device and return its volume root if found
 resolveDevice :: DeviceInfo -> IO (Maybe FilePath)
@@ -461,18 +463,18 @@ resolvePhysicalDevice :: DeviceInfo -> IO (Maybe FilePath)
 resolvePhysicalDevice info = do
   mounts <- getPhysicalMountPoints
   found <- filterM (checkMountForDevice info) mounts
-  return (listToMaybe found)
+  pure (listToMaybe found)
 
 resolveNetworkDevice :: DeviceInfo -> IO (Maybe FilePath)
 resolveNetworkDevice info = do
   mounts <- getNetworkMountPoints
   found <- filterM (checkMountForDevice info) mounts
-  return (listToMaybe found)
+  pure (listToMaybe found)
 
 checkMountForDevice :: DeviceInfo -> FilePath -> IO Bool
 checkMountForDevice info mountRoot = do
   mStoreUuid <- readBitStore mountRoot
-  return $ mStoreUuid == Just (deviceUuid info)
+  pure $ mStoreUuid == Just (deviceUuid info)
 
 getPhysicalMountPoints :: IO [FilePath]
 getPhysicalMountPoints
@@ -488,29 +490,33 @@ getLinuxMountPoints :: (String -> Bool) -> IO [FilePath]
 getLinuxMountPoints _typeFilter = do
   -- Parse /proc/mounts for mount points; full impl would filter by fstype
   (code, out, _) <- readProcessWithExitCode "sh" ["-c", "awk '{print $2}' /proc/mounts 2>/dev/null | sort -u"] ""
-  if code /= ExitSuccess then return ["/"]
-  else return (filter (not . null) (lines out))
+  if code /= ExitSuccess then pure ["/"]
+  else pure (filter (not . null) (lines out))
 
 getWindowsPhysicalMounts :: IO [FilePath]
 getWindowsPhysicalMounts = do
   (code, out, _) <- readProcessWithExitCode "wmic" ["logicaldisk", "where", "DriveType=2 or DriveType=3", "get", "DeviceID"] ""
-  if code /= ExitSuccess then return []
-  else return
+  if code /= ExitSuccess then pure []
+  else pure
     [ trim l ++ "\\"
     | l <- lines out
     , let t = trim l
     , length t == 2
-    , last t == ':'
+    , case reverse t of
+        (':':_) -> True
+        _ -> False
     ]
 
 getWindowsNetworkMounts :: IO [FilePath]
 getWindowsNetworkMounts = do
   (code, out, _) <- readProcessWithExitCode "wmic" ["logicaldisk", "where", "DriveType=4", "get", "DeviceID"] ""
-  if code /= ExitSuccess then return []
-  else return
+  if code /= ExitSuccess then pure []
+  else pure
     [ trim l ++ "\\"
     | l <- lines out
     , let t = trim l
     , length t == 2
-    , last t == ':'
+    , case reverse t of
+        (':':_) -> True
+        _ -> False
     ]

@@ -19,7 +19,7 @@ import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
-import Data.List (isPrefixOf)
+import Data.List (dropWhileEnd)
 import Control.Exception (catch, SomeException)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
@@ -78,7 +78,7 @@ run = do
 extractRemoteTarget :: [String] -> (Maybe String, [String])
 extractRemoteTarget [] = (Nothing, [])
 extractRemoteTarget (arg:rest)
-    | "@" `isPrefixOf` arg && length arg > 1 = (Just (drop 1 arg), rest)
+    | ('@':remoteName@(_:_)) <- arg = (Just remoteName, rest)
     | otherwise = (Nothing, arg:rest)
 
 -- | Execute a command in the context of a remote workspace
@@ -131,7 +131,7 @@ runRemoteCommand remoteName args = do
                                 then putStrLn "Remote is now a bit repository."
                                 else hPutStrLn stderr "Error uploading bundle to remote."
                             -- Cleanup bundle
-                            Dir.removeFile bundlePath `catch` (\(_ :: SomeException) -> return ())
+                            Dir.removeFile bundlePath `catch` (\(_ :: SomeException) -> pure ())
                     exitWith code
 
                 ("status":rest) -> do
@@ -189,7 +189,7 @@ syncBitignoreToIndex cwd = do
         when destExists $ Dir.removeFile dest
     
     trim :: String -> String
-    trim = dropWhile (== ' ') . reverse . dropWhile (== ' ') . reverse
+    trim = dropWhile (== ' ') . dropWhileEnd (== ' ')
 
 runCommand :: [String] -> IO ()
 runCommand args = do
@@ -208,7 +208,7 @@ runCommand args = do
     -- Lightweight env (no scan) — for read-only commands
     let baseEnv = do
             mRemote <- getDefaultRemote cwd
-            return $ BitEnv cwd [] mRemote isForce isForceWithLease isSkipVerify
+            pure $ BitEnv cwd [] mRemote isForce isForceWithLease isSkipVerify
 
     -- Full env (scan + bitignore sync + metadata write) — for write commands
     let scannedEnv = do
@@ -216,7 +216,7 @@ runCommand args = do
             localFiles <- Scan.scanWorkingDir cwd
             Scan.writeMetadataFiles cwd localFiles
             mRemote <- getDefaultRemote cwd
-            return $ BitEnv cwd localFiles mRemote isForce isForceWithLease isSkipVerify
+            pure $ BitEnv cwd localFiles mRemote isForce isForceWithLease isSkipVerify
 
     -- Repo existence check (skip for init)
     let needsRepo = cmd /= ["init"]

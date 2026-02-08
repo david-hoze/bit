@@ -42,7 +42,7 @@ import qualified Internal.Git as Git
 import qualified Bit.Device as Device
 import Bit.Remote (Remote)
 import Data.Char (isSpace)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, foldl')
 import System.IO (stderr, hPutStrLn)
 import Data.Maybe (mapMaybe)
 import Bit.Types (BitM, BitEnv(..))
@@ -78,17 +78,17 @@ defaultPullOptions = PullOptions False False False
 getLocalHeadE :: IO (Maybe String)
 getLocalHeadE = do
     (code, out, _) <- Git.runGitWithOutput ["rev-parse", "HEAD"]
-    return $ if code == ExitSuccess then Just (filter (not . isSpace) out) else Nothing
+    pure $ if code == ExitSuccess then Just (filter (not . isSpace) out) else Nothing
 
 checkIsAheadE :: String -> String -> IO Bool
 checkIsAheadE rHash lHash = do
     (code, _, _) <- Git.runGitWithOutput ["merge-base", "--is-ancestor", rHash, lHash]
-    return (code == ExitSuccess)
+    pure (code == ExitSuccess)
 
 hasStagedChangesE :: IO Bool
 hasStagedChangesE = do
     (code, _, _) <- Git.runGitWithOutput ["diff", "--cached", "--quiet"]
-    return (code == ExitFailure 1)
+    pure (code == ExitFailure 1)
 
 -- | Determine the remote target type from a remote name.
 -- Returns the RemoteTarget if the remote is configured, Nothing otherwise.
@@ -184,10 +184,10 @@ readFileMaybe filePath = do
     if exists
         then do
             bs <- BS.readFile filePath
-            return $ case decodeUtf8' bs of
+            pure $ case decodeUtf8' bs of
                 Left _ -> Nothing
                 Right txt -> Just (T.unpack txt)
-        else return Nothing
+        else pure Nothing
 
 removeDirectoryRecursive :: FilePath -> IO ()
 removeDirectoryRecursive dir = do
@@ -218,7 +218,7 @@ restoreCheckoutPaths args =
                      "--inter-hunk-context=" `isPrefixOf` arg ||
                      "--unified=" `isPrefixOf` arg ||
                      "-U" `isPrefixOf` arg
-        (_, paths) = foldl (\(afterDash, acc) arg ->
+        (_, paths) = foldl' (\(afterDash, acc) arg ->
             if arg == "--" then (True, acc)
             else if afterDash then (True, arg:acc)
             else if isFlag arg then (False, acc)
@@ -230,7 +230,7 @@ expandPathsToFiles :: FilePath -> [String] -> IO [FilePath]
 expandPathsToFiles cwd paths = do
     let indexRoot = cwd </> bitIndexPath
     allFiles <- Scan.listMetadataPaths indexRoot
-    return $ concatMap (\p ->
+    pure $ concatMap (\p ->
         if p == "." || p == "./"
         then allFiles
         else let p' = normalise p

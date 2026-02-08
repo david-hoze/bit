@@ -47,7 +47,7 @@ runPure env program =
   in (result, reverse (pureTrace finalEnv))
 
 interpretPure :: Rgit a -> PureM a
-interpretPure (Pure a) = return a
+interpretPure (Pure a) = pure a
 interpretPure (Free f) = case f of
   GitRaw args k -> do
     trace (TGitRaw args)
@@ -76,7 +76,7 @@ interpretPure (Free f) = case f of
     env <- get
     case Map.lookup src (pureFiles env) of
       Just content -> modify (\e -> e { pureFiles = Map.insert dest content (pureFiles e) })
-      Nothing -> return ()
+      Nothing -> pure ()
     interpretPure next
   FileExistsE path k -> do
     env <- get

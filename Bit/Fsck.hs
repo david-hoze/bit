@@ -11,7 +11,7 @@ import qualified Internal.Git as Git
 import Bit.Concurrency (Concurrency(..))
 import System.FilePath ((</>))
 import System.Exit (ExitCode(..), exitWith)
-import Control.Monad (when)
+import Control.Monad (when, unless)
 import System.IO (hPutStr, hPutStrLn, hFlush, hSetBuffering, BufferMode(..), stderr, hIsTerminalDevice)
 import Data.IORef (newIORef, readIORef, IORef)
 import Control.Concurrent (forkIO, threadDelay, killThread)
@@ -43,17 +43,17 @@ doFsck cwd concurrency = do
       -- Start progress reporter thread if in TTY
       reporterThread <- if shouldShowProgress
         then Just <$> forkIO (fsckProgressLoop counter fileCount)
-        else return Nothing
+        else pure Nothing
       
       -- Run verification with progress
       result <- finally
         (Verify.verifyLocal cwd (Just counter) concurrency)
         (do
           -- Clean up: kill reporter thread and clear line
-          maybe (return ()) killThread reporterThread
+          maybe (pure ()) killThread reporterThread
           when shouldShowProgress clearProgress
         )
-      return result
+      pure result
     else
       -- Few files, no progress needed
       Verify.verifyLocal cwd Nothing concurrency
@@ -76,7 +76,7 @@ doFsck cwd concurrency = do
       putStr gitOut
       hPutStr stderr gitErr
 
-  when (not localOk || not gitOk) $
+  unless (localOk && gitOk) $
     exitWith (ExitFailure 1)
 
   where

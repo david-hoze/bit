@@ -134,7 +134,7 @@ applyMergeToWorkingDir :: FileTransport -> FilePath -> String -> IO ()
 applyMergeToWorkingDir transport cwd oldHead = do
     newHead <- getLocalHeadE
     case newHead of
-        Nothing -> return ()  -- shouldn't happen after merge commit
+        Nothing -> pure ()  -- shouldn't happen after merge commit
         Just newH -> do
             changes <- Git.getDiffNameStatus oldHead newH
             putStrLn "--- Pulling changes from remote ---"
@@ -143,21 +143,21 @@ applyMergeToWorkingDir transport cwd oldHead = do
                 else do
                     -- First pass: collect paths that will be copied and their sizes
                     filesToCopy <- fmap concat $ forM changes $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
-                        'A' -> return [filePath]
-                        'M' -> return [filePath]
-                        'R' -> return (maybe [] (\p -> [p]) mNewPath)
-                        _ -> return []
+                        'A' -> pure [filePath]
+                        'M' -> pure [filePath]
+                        'R' -> pure (maybe [] (\p -> [p]) mNewPath)
+                        _ -> pure []
                     
                     -- Gather file sizes for binary files (for progress tracking)
                     fileInfo <- forM filesToCopy $ \filePath -> do
                         fromIndex <- isTextFileInIndex cwd filePath
                         if fromIndex
-                            then return (filePath, True, (0 :: Integer))
+                            then pure (filePath, True, (0 :: Integer))
                             else do
                                 -- Binary file: try to get size for progress
                                 -- (size might not be available yet, that's ok)
                                 let _destPath = cwd </> filePath
-                                return (filePath, False, 0)  -- Size will be tracked during copy
+                                pure (filePath, False, 0)  -- Size will be tracked during copy
                     
                     let binaryFiles = [(p, s) | (p, False, s) <- fileInfo]
                         totalFiles = length binaryFiles
@@ -178,8 +178,8 @@ applyMergeToWorkingDir transport cwd oldHead = do
                                 Just newPath -> do
                                     safeDeleteWorkFile cwd filePath
                                     (transportDownloadFile transport) cwd newPath progress
-                                Nothing -> return ()
-                            _ -> return ()
+                                Nothing -> pure ()
+                            _ -> pure ()
                             ) changes
 
 -- | Download a file from remote, or copy from index if it's a text file.
@@ -226,7 +226,7 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
             let metaPath = localIndex </> filePath
             isText <- isTextMetadataFile metaPath
             if isText
-                then return (filePath, True, 0)
+                then pure (filePath, True, 0)
                 else do
                     -- Binary file: get size from remote file
                     let srcPath = remotePath </> filePath
@@ -234,8 +234,8 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
                     if srcExists
                         then do
                             size <- Dir.getFileSize srcPath
-                            return (filePath, False, fromIntegral size)
-                        else return (filePath, False, 0)
+                            pure (filePath, False, fromIntegral size)
+                        else pure (filePath, False, 0)
         
         let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
             totalBytes = sum [s | (_, s) <- binaryFiles]
@@ -312,7 +312,7 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
                 let metaPath = remoteIndex </> filePath
                 isText <- isTextMetadataFile metaPath
                 if isText
-                    then return (filePath, True, 0)
+                    then pure (filePath, True, 0)
                     else do
                         -- Binary file: get size from local file
                         let srcPath = localRoot </> filePath
@@ -320,8 +320,8 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
                         if srcExists
                             then do
                                 size <- Dir.getFileSize srcPath
-                                return (filePath, False, fromIntegral size)
-                            else return (filePath, False, 0)
+                                pure (filePath, False, fromIntegral size)
+                            else pure (filePath, False, 0)
             
             let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
                 totalBytes = sum [s | (_, s) <- binaryFiles]
@@ -353,7 +353,7 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
                                 CopyProgress.copyFileWithProgress srcPath destPath size progress
                                 CopyProgress.incrementFilesComplete progress
                     ) fileInfo
-        _ -> return ()
+        _ -> pure ()
 
 -- | Sync only changed files between two commits.
 filesystemSyncChangedFiles :: FilePath -> FilePath -> String -> String -> IO ()
@@ -366,25 +366,25 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
             
             -- First pass: collect paths that will be copied and their sizes
             filesToCopy <- fmap concat $ forM parsedChanges $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
-                'A' -> return [filePath]
-                'M' -> return [filePath]
-                'R' -> return (maybe [] (\p -> [p]) mNewPath)
-                _ -> return []
+                'A' -> pure [filePath]
+                'M' -> pure [filePath]
+                'R' -> pure (maybe [] (\p -> [p]) mNewPath)
+                _ -> pure []
             
             -- Gather file sizes for binary files
             fileInfo <- forM filesToCopy $ \p -> do
                 let metaPath = remoteIndex </> p
                 isText <- isTextMetadataFile metaPath
                 if isText
-                    then return (p, True, 0)
+                    then pure (p, True, 0)
                     else do
                         let srcPath = localRoot </> p
                         srcExists <- Dir.doesFileExist srcPath
                         if srcExists
                             then do
                                 size <- Dir.getFileSize srcPath
-                                return (p, False, fromIntegral size)
-                            else return (p, False, 0)
+                                pure (p, False, fromIntegral size)
+                            else pure (p, False, 0)
             
             let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
                 totalBytes = sum [s | (_, s) <- binaryFiles]
@@ -406,10 +406,10 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
                         Just newPath -> do
                             filesystemDeleteFileAtRemote remotePath p
                             filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
-                        Nothing -> return ()
-                    _ -> return ()
+                        Nothing -> pure ()
+                    _ -> pure ()
                     ) parsedChanges
-        _ -> return ()
+        _ -> pure ()
 
 -- | Safely delete a file from the working directory.
 safeDeleteWorkFile :: FilePath -> FilePath -> IO ()
@@ -428,10 +428,10 @@ isTextFileInIndex :: FilePath -> FilePath -> IO Bool
 isTextFileInIndex localRoot filePath = do
     let metaPath = localRoot </> bitIndexPath </> filePath
     exists <- Dir.doesFileExist metaPath
-    if not exists then return False
+    if not exists then pure False
     else do
         mcontent <- readFileMaybe metaPath
-        return $ case mcontent of
+        pure $ case mcontent of
             Nothing -> False
             Just content -> not (any ("hash: " `isPrefixOf`) (lines content))
 
@@ -449,14 +449,14 @@ copyFromIndexToWorkTree localRoot filePath = do
 isTextMetadataFile :: FilePath -> IO Bool
 isTextMetadataFile metaPath = do
     exists <- Dir.doesFileExist metaPath
-    if not exists then return False
+    if not exists then pure False
     else do
         -- Use strict ByteString reading to avoid Windows file locking issues
         bs <- BS.readFile metaPath
         let content = case decodeUtf8' bs of
               Left _ -> ""
               Right txt -> T.unpack txt
-        return $ not (any ("hash: " `isPrefixOf`) (lines content))
+        pure $ not (any ("hash: " `isPrefixOf`) (lines content))
 
 -- | Sync binaries after a successful merge commit
 syncBinariesAfterMerge :: FileTransport -> Remote -> Maybe String -> BitM ()
@@ -471,7 +471,7 @@ syncBinariesAfterMerge transport _remote oldHead = do
     maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
     case maybeRemoteHash of
         Just rHash -> liftIO $ void $ Git.updateRemoteTrackingBranchToHash rHash
-        Nothing    -> return ()
+        Nothing    -> pure ()
 
 -- | Executes/Prints the command to be run in the shell (push: local -> remote).
 executeCommand :: FilePath -> Remote -> RcloneAction -> IO ()
@@ -486,7 +486,7 @@ executeCommand localRoot remote action = case action of
         Delete p ->
             void $ Transport.deleteRemote remote (toPosix p)
 
-        Swap _ _ _ -> return ()  -- not produced by planAction; future-proofing
+        Swap _ _ _ -> pure ()  -- not produced by planAction; future-proofing
 
 -- | Execute a single pull action: copy from remote to local or delete local file.
 -- Text files are already in the git bundle (index); copy from index to work dir instead of rclone.
@@ -515,4 +515,4 @@ executePullCommand localRoot remote action = case action of
             let localPath = localRoot </> filePath
             exists <- Dir.doesFileExist localPath
             when exists $ Dir.removeFile localPath
-        Swap _ _ _ -> return ()
+        Swap _ _ _ -> pure ()

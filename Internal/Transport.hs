@@ -56,15 +56,15 @@ readProcessBytes cmd args = do
                 outBytes <- wait asyncOut
                 errStr   <- wait asyncErr
                 code     <- waitForProcess ph
-                return (code, LBS.fromStrict outBytes, errStr)
+                pure (code, LBS.fromStrict outBytes, errStr)
             _ -> error "readProcessBytes: failed to create pipes"
   where
     -- Cleanup: close any handles that might still be open and wait for process
     cleanupProcess (mStdin, mStdout, mStderr, ph) = do
         -- Try to close handles (may already be closed by hGetContents)
-        maybe (return ()) (const $ return ()) mStdin
-        maybe (return ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStdout
-        maybe (return ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStderr
+        maybe (pure ()) (const $ pure ()) mStdin
+        maybe (pure ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStdout
+        maybe (pure ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStderr
         -- Ensure process is cleaned up
         void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
     
@@ -75,7 +75,7 @@ readProcessBytes cmd args = do
         go acc = do
             eof <- hIsEOF h
             if eof
-                then return (concat (reverse acc))
+                then pure (concat (reverse acc))
                 else do
                     line <- hGetLine h
                     go ((line ++ "\n") : acc)
@@ -86,7 +86,9 @@ remoteFilePath :: Remote -> FilePath -> String
 remoteFilePath remote relPath =
     let base = remoteUrl remote
         -- Ensure exactly one separator between base and relative path
-        base' = if not (null base) && last base == '/' then init base else base
+        base' = case base of
+            [] -> base
+            _  -> if last base == '/' then init base else base
     in base' ++ "/" ++ relPath
 
 -- Dumb transport-level data types
@@ -134,14 +136,14 @@ copyToRemote :: FilePath -> Remote -> FilePath -> IO ExitCode
 copyToRemote localPath remote relPath = do
     let fullRemote = remoteFilePath remote relPath
     (code, _, _) <- readProcessWithExitCode "rclone" ["copyto", localPath, fullRemote] ""
-    return code
+    pure code
 
 -- | Copy file from remote (relative path) to local
 copyFromRemote :: Remote -> FilePath -> FilePath -> IO ExitCode
 copyFromRemote remote relPath localPath = do
     let fullRemote = remoteFilePath remote relPath
     (code, _, _) <- readProcessWithExitCode "rclone" ["copyto", fullRemote, localPath] ""
-    return code
+    pure code
 
 -- | Copy from remote with detailed error classification
 copyFromRemoteDetailed :: Remote -> FilePath -> FilePath -> IO CopyResult
@@ -149,11 +151,11 @@ copyFromRemoteDetailed remote relPath localPath = do
     let fullRemote = remoteFilePath remote relPath
     (code, _, err) <- readProcessWithExitCode "rclone" ["copyto", fullRemote, localPath] ""
     case code of
-        ExitSuccess -> return CopySuccess
+        ExitSuccess -> pure CopySuccess
         ExitFailure _ 
-            | "directory not found" `isInfixOf` err || "object not found" `isInfixOf` err -> return CopyNotFound
-            | "no such host" `isInfixOf` err || "dial tcp" `isInfixOf` err -> return (CopyNetworkError err)
-            | otherwise -> return (CopyOtherError err)
+            | "directory not found" `isInfixOf` err || "object not found" `isInfixOf` err -> pure CopyNotFound
+            | "no such host" `isInfixOf` err || "dial tcp" `isInfixOf` err -> pure (CopyNetworkError err)
+            | otherwise -> pure (CopyOtherError err)
 
 -- | Move a file on remote (both paths relative to remote root)
 moveRemote :: Remote -> FilePath -> FilePath -> IO ExitCode
@@ -161,28 +163,28 @@ moveRemote remote srcRel destRel = do
     let src = remoteFilePath remote srcRel
         dest = remoteFilePath remote destRel
     (code, _, _) <- readProcessWithExitCode "rclone" ["moveto", src, dest] ""
-    return code
+    pure code
 
 -- | Delete a file on remote (relative path)
 deleteRemote :: Remote -> FilePath -> IO ExitCode
 deleteRemote remote relPath = do
     let fullRemote = remoteFilePath remote relPath
     (code, _, _) <- readProcessWithExitCode "rclone" ["deletefile", fullRemote] ""
-    return code
+    pure code
 
 -- | Purge entire remote (no relative path — purges the remote root)
 purgeRemote :: Remote -> IO ExitCode
 purgeRemote remote = do
     let fullRemote = remoteUrl remote
     (code, _, _) <- readProcessWithExitCode "rclone" ["purge", fullRemote] ""
-    return code
+    pure code
 
 -- | Create directory on remote (relative path)
 mkdirRemote :: Remote -> FilePath -> IO ExitCode
 mkdirRemote remote relPath = do
     let fullRemote = remoteFilePath remote relPath
     (code, _, _) <- readProcessWithExitCode "rclone" ["mkdir", fullRemote] ""
-    return code
+    pure code
 
 -- | List remote directory as JSON (at remote root)
 -- Returns (ExitCode, ByteString, String) where stdout is raw bytes for proper UTF-8 handling
@@ -197,12 +199,12 @@ listRemoteItems remote maxDepth = do
     case code of
         ExitFailure _ -> 
             if "directory not found" `isInfixOf` err 
-            then return (Right [])  -- Empty directory
-            else return (Left err)  -- Network or other error
+            then pure (Right [])  -- Empty directory
+            else pure (Left err)  -- Network or other error
         ExitSuccess -> do
             case Aeson.decode outBytes :: Maybe [RcloneItem] of
-                Nothing -> return (Left "Failed to parse rclone JSON output")
-                Just items -> return (Right [TransportItem (name item) (isDir item) | item <- items])
+                Nothing -> pure (Left "Failed to parse rclone JSON output")
+                Just items -> pure (Right [TransportItem (name item) (isDir item) | item <- items])
 
 -- | List remote recursively with hashes
 -- Returns (ExitCode, ByteString, String) where stdout is raw bytes for proper UTF-8 handling
@@ -224,7 +226,7 @@ checkRemote localPath remote mCounter = do
             -- No progress tracking - use simple blocking version
             (code, out, err) <- readProcessWithExitCode "rclone" args ""
             let parsed = parseCombinedOutput out
-            return CheckResult
+            pure CheckResult
                 { checkMatches     = parsed '='
                 , checkDiffers     = parsed '*'
                 , checkMissingDest = parsed '+'
@@ -258,7 +260,7 @@ checkRemote localPath remote mCounter = do
                         code <- waitForProcess ph
                         let out = unlines outLines
                             parsed = parseCombinedOutput out
-                        return CheckResult
+                        pure CheckResult
                             { checkMatches     = parsed '='
                             , checkDiffers     = parsed '*'
                             , checkMissingDest = parsed '+'
@@ -272,8 +274,8 @@ checkRemote localPath remote mCounter = do
   where
     cleanup (_, mOut, mErr, ph) = do
         -- Try to close any handles that are still open
-        maybe (return ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mOut
-        maybe (return ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mErr
+        maybe (pure ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mOut
+        maybe (pure ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mErr
         -- Ensure process is cleaned up
         void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
     
@@ -284,7 +286,7 @@ checkRemote localPath remote mCounter = do
         go acc = do
             eof <- hIsEOF h
             if eof
-                then return (reverse acc)
+                then pure (reverse acc)
                 else do
                     line <- hGetLine h
                     unless (null line) $ modifyIORef' counter (+1)
@@ -297,7 +299,7 @@ checkRemote localPath remote mCounter = do
         go acc = do
             eof <- hIsEOF h
             if eof
-                then return (concat (reverse acc))
+                then pure (concat (reverse acc))
                 else do
                     line <- hGetLine h
                     go ((line ++ "\n") : acc)
@@ -313,7 +315,9 @@ checkRemote localPath remote mCounter = do
                                (s, ' ' : r) -> (s, r)
                                (s, _)       -> (s, "")
                      , not (null symChar)
-                     , head symChar == sym
+                     , case symChar of
+                         (c : _) -> c == sym
+                         []      -> False
                      ]
         in go
 

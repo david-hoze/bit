@@ -37,7 +37,7 @@ import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
 import System.IO (hPutStrLn, stderr)
-import Control.Monad (when)
+import Control.Monad (when, unless)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.IORef (IORef, atomicModifyIORef')
@@ -85,9 +85,9 @@ isUserFile filePath = not (isGitPath filePath) && filePath /= ".gitignore"
 
 -- | Resolve concurrency setting to a concrete bound.
 resolveConcurrency :: Concurrency -> IO Int
-resolveConcurrency Sequential = return 1
+resolveConcurrency Sequential = pure 1
 resolveConcurrency (Parallel 0) = ioConcurrency
-resolveConcurrency (Parallel n) = return n
+resolveConcurrency (Parallel n) = pure n
 
 -- | List all regular files under dir, with paths relative to baseDir.
 listFilesRecursive :: FilePath -> FilePath -> IO [FilePath]
@@ -98,7 +98,7 @@ listFilesRecursive baseDir dir = do
     isDir <- doesDirectoryExist full
     if isDir
       then listFilesRecursive baseDir full
-      else return [makeRelative baseDir full]
+      else pure [makeRelative baseDir full]
     ) entries
 
 -- | Check if a path is within the .git directory.
@@ -111,7 +111,7 @@ loadMetadata :: MetadataSource -> Concurrency -> IO [MetadataEntry]
 loadMetadata (FromFilesystem indexDir) concurrency = do
   exists <- doesDirectoryExist indexDir
   if not exists
-    then return []
+    then pure []
     else do
       relPaths <- listFilesRecursive indexDir indexDir
       let userPaths = filter isUserFile relPaths
@@ -123,7 +123,7 @@ loadMetadata (FromCommit commitHash) _concurrency = do
   (code, out, _) <- readProcessWithExitCode "git"
     [ "-C", bitIndexPath, "ls-tree", "-r", "--name-only", commitHash ] ""
   if code /= ExitSuccess
-    then return []
+    then pure []
     else do
       let paths = filter isUserFile $ filter (not . null) $ lines out
       mapM (readEntryFromCommit commitHash) paths
@@ -138,9 +138,9 @@ readEntryFromFilesystem indexDir relPath = do
       -- Check if this was parsed as metadata (binary) or computed from content (text)
       -- by trying parseMetadata on the raw content
       parseMetadataFile fullPath >>= \case
-        Just _ -> return (BinaryEntry relPath h sz)   -- has hash:/size: format → binary
-        Nothing -> return (TextEntry relPath)          -- content IS the file → text
-    Nothing -> return (TextEntry relPath)  -- shouldn't happen, but safe fallback
+        Just _ -> pure (BinaryEntry relPath h sz)   -- has hash:/size: format → binary
+        Nothing -> pure (TextEntry relPath)          -- content IS the file → text
+    Nothing -> pure (TextEntry relPath)  -- shouldn't happen, but safe fallback
 
 -- | Read a single metadata entry from a git commit tree.
 readEntryFromCommit :: String -> FilePath -> IO MetadataEntry
@@ -149,12 +149,12 @@ readEntryFromCommit commitHash relPath = do
   (code, content, _) <- readProcessWithExitCode "git"
     [ "-C", bitIndexPath, "show", commitHash ++ ":" ++ relPath ] ""
   if code /= ExitSuccess
-    then return (TextEntry relPath)
+    then pure (TextEntry relPath)
     else case parseMetadata content of
       Just (MetaContent { metaHash = h, metaSize = sz }) ->
-        return (BinaryEntry relPath h sz)
+        pure (BinaryEntry relPath h sz)
       Nothing ->
-        return (TextEntry relPath)  -- text file: content IS the data, skip hash verify
+        pure (TextEntry relPath)  -- text file: content IS the data, skip hash verify
 
 -- | Load only binary (hash-verifiable) metadata entries from the index.
 -- Text files are excluded. If you need all entries, use 'loadMetadata' directly.
@@ -178,21 +178,21 @@ verifyLocalAt root mCounter concurrency = do
   
   -- Parallelize verification (IO-bound: file reads and hashing)
   issues <- runConcurrently (Parallel bound) (checkOne root indexDir) filteredEntries
-  return (length filteredEntries, concat issues)
+  pure (length filteredEntries, concat issues)
   where
     checkOne rootPath indexPath entry = do
       let relPath = entryPath entry
           actualPath = rootPath </> relPath
       exists <- doesFileExist actualPath
       result <- if not exists
-        then return [Missing relPath]
+        then pure [Missing relPath]
         else case entry of
           BinaryEntry _ expectedHash expectedSize -> do
             actualHash <- hashFile actualPath
             actualSize <- fromIntegral . BS.length <$> BS.readFile actualPath
             if actualHash == expectedHash && actualSize == expectedSize
-              then return []
-              else return [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
+              then pure []
+              else pure [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
           TextEntry _ -> do
             -- Text files: just verify they exist (already checked above)
             -- Could optionally verify content matches index, but that's redundant
@@ -204,11 +204,11 @@ verifyLocalAt root mCounter concurrency = do
             indexHash <- hashFile indexFilePath
             indexSize <- fromIntegral . BS.length <$> BS.readFile indexFilePath
             if actualHash == indexHash && actualSize == indexSize
-              then return []
-              else return [HashMismatch relPath (T.unpack (hashToText indexHash)) (T.unpack (hashToText actualHash)) indexSize actualSize]
+              then pure []
+              else pure [HashMismatch relPath (T.unpack (hashToText indexHash)) (T.unpack (hashToText actualHash)) indexSize actualSize]
       -- Increment counter after checking file (atomicModifyIORef' is thread-safe)
-      maybe (return ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
-      return result
+      maybe (pure ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
+      pure result
 
 -- | Verify local working tree against metadata in .rgit/index.
 -- Returns (number of files checked, list of issues).
@@ -228,7 +228,7 @@ loadMetadataFromBundle bundleName = do
   -- First, fetch the bundle into the repo so we can read from it
   fetchCode <- Git.fetchFromBundle bundleName
   if fetchCode /= ExitSuccess
-    then return ([], Set.empty)
+    then pure ([], Set.empty)
     else do
       -- Get the remote HEAD hash (now available as refs/remotes/origin/main)
       (_code, out, _) <- readProcessWithExitCode "git"
@@ -237,10 +237,10 @@ loadMetadataFromBundle bundleName = do
         , "refs/remotes/origin/main"
         ] ""
       case filter (not . isSpace) out of
-        [] -> return ([], Set.empty)
+        [] -> pure ([], Set.empty)
         headHash -> do
           entries <- loadMetadata (FromCommit headHash) Sequential
-          return (binaryEntries entries, allEntryPaths entries)
+          pure (binaryEntries entries, allEntryPaths entries)
 
 -- | Verify remote files match remote metadata.
 -- Returns (number of files checked, list of issues).
@@ -250,7 +250,7 @@ verifyRemote _cwd remote mCounter _concurrency = do
   -- 1. Fetch the remote bundle if needed
   let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
   bundleExists <- doesFileExist fetchedPath
-  when (not bundleExists) $ do
+  unless bundleExists $ do
     let localDest = ".bit/temp_remote.bundle"
     fetchResult <- Transport.copyFromRemoteDetailed remote ".bit/bit.bundle" localDest
     case fetchResult of
@@ -260,19 +260,19 @@ verifyRemote _cwd remote mCounter _concurrency = do
         when (localDest /= fetchedPath) $ safeRemove localDest
       _ -> do
         hPutStrLn stderr "Error: Could not fetch remote bundle."
-        return ()
+        pure ()
   
   -- Check if bundle exists now (if fetch failed, we can't continue)
   bundleExistsNow <- doesFileExist fetchedPath
   if not bundleExistsNow
-    then return (0, [])
+    then pure (0, [])
     else do
       -- 2. Load metadata from the bundle (binary metadata + all known paths)
       (remoteMeta, allKnownPaths) <- loadMetadataFromBundle fetchedBundle
       
       -- 3. Fetch actual remote files
       Remote.Scan.fetchRemoteFiles remote >>= either
-        (\_ -> hPutStrLn stderr "Error: Could not fetch remote file list." >> return (0, []))
+        (\_ -> hPutStrLn stderr "Error: Could not fetch remote file list." >> pure (0, []))
         (\remoteFiles -> do
           let filteredRemoteFiles = filterOutBitPaths remoteFiles
           
@@ -292,22 +292,22 @@ verifyRemote _cwd remote mCounter _concurrency = do
               extraPaths = filePaths `Set.difference` allKnownPaths
               extraIssues = map (\p -> HashMismatch p "(not in metadata)" "(exists on remote)" 0 0) (Set.toList extraPaths)
           
-          return (length remoteMeta, concat issues ++ extraIssues))
+          pure (length remoteMeta, concat issues ++ extraIssues))
   where
     -- Check one file from metadata against remote (both use MD5)
     checkRemoteFile :: Map.Map FilePath (Hash 'MD5, EntryKind) -> (Path, Hash 'MD5, Integer) -> IO [VerifyIssue]
     checkRemoteFile remoteFileMap (relPath, expectedHash, expectedSize) = do
       let normalizedPath = normalise relPath
       result <- case Map.lookup normalizedPath remoteFileMap of
-        Nothing -> return [Missing relPath]
+        Nothing -> pure [Missing relPath]
         Just (actualHash, File _ actualSize _) ->
           if actualHash == expectedHash && actualSize == expectedSize
-            then return []
-            else return [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
-        Just _ -> return []
+            then pure []
+            else pure [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
+        Just _ -> pure []
       -- Increment counter after checking file
-      maybe (return ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
-      return result
+      maybe (pure ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
+      pure result
 
 -- Helper to safely remove a file
 safeRemove :: FilePath -> IO ()

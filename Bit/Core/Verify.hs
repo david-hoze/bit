@@ -43,12 +43,12 @@ verify isRemote concurrency
 
           reporterThread <- if shouldShowProgress
             then Just <$> forkIO (verifyProgressLoop counter fileCount)
-            else return Nothing
+            else pure Nothing
 
           (actualCount, issues) <- finally
             (Verify.verifyRemote cwd remote (Just counter) concurrency)
             (do
-              maybe (return ()) killThread reporterThread
+              maybe (pure ()) killThread reporterThread
               when shouldShowProgress clearProgress
             )
 
@@ -79,12 +79,12 @@ verify isRemote concurrency
 
           reporterThread <- if shouldShowProgress
             then Just <$> forkIO (verifyProgressLoop counter fileCount)
-            else return Nothing
+            else pure Nothing
 
           (actualCount, issues) <- finally
             (Verify.verifyLocal cwd (Just counter) concurrency)
             (do
-              maybe (return ()) killThread reporterThread
+              maybe (pure ()) killThread reporterThread
               when shouldShowProgress clearProgress
             )
 

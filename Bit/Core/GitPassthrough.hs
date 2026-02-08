@@ -130,7 +130,7 @@ mergeContinue = do
                         liftIO $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
                         liftIO $ putStrLn "Merge complete."
                         case mRemote of
-                            Nothing -> return ()
+                            Nothing -> pure ()
                             Just remote -> do
                                 mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
                                 let transport = case mTarget of
@@ -161,7 +161,7 @@ mergeContinue = do
                 liftIO $ putStrLn "Conflict directories cleaned up."
 
                 case mRemote of
-                    Nothing -> return ()
+                    Nothing -> pure ()
                     Just remote -> do
                         mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
                         let transport = case mTarget of
@@ -220,7 +220,7 @@ doRestore args = do
                     unless isBinaryMetadata $ do
                         lift $ createDirE (takeDirectory workPath)
                         lift $ copyFileE metaPath workPath
-    return code
+    pure code
 
 doCheckout :: [String] -> BitM ExitCode
 doCheckout args = do
@@ -243,4 +243,4 @@ doCheckout args = do
                 unless isBinaryMetadata $ do
                     lift $ createDirE (takeDirectory workPath)
                     lift $ copyFileE metaPath workPath
-    return code
+    pure code

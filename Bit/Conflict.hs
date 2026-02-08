@@ -10,8 +10,9 @@ module Bit.Conflict
   ) where
 
 import Data.Char (toLower, isSpace)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, dropWhileEnd)
 import Data.Maybe (mapMaybe)
+import Text.Read (readMaybe)
 import Control.Monad (void, when)
 import System.Exit (ExitCode(..))
 import qualified Internal.Git as Git
@@ -33,19 +34,19 @@ data ConflictInfo
 getConflictedFilesE :: IO [FilePath]
 getConflictedFilesE = do
   (code, out, _) <- Git.runGitWithOutput ["diff", "--name-only", "--diff-filter=U"]
-  return $ if code /= ExitSuccess then [] else filter (not . null) (lines out)
+  pure $ if code /= ExitSuccess then [] else filter (not . null) (lines out)
 
 -- | Detect conflict type
 getConflictInfoE :: FilePath -> IO ConflictInfo
 getConflictInfoE path = do
   (_, out, _) <- Git.runGitWithOutput ["ls-files", "-u", "--", path]
-  return (parseConflictInfo path out)
+  pure (parseConflictInfo path out)
 
 -- | Pure parsing of `git ls-files -u` output into ConflictInfo.
 parseConflictInfo :: FilePath -> String -> ConflictInfo
 parseConflictInfo path out =
   let stageNum line = case reverse (words (takeWhile (/= '\t') line)) of
-        (s:_) | s `elem` ["1","2","3"] -> Just (read s :: Int)
+        (s:_) | s `elem` ["1","2","3"] -> readMaybe s :: Maybe Int
         _ -> Nothing
       stageNums = mapMaybe stageNum (lines out)
       has1 = 1 `elem` stageNums
@@ -116,9 +117,7 @@ applyResolution path res = do
 
 -- | Normalize user input: trim whitespace, lowercase.
 normalize :: String -> String
-normalize = map toLower . trim
-  where trim = f . f
-        f = reverse . dropWhile isSpace
+normalize = map toLower . dropWhileEnd isSpace . dropWhile isSpace
 
 -- | Resolve all conflicts as a structured traversal.
 -- Each conflict is visited exactly once, in order, with correct numbering.

@@ -47,14 +47,14 @@ resolveRemote cwd name = do
         Just target -> do
             res <- Device.resolveRemoteTarget cwd target
             case res of
-                Device.Resolved url -> return (Just (mkRemote name url))
-                Device.NotConnected _ -> return Nothing
+                Device.Resolved url -> pure (Just (mkRemote name url))
+                Device.NotConnected _ -> pure Nothing
         Nothing -> do
             -- Fall back to git remote URL
             mUrl <- Git.getRemoteUrl name
             case mUrl of
-                Just url | not (null url) -> return (Just (mkRemote name url))
-                _ -> return Nothing
+                Just url | not (null url) -> pure (Just (mkRemote name url))
+                _ -> pure Nothing
 
 -- | Get the default remote for push/pull/fetch.
 -- Checks branch tracking config, falls back to "origin".
