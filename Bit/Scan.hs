@@ -15,7 +15,7 @@ module Bit.Scan
   , EntryKind(..)
   ) where
 
-import Bit.Types (Hash(..), HashAlgo(..), FileEntry(..), EntryKind(..), hashToText)
+import Bit.Types (Hash(..), HashAlgo(..), FileEntry(..), EntryKind(..), ContentType(..), hashToText)
 import System.FilePath
 import System.Directory
     ( doesDirectoryExist,
@@ -275,7 +275,7 @@ scanWorkingDir root = do
                   atomicModifyIORef' counter (\n -> (n + 1, ()))
                   pure $ FileEntry
                       { path = rel
-                      , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fIsText = ceIsText ce }
+                      , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = if ceIsText ce then TextContent else BinaryContent }
                       }
                 _ -> do
                   -- Cache miss: hash the file, save cache entry
@@ -284,7 +284,7 @@ scanWorkingDir root = do
                   atomicModifyIORef' counter (\n -> (n + 1, ()))
                   pure $ FileEntry
                       { path = rel
-                      , kind = File { fHash = h, fSize = fromIntegral size, fIsText = isText }
+                      , kind = File { fHash = h, fSize = fromIntegral size, fContentType = if isText then TextContent else BinaryContent }
                       }
     
       -- Wrap hashing with progress reporter
@@ -364,17 +364,17 @@ writeMetadataFiles root entries = do
       let writeWithProgress entry = do
               let metaPath = metaRoot </> path entry
               case kind entry of
-                File { fHash, fSize, fIsText } -> do
+                File { fHash, fSize, fContentType } -> do
                   -- Check if file is unchanged before writing
-                  needsWrite <- shouldWriteFile root metaPath entry fHash fSize fIsText
+                  needsWrite <- shouldWriteFile root metaPath entry fHash fSize fContentType
                   if needsWrite
                     then do
-                      if fIsText
-                        then do
+                      case fContentType of
+                        TextContent -> do
                           -- For text files, copy the actual content directly
                           let actualPath = root </> path entry
                           copyFileWithMetadata actualPath metaPath
-                        else do
+                        BinaryContent -> do
                           -- For binary files, write metadata (hash + size). Spec: raw hash value; atomic write.
                           atomicWriteFileStr metaPath $
                             serializeMetadata (MetaContent fHash fSize)
@@ -421,13 +421,13 @@ writeMetadataFiles root entries = do
             when (n < total) go
 
 -- | Check if a metadata file needs to be written (returns True if write needed)
-shouldWriteFile :: FilePath -> FilePath -> FileEntry -> Hash 'MD5 -> Integer -> Bool -> IO Bool
-shouldWriteFile root metaPath entry fHash fSize fIsText = do
+shouldWriteFile :: FilePath -> FilePath -> FileEntry -> Hash 'MD5 -> Integer -> ContentType -> IO Bool
+shouldWriteFile root metaPath entry fHash fSize fContentType = do
   exists <- doesFileExist metaPath
   if not exists
     then pure True  -- File doesn't exist, must write
-    else if fIsText
-      then do
+    else case fContentType of
+      TextContent -> do
         -- For text files: compare mtime and size of source vs destination
         let sourcePath = root </> path entry
         sourceMtime <- getModificationTime sourcePath
@@ -436,7 +436,7 @@ shouldWriteFile root metaPath entry fHash fSize fIsText = do
         destSize <- getFileSize metaPath
         -- Write if mtime or size differs
         pure (sourceMtime /= destMtime || sourceSize /= destSize)
-      else do
+      BinaryContent -> do
         -- For binary files: read existing metadata and compare hash/size
         existing <- readMetadataOrComputeHash metaPath
         case existing of

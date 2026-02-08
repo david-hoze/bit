@@ -8,7 +8,7 @@ module Bit.RemoteWorkspace
   , remoteWorkspacePath
   ) where
 
-import Bit.Types (FileEntry(..), EntryKind(..))
+import Bit.Types (FileEntry(..), EntryKind(..), ContentType(..))
 import Bit.Remote (Remote, remoteUrl)
 import qualified Bit.Remote.Scan as Remote.Scan
 import Bit.Scan (hashAndClassifyFile, binaryExtensions)
@@ -79,7 +79,7 @@ classifyRemoteTextCandidates remote config candidates = do
                 case kind fe of
                     File{fSize} -> do
                         (h, isText) <- hashAndClassifyFile localPath fSize config
-                        pure fe { kind = File { fHash = h, fSize = fSize, fIsText = isText } }
+                        pure fe { kind = File { fHash = h, fSize = fSize, fContentType = if isText then TextContent else BinaryContent } }
                     _ -> pure fe
             _ -> do
                 -- Download failed — treat as binary, keep rclone hash
@@ -141,7 +141,7 @@ initRemoteWorkspace cwd remote remName = do
             let (textFiles, binaryFiles) = partition isTextFile allFiles
                   where
                     isTextFile fe = case kind fe of
-                        File{fIsText} -> fIsText
+                        File{fContentType = TextContent} -> True
                         _ -> False
             
             -- For text files from the classified set: download them again to the workspace

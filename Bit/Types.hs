@@ -7,6 +7,7 @@ module Bit.Types
   , HashAlgo(..)
   , Hash(..)
   , hashToText
+  , ContentType(..)
   , EntryKind(..)
   , FileEntry(..)
   , syncHash
@@ -31,8 +32,11 @@ newtype Hash (a :: HashAlgo) = Hash Text
 hashToText :: Hash a -> Text
 hashToText (Hash t) = t
 
+data ContentType = TextContent | BinaryContent
+  deriving (Show, Eq, Generic)
+
 data EntryKind
-  = File { fHash :: Hash 'MD5, fSize :: Integer, fIsText :: Bool }
+  = File { fHash :: Hash 'MD5, fSize :: Integer, fContentType :: ContentType }
   | Directory
   | Symlink FilePath
   deriving (Show, Eq, Generic)
@@ -40,7 +44,7 @@ data EntryKind
 -- | Hash to use for sync diff (MD5). File has one hash; Directory/Symlink have none.
 syncHash :: EntryKind -> Maybe (Hash 'MD5)
 syncHash (File h _ _) = Just h
-syncHash _           = Nothing
+syncHash _            = Nothing
 
 data FileEntry = FileEntry
   { path :: FilePath

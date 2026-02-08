@@ -51,7 +51,7 @@ rcloneFileToFileEntry :: RcloneFile -> FileEntry
 rcloneFileToFileEntry rf =
   FileEntry
     { path = normalise rf.rfPath
-    , kind = File { fHash = Hash (T.pack ("md5:" ++ md5)), fSize = rf.rfSize, fIsText = False }
+    , kind = File { fHash = Hash (T.pack ("md5:" ++ md5)), fSize = rf.rfSize, fContentType = BinaryContent }
     }
     where
       md5 =
