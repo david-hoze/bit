@@ -1,4 +1,0 @@
-mtime: 1770566204
-size: 15
-hash: md5:6e6e8624f62c15a86a408f86354e061a
-isText: True

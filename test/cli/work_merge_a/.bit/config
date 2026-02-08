@@ -1,3 +1,0 @@
-[text]
-    size-limit = 1048576  # 1MB, files larger are always binary
-    extensions = .txt,.md,.yaml,.yml,.json,.xml,.html,.css,.js,.py,.hs,.rs
