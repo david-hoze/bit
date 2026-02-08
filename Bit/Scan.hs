@@ -26,7 +26,7 @@ import System.Directory
       copyFileWithMetadata,
       getModificationTime )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, stderr)
-import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf, lines, dropWhile, drop, filter, map, concat, partition, null)
+import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf, partition)
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
 import Control.Monad (void, when, forM_)
@@ -68,9 +68,7 @@ hashAndClassifyFile filePath size config = do
             withFile filePath ReadMode $ \handle -> do
                 firstChunk <- BS.hGet handle 8192
                 let isText = not (BS.elem 0 firstChunk) &&
-                             case decodeUtf8' firstChunk of
-                                 Left _ -> False
-                                 Right _ -> True
+                             either (const False) (const True) (decodeUtf8' firstChunk)
                 
                 -- Continue streaming hash from where we left off
                 let loop !ctx = do
@@ -162,9 +160,7 @@ loadCacheEntry root relPath = do
     else do
       -- Use strict bytestring reading to avoid lazy file handle issues on Windows
       bs <- BS.readFile cachePath
-      case decodeUtf8' bs of
-        Left _ -> pure Nothing
-        Right txt -> pure (parseCacheEntry (T.unpack txt))
+      pure $ either (const Nothing) (parseCacheEntry . T.unpack) (decodeUtf8' bs)
 
 -- | Save cache entry for a file (non-atomic write, cache corruption is acceptable)
 saveCacheEntry :: FilePath -> FilePath -> CacheEntry -> IO ()
@@ -206,9 +202,7 @@ checkIgnoredFiles root paths = do
         else do
             -- Use strict ByteString reading to avoid lazy file handle issues on Windows
             bs <- BS.readFile gitignorePath
-            let content = case decodeUtf8' bs of
-                    Left _ -> ""  -- Invalid UTF-8, treat as empty
-                    Right txt -> T.unpack txt
+            let content = either (const "") T.unpack (decodeUtf8' bs)
             let whitespace = ['\r', '\n', ' '] :: [Char]
             let patterns = filter (not . null) $ 
                            filter (not . ("#" `isPrefixOf`)) $  -- Skip comments

@@ -192,9 +192,7 @@ readFileMaybe filePath = do
     if exists
         then do
             bs <- BS.readFile filePath
-            pure $ case decodeUtf8' bs of
-                Left _ -> Nothing
-                Right txt -> Just (T.unpack txt)
+            pure $ either (const Nothing) (Just . T.unpack) (decodeUtf8' bs)
         else pure Nothing
 
 removeDirectoryRecursive :: FilePath -> IO ()

@@ -11,7 +11,7 @@ import System.FilePath ((</>))
 import System.Directory (doesFileExist)
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString as BS
@@ -67,9 +67,7 @@ parseConfig content =
 
 -- | Find index of first element matching predicate
 findIndex' :: (a -> Bool) -> [a] -> Maybe Int
-findIndex' p xs = case [i | (i, x) <- zip [0..] xs, p x] of
-  [] -> Nothing
-  (i:_) -> Just i
+findIndex' p xs = listToMaybe [i | (i, x) <- zip [0..] xs, p x]
 
 -- | Extract lines for a given section (between [section] and next [section] or EOF)
 extractSection :: String -> [T.Text] -> [T.Text]

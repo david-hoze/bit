@@ -19,7 +19,7 @@ import Bit.Types (Hash(..), HashAlgo(..), hashToText)
 import System.Directory (doesFileExist, doesDirectoryExist, listDirectory)
 import System.FilePath ((</>))
 import System.IO (withFile, IOMode(ReadMode), hIsEOF)
-import Data.List (isPrefixOf, isInfixOf)
+import Data.List (dropWhileEnd, isPrefixOf, isInfixOf)
 import Data.Maybe (listToMaybe)
 import Control.Monad (filterM)
 import qualified Data.ByteString as BS
@@ -64,12 +64,12 @@ parseMetadata content = do
     cleanHash s
       | "Hash \"" `isPrefixOf` s =
           let rest = drop (length ("Hash \"" :: String)) s
-          in if not (null rest) && last rest == '"' then init rest else rest
+          in dropWhileEnd (== '"') rest
       | ('"':rest) <- s = case reverse rest of
           ('"':middle) -> reverse middle
           _ -> s
       | otherwise = s
-    trim = dropWhile isSpaceChar . reverse . dropWhile isSpaceChar . reverse
+    trim = dropWhileEnd isSpaceChar . dropWhile isSpaceChar
     isSpaceChar c = c == ' ' || c == '\t'
     readMaybeInt s = case reads s of
       [(n, "")] -> Just n
@@ -84,9 +84,7 @@ parseMetadataFile fp = do
     then pure Nothing
     else do
       bs <- BS.readFile fp
-      case decodeUtf8' bs of
-        Left _ -> pure Nothing  -- Binary file, not valid metadata
-        Right txt -> pure (parseMetadata (T.unpack txt))
+      pure $ either (const Nothing) (parseMetadata . T.unpack) (decodeUtf8' bs)
 
 -- | Read a metadata file OR (if it's a text file whose content is stored directly)
 -- compute hash/size from the file bytes. This is the replacement for the fallback
@@ -149,9 +147,7 @@ conflictMarkers = ["<<<<<<<", "=======", ">>>>>>>"]
 hasConflictMarkers :: FilePath -> IO Bool
 hasConflictMarkers path = do
   bs <- BS.readFile path
-  case decodeUtf8' bs of
-    Left _ -> pure False  -- Binary file, no conflict markers possible
-    Right txt -> pure $ any (`isInfixOf` T.unpack txt) conflictMarkers
+  pure $ either (const False) (\txt -> any (`isInfixOf` T.unpack txt) conflictMarkers) (decodeUtf8' bs)
 
 listAllFiles :: FilePath -> IO [FilePath]
 listAllFiles dir = do

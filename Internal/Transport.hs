@@ -24,7 +24,7 @@ import System.IO (hGetLine, hIsEOF, hClose, Handle)
 import System.FilePath (normalise)
 import Control.Monad (unless, void)
 import Control.Concurrent.Async (async, wait)
-import Data.List (isInfixOf)
+import Data.List (dropWhileEnd, isInfixOf)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
@@ -88,7 +88,7 @@ remoteFilePath remote relPath =
         -- Ensure exactly one separator between base and relative path
         base' = case base of
             [] -> base
-            _  -> if last base == '/' then init base else base
+            _  -> dropWhileEnd (== '/') base
     in base' ++ "/" ++ relPath
 
 -- Dumb transport-level data types

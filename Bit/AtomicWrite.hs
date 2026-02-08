@@ -55,7 +55,7 @@ atomicWriteFile target content = do
     (openTempFile tempDir ".bit-tmp")
     (\(tempPath, handle) -> do
         hClose handle
-        removeFile tempPath `catch` \(_ :: IOException) -> return ())
+        removeFile tempPath `catch` \(_ :: IOException) -> pure ())
     (\(tempPath, handle) -> do
         BS.hPut handle content
         hClose handle
@@ -68,12 +68,12 @@ atomicWriteFile target content = do
 renameWithRetry :: FilePath -> FilePath -> Int -> IO ()
 renameWithRetry src dest 0 = do
   -- Final attempt: try to remove target first, then rename
-  removeFile dest `catch` \(_ :: IOException) -> return ()
+  removeFile dest `catch` \(_ :: IOException) -> pure ()
   renameFile src dest
 renameWithRetry src dest n = do
   result <- try (renameFile src dest)
   case result of
-    Right () -> return ()
+    Right () -> pure ()
     Left (_ :: IOException) -> do
       -- Try to remove the locked target file
       void (try (removeFile dest) :: IO (Either IOException ()))

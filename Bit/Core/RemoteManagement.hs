@@ -27,13 +27,13 @@ import Control.Exception (try, IOException)
 import Control.Concurrent (forkIO, threadDelay, killThread)
 import Data.IORef (IORef, newIORef, readIORef)
 import System.IO (hIsTerminalDevice)
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe)
 import Internal.Config (bitDevicesDir, bitRemotesDir, bitDir, fetchedBundle, bundleCwdPath, fromCwdPath, BundleName(..))
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Bit.Progress (reportProgress, clearProgress)
-import Bit.Remote (Remote, remoteUrl, displayRemote, resolveRemote)
+import Bit.Remote (remoteUrl, displayRemote, resolveRemote)
 import Bit.Core.Helpers (formatPathList)
 import qualified Bit.Core.Fetch as Fetch
 import Bit.Utils (atomicWriteFileStr)
@@ -197,9 +197,10 @@ remoteCheck mName = do
             pure (mRemote, name)
     case mRemote of
         Nothing -> do
-            liftIO $ if isNothing mName
-                then hPutStrLn stderr "fatal: No remote configured."
-                else hPutStrLn stderr $ "fatal: '" ++ fromMaybe "" mName ++ "' does not appear to be a git remote."
+            liftIO $ maybe
+                (hPutStrLn stderr "fatal: No remote configured.")
+                (\name -> hPutStrLn stderr $ "fatal: '" ++ name ++ "' does not appear to be a git remote.")
+                mName
             liftIO $ hPutStrLn stderr "hint: Set remote with 'bit remote add <name> <url>'"
             liftIO $ exitWith (ExitFailure 1)
         Just remote -> do

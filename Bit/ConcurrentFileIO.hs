@@ -32,7 +32,7 @@ module Bit.ConcurrentFileIO
   , T.Text
   ) where
 
-import Prelude (FilePath, Maybe(..), Either(..), pure, ($), (.))
+import Prelude (FilePath, Maybe(..), Either(..), pure, ($), (.), const, either)
 import Control.Exception (try, SomeException, throwIO)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.ByteString as BS
@@ -80,9 +80,7 @@ readFileUtf8Maybe path = liftIO $ do
   result <- try (BS.readFile path)
   pure $ case result of
     Left (_ :: SomeException) -> Nothing
-    Right bs -> case T.decodeUtf8' bs of
-      Left _ -> Nothing
-      Right t -> Just t
+    Right bs -> either (const Nothing) Just (T.decodeUtf8' bs)
 
 -- ============================================================================
 -- Writing (strict)

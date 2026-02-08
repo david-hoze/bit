@@ -35,7 +35,7 @@ module Bit.Device
   , generateStoreUuid
   ) where
 
-import Data.List (isPrefixOf, intercalate)
+import Data.List (dropWhileEnd, isPrefixOf, intercalate)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Control.Monad (when, filterM, join)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
@@ -112,7 +112,7 @@ getRcloneRemotes = do
     | line <- lines out
     , not (null (trimLine line))
     ]
-  where trimLine = reverse . dropWhile (== ' ') . reverse . dropWhile (== ' ')
+  where trimLine = dropWhileEnd (== ' ') . dropWhile (== ' ')
 
 -- ---------------------------------------------------------------------------
 -- Volume operations (platform-specific)
@@ -213,7 +213,7 @@ detectStorageTypeLinux _ = do
     else pure Physical
 
 trim :: String -> String
-trim = reverse . dropWhile (== ' ') . reverse . dropWhile (== ' ')
+trim = dropWhileEnd (== ' ') . dropWhile (== ' ')
 
 -- | Get hardware serial for a physical volume
 getHardwareSerial :: FilePath -> IO (Maybe String)
@@ -288,9 +288,7 @@ readBitStore volumeRoot = do
   else do
     -- Use strict ByteString reading to avoid Windows file locking issues
     bs <- BS.readFile storePath
-    let content = case decodeUtf8' bs of
-          Left _ -> ""
-          Right txt -> T.unpack txt
+    let content = either (const "") T.unpack (decodeUtf8' bs)
     pure (parseBitStoreUuid content)
 
 parseBitStoreUuid :: String -> Maybe UUID
@@ -342,9 +340,7 @@ readDeviceFile repoRoot deviceName = do
   else do
     -- Use strict ByteString reading to avoid Windows file locking issues
     bs <- BS.readFile path
-    let content = case decodeUtf8' bs of
-          Left _ -> ""
-          Right txt -> T.unpack txt
+    let content = either (const "") T.unpack (decodeUtf8' bs)
     pure (parseDeviceFile content)
 
 writeDeviceFile :: FilePath -> String -> DeviceInfo -> IO ()
@@ -402,9 +398,7 @@ readRemoteFile repoRoot remoteName = do
   else do
     -- Use strict ByteString reading to avoid Windows file locking issues
     bs <- BS.readFile path
-    let content = case decodeUtf8' bs of
-          Left _ -> ""
-          Right txt -> T.unpack txt
+    let content = either (const "") T.unpack (decodeUtf8' bs)
     let raw = parseRemoteFile content
     case raw of
       Nothing -> pure Nothing

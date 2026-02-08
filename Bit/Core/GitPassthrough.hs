@@ -30,6 +30,7 @@ import Prelude hiding (log)
 import qualified System.Directory as Dir
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, unless, void, forM_)
+import Data.Foldable (traverse_)
 import Control.Monad.Trans.Class (lift)
 import System.Exit (ExitCode(..), exitWith)
 import Control.Exception (throwIO)
@@ -44,7 +45,7 @@ import Data.List (isPrefixOf)
 import qualified Bit.Conflict as Conflict
 import qualified Bit.Device as Device
 import qualified Bit.Internal.Metadata as Metadata
-import Bit.Remote (Remote, remoteName, remoteUrl)
+import Bit.Remote (remoteName, remoteUrl)
 import qualified Bit.Core.Transport as Transport
 import Bit.Core.Helpers
     ( fileExistsE
@@ -129,15 +130,13 @@ mergeContinue = do
                         oldHead <- liftIO getLocalHeadE
                         liftIO $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
                         liftIO $ putStrLn "Merge complete."
-                        case mRemote of
-                            Nothing -> pure ()
-                            Just remote -> do
+                        traverse_ (\remote -> do
                                 mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
                                 let transport = case mTarget of
                                       Just (Device.TargetDevice _ _) -> Transport.mkFilesystemTransport (remoteUrl remote)
                                       Just (Device.TargetLocalPath _) -> Transport.mkFilesystemTransport (remoteUrl remote)
                                       _ -> Transport.mkCloudTransport remote
-                                Transport.syncBinariesAfterMerge transport remote oldHead
+                                Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
                     else do
                         liftIO $ hPutStrLn stderr "error: no merge in progress."
                         liftIO $ exitWith (ExitFailure 1)
@@ -160,15 +159,13 @@ mergeContinue = do
                 liftIO $ removeDirectoryRecursive conflictsDir
                 liftIO $ putStrLn "Conflict directories cleaned up."
 
-                case mRemote of
-                    Nothing -> pure ()
-                    Just remote -> do
+                traverse_ (\remote -> do
                         mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
                         let transport = case mTarget of
                               Just (Device.TargetDevice _ _) -> Transport.mkFilesystemTransport (remoteUrl remote)
                               Just (Device.TargetLocalPath _) -> Transport.mkFilesystemTransport (remoteUrl remote)
                               _ -> Transport.mkCloudTransport remote
-                        Transport.syncBinariesAfterMerge transport remote oldHead
+                        Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
 
 mergeAbort :: IO ()
 mergeAbort = doMergeAbort

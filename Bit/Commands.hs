@@ -176,9 +176,7 @@ syncBitignoreToIndex cwd = do
     writeBitignore :: FilePath -> FilePath -> IO ()
     writeBitignore src dest = do
         bs <- BS.readFile src
-        let content = case decodeUtf8' bs of
-              Left _ -> ""
-              Right txt -> T.unpack txt
+        let content = either (const "") T.unpack (decodeUtf8' bs)
             normalizedLines = filter (not . null) $
               map (trim . filter (/= '\r')) (lines content)
         atomicWriteFileStr dest (unlines normalizedLines)

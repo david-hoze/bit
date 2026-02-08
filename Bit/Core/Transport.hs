@@ -29,6 +29,7 @@ import System.Directory (copyFile, createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, void, forM)
 import Data.Foldable (traverse_)
+import Data.Maybe (maybeToList)
 import System.Exit (ExitCode(..))
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
@@ -144,7 +145,7 @@ applyMergeToWorkingDir transport cwd oldHead = do
                     filesToCopy <- fmap concat $ forM changes $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
                         'A' -> pure [filePath]
                         'M' -> pure [filePath]
-                        'R' -> pure (maybe [] (\p -> [p]) mNewPath)
+                        'R' -> pure (maybeToList mNewPath)
                         _ -> pure []
                     
                     -- Gather file sizes for binary files (for progress tracking)
@@ -371,7 +372,7 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
             filesToCopy <- fmap concat $ forM parsedChanges $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
                 'A' -> pure [filePath]
                 'M' -> pure [filePath]
-                'R' -> pure (maybe [] (\p -> [p]) mNewPath)
+                'R' -> pure (maybeToList mNewPath)
                 _ -> pure []
             
             -- Gather file sizes for binary files
@@ -454,9 +455,7 @@ isTextMetadataFile metaPath = do
     else do
         -- Use strict ByteString reading to avoid Windows file locking issues
         bs <- BS.readFile metaPath
-        let content = case decodeUtf8' bs of
-              Left _ -> ""
-              Right txt -> T.unpack txt
+        let content = either (const "") T.unpack (decodeUtf8' bs)
         pure $ not (any ("hash: " `isPrefixOf`) (lines content))
 
 -- | Sync binaries after a successful merge commit
