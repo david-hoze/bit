@@ -31,7 +31,7 @@ module Bit.Utils
   ) where
 
 import Data.List (isPrefixOf, isInfixOf)
-import Bit.Types (FileEntry(..))
+import Bit.Types (FileEntry(..), Path(unPath))
 import Bit.AtomicWrite
     ( atomicWriteFile
     , atomicWriteFileStr
@@ -54,7 +54,7 @@ isBitPath p = p == ".bit" || ".bit" `isPrefixOf` p || "/.bit" `isInfixOf` p || "
 
 -- | Remove .bit paths from a list of file entries (e.g. remote file list).
 filterOutBitPaths :: [FileEntry] -> [FileEntry]
-filterOutBitPaths = filter (\e -> not (isBitPath e.path))
+filterOutBitPaths = filter (\e -> not (isBitPath (unPath e.path)))
 
 -- | Format bytes in human-readable form (B, KB, MB, GB, TB).
 -- Uses 1 decimal place for KB and above, 1024 base.

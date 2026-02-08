@@ -50,7 +50,7 @@ fetchRemoteFiles remote = do
 rcloneFileToFileEntry :: RcloneFile -> FileEntry
 rcloneFileToFileEntry rf =
   FileEntry
-    { path = normalise rf.rfPath
+    { path = Path (normalise rf.rfPath)
     , kind = File { fHash = Hash (T.pack ("md5:" ++ md5)), fSize = rf.rfSize, fContentType = BinaryContent }
     }
     where

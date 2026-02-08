@@ -1,0 +1,79 @@
+# =============================================================================
+# Path Type Safety - Nested tracked paths and .bit filtering
+#
+# Covers:
+# - Creating a nested file (sub\file.txt) and committing it
+# - Verifying tracked output includes the nested path
+# - Verifying `.bit\...` paths do not appear in tracked output
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work_path_safety 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP
+# ======================================================================
+
+mkdir test\cli\work_path_safety
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_path_safety & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+mkdir test\cli\work_path_safety\sub
+<<<
+>>>
+>>>= 0
+
+echo hello> test\cli\work_path_safety\sub\file.txt
+<<<
+>>>
+>>>= 0
+
+mkdir test\cli\work_path_safety\.bit\junk
+<<<
+>>>
+>>>= 0
+
+echo nope> test\cli\work_path_safety\.bit\junk\should_not_show.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_path_safety & bit add . & bit commit -m "Add nested file"
+<<<
+>>> /\[main.*\].*Add nested file/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: ASSERTIONS
+# ======================================================================
+
+# Tracked output should include nested file
+cd test\cli\work_path_safety & bit ls-files | findstr /R /C:"sub[\\/]*file\.txt" >nul
+<<<
+>>>= 0
+
+# Tracked output should NOT include `.bit` paths
+cd test\cli\work_path_safety & bit ls-files | findstr /C:".bit" >nul
+<<<
+>>>= 1
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\work_path_safety 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+

@@ -25,7 +25,8 @@ instance Arbitrary EntryKind where
     h <- arbitrary
     sz <- choose (0, 10000000)
     isText <- arbitrary
-    return $ File h sz isText
+    let ct = if isText then TextContent else BinaryContent
+    return $ File h sz ct
 
 instance Arbitrary FileEntry where
   arbitrary = do
@@ -34,7 +35,7 @@ instance Arbitrary FileEntry where
     segments <- vectorOf depth (vectorOf 5 (elements "abcdefghijklmnop"))
     let filePath = foldl1 (\a b -> a ++ "/" ++ b) segments
     k <- arbitrary
-    return $ FileEntry filePath k
+    return $ FileEntry (Path filePath) k
 
 main :: IO ()
 main = defaultMain tests
@@ -92,7 +93,7 @@ prop_emptyTargetOnlyCopies source =
 test_singleAddedFile :: Assertion
 test_singleAddedFile = do
   let h = Hash (T.pack "md5:abc123")
-      source = [FileEntry "foo.bin" (File h 100 False)]
+      source = [FileEntry "foo.bin" (File h 100 BinaryContent)]
       target = []
       actions = diffAndPlan source target
   length actions @?= 1
@@ -104,7 +105,7 @@ test_singleDeletedFile :: Assertion
 test_singleDeletedFile = do
   let h = Hash (T.pack "md5:abc123")
       source = []
-      target = [FileEntry "foo.bin" (File h 100 False)]
+      target = [FileEntry "foo.bin" (File h 100 BinaryContent)]
       actions = diffAndPlan source target
   length actions @?= 1
   case head actions of
@@ -115,8 +116,8 @@ test_modifiedFile :: Assertion
 test_modifiedFile = do
   let h1 = Hash (T.pack "md5:aaa")
       h2 = Hash (T.pack "md5:bbb")
-      source = [FileEntry "foo.bin" (File h1 100 False)]
-      target = [FileEntry "foo.bin" (File h2 200 False)]
+      source = [FileEntry "foo.bin" (File h1 100 BinaryContent)]
+      target = [FileEntry "foo.bin" (File h2 200 BinaryContent)]
       actions = diffAndPlan source target
   length actions @?= 1
   case head actions of

@@ -45,7 +45,7 @@ import Data.Char (isSpace)
 import Data.List (isPrefixOf, foldl')
 import System.IO (stderr, hPutStrLn)
 import Data.Maybe (mapMaybe)
-import Bit.Types (BitM, BitEnv(..))
+import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Bit.Utils (toPosix, atomicWriteFileStr)
@@ -156,11 +156,11 @@ formatPathList paths
 printVerifyIssue :: (String -> String) -> Verify.VerifyIssue -> IO ()
 printVerifyIssue fmtHash = \case
   Verify.HashMismatch filePath expectedHash actualHash _expectedSize _actualSize -> do
-    hPutStrLn stderr $ "[ERROR] Hash mismatch: " ++ toPosix filePath
+    hPutStrLn stderr $ "[ERROR] Hash mismatch: " ++ toPosix (unPath filePath)
     hPutStrLn stderr $ "  Expected: " ++ fmtHash expectedHash
     hPutStrLn stderr $ "  Actual:   " ++ fmtHash actualHash
   Verify.Missing filePath ->
-    hPutStrLn stderr $ "[ERROR] Missing: " ++ toPosix filePath
+    hPutStrLn stderr $ "[ERROR] Missing: " ++ toPosix (unPath filePath)
 
 parseFilesystemDiffOutput :: String -> [(Char, FilePath, Maybe FilePath)]
 parseFilesystemDiffOutput = mapMaybe parseLine . lines

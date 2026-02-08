@@ -8,7 +8,7 @@ module Bit.RemoteWorkspace
   , remoteWorkspacePath
   ) where
 
-import Bit.Types (FileEntry(..), EntryKind(..), ContentType(..))
+import Bit.Types (FileEntry(..), EntryKind(..), ContentType(..), Path(..))
 import Bit.Remote (Remote, remoteUrl)
 import qualified Bit.Remote.Scan as Remote.Scan
 import Bit.Scan (hashAndClassifyFile, binaryExtensions)
@@ -53,7 +53,7 @@ partitionFiles config = partition isBinary
     isBinary fe = case kind fe of
         File{fSize} ->
             fSize >= ConfigFile.textSizeLimit config
-            || map toLower (takeExtension (path fe)) `elem` binaryExtensions
+            || map toLower (takeExtension (unPath (path fe))) `elem` binaryExtensions
         _ -> True  -- directories are not text candidates
 
 -- | Download text candidate files from remote, classify them, return updated FileEntries.
@@ -68,11 +68,11 @@ classifyRemoteTextCandidates remote config candidates = do
     -- Download and classify each candidate file
     classifiedEntries <- forM candidates $ \fe -> do
         let remotePath = path fe  -- Already normalized by rclone
-        let localPath = tempDir </> path fe
+        let localPath = tempDir </> unPath (path fe)
         createDirectoryIfMissing True (takeDirectory localPath)
 
         -- Download via rclone
-        code <- Transport.copyFromRemote remote remotePath localPath
+        code <- Transport.copyFromRemote remote (unPath remotePath) localPath
         case code of
             ExitSuccess -> do
                 -- Classify using existing function
@@ -83,7 +83,7 @@ classifyRemoteTextCandidates remote config candidates = do
                     _ -> pure fe
             _ -> do
                 -- Download failed — treat as binary, keep rclone hash
-                hPutStrLn stderr $ "Warning: Could not download " ++ path fe ++ " for classification, treating as binary."
+                hPutStrLn stderr $ "Warning: Could not download " ++ unPath (path fe) ++ " for classification, treating as binary."
                 pure fe
 
     -- Cleanup temp dir
@@ -113,7 +113,7 @@ initRemoteWorkspace cwd remote remName = do
             hPutStrLn stderr $ "Error scanning remote: " ++ show err
             exitWith (ExitFailure 1)
         Right remoteFiles -> do
-            let files = filter (not . isBitPath . path) remoteFiles
+            let files = filter (not . isBitPath . unPath . path) remoteFiles
             putStrLn $ "Found " ++ show (length files) ++ " files on remote."
 
             -- Step 2: Partition into binary (certain) and text candidates
@@ -148,15 +148,15 @@ initRemoteWorkspace cwd remote remName = do
             -- (we could optimize by keeping the temp files, but this is simpler and more robust)
             putStrLn $ "Downloading " ++ show (length textFiles) ++ " text files..."
             forM_ textFiles $ \fe -> do
-                let localPath = wsPath </> path fe
+                let localPath = wsPath </> unPath (path fe)
                 createDirectoryIfMissing True (takeDirectory localPath)
-                code <- Transport.copyFromRemote remote (path fe) localPath
+                code <- Transport.copyFromRemote remote (unPath (path fe)) localPath
                 when (code /= ExitSuccess) $
-                    hPutStrLn stderr $ "Warning: Failed to download text file " ++ path fe
+                    hPutStrLn stderr $ "Warning: Failed to download text file " ++ unPath (path fe)
 
             -- For binary files: write metadata
             forM_ binaryFiles $ \fe -> do
-                let metaPath = wsPath </> path fe
+                let metaPath = wsPath </> unPath (path fe)
                 createDirectoryIfMissing True (takeDirectory metaPath)
                 case kind fe of
                     File{fHash, fSize} ->

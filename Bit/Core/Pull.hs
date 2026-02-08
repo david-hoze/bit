@@ -41,7 +41,7 @@ import Control.Exception (try, SomeException, throwIO)
 import Bit.Utils (toPosix, filterOutBitPaths)
 import Data.Maybe (maybeToList)
 import Bit.Remote (Remote, remoteName, remoteUrl)
-import Bit.Types (BitM, BitEnv(..), Hash, HashAlgo(..), EntryKind(..), syncHash, runBitM)
+import Bit.Types (BitM, BitEnv(..), Hash, HashAlgo(..), EntryKind(..), syncHash, runBitM, unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
@@ -319,12 +319,12 @@ pullManualMergeImpl remote = do
                     localMeta <- lift $ Verify.loadBinaryMetadata (cwd </> bitIndexPath) (Parallel 0)
 
                     let remoteFileMap = Map.fromList
-                          [ (normalise e.path, (h, e.kind))
+                          [ (normalise (unPath e.path), (h, e.kind))
                           | e <- filteredRemoteFiles
                           , h <- maybeToList (syncHash e.kind)
                           ]
-                        remoteMetaMap = Map.fromList [(normalise p, (h, sz)) | (p, h, sz) <- remoteMeta]
-                        localMetaMap = Map.fromList [(normalise p, (h, sz)) | (p, h, sz) <- localMeta]
+                        remoteMetaMap = Map.fromList [(normalise (unPath p), (h, sz)) | (p, h, sz) <- remoteMeta]
+                        localMetaMap = Map.fromList [(normalise (unPath p), (h, sz)) | (p, h, sz) <- localMeta]
 
                     lift $ tell "Comparing..."
                     let divergentFiles = findDivergentFiles remoteFileMap remoteMetaMap localMetaMap

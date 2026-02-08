@@ -8,6 +8,7 @@ module Bit.Fsck
 import qualified Bit.Verify as Verify
 import qualified Bit.Utils as Utils
 import qualified Internal.Git as Git
+import Bit.Types (unPath)
 import Bit.Concurrency (Concurrency(..))
 import System.FilePath ((</>))
 import System.Exit (ExitCode(..), exitWith)
@@ -83,9 +84,9 @@ doFsck cwd concurrency = do
     printIssue :: (FilePath -> FilePath) -> Verify.VerifyIssue -> IO ()
     printIssue toP = \case
       Verify.HashMismatch path _ _ _ _ ->
-        hPutStrLn stderr $ "hash mismatch " ++ toP path
+        hPutStrLn stderr $ "hash mismatch " ++ toP (unPath path)
       Verify.Missing path ->
-        hPutStrLn stderr $ "missing " ++ toP path
+        hPutStrLn stderr $ "missing " ++ toP (unPath path)
     
     -- Progress reporter loop for fsck operation
     fsckProgressLoop :: IORef Int -> Int -> IO ()

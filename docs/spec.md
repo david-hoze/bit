@@ -209,7 +209,8 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 | Type | Module | Purpose |
 |------|--------|---------|
 | `Hash (a :: HashAlgo)` | `bit.Types` | Phantom-typed hash — compiler distinguishes MD5 vs SHA256 |
-| `FileEntry` | `bit.Types` | Path + EntryKind (hash, size, isText) |
+| `Path` | `bit.Types` | Domain path (bit-tracked file path). `newtype` over `FilePath` to prevent transposition bugs. |
+| `FileEntry` | `bit.Types` | Tracked `Path` + `EntryKind` (hash, size, `ContentType`) |
 | `BitEnv` | `bit.Types` | Reader environment: cwd, local files, remote, force flags |
 | `BitM` | `bit.Types` | `ReaderT BitEnv IO` — the application monad |
 | `MetaContent` | `bit.Internal.Metadata` | Canonical metadata: hash + size, single parser/serializer |

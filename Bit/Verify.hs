@@ -18,7 +18,7 @@ module Bit.Verify
   , allEntryPaths
   ) where
 
-import Bit.Types (Hash(..), HashAlgo(..), Path, FileEntry(..), EntryKind(..), syncHash, hashToText)
+import Bit.Types (Hash(..), HashAlgo(..), Path(..), FileEntry(..), EntryKind(..), syncHash, hashToText)
 import Bit.Utils (filterOutBitPaths)
 import Bit.Concurrency (Concurrency(..), runConcurrently, ioConcurrency)
 import System.FilePath ((</>), makeRelative, normalise)
@@ -138,9 +138,9 @@ readEntryFromFilesystem indexDir relPath = do
       -- Check if this was parsed as metadata (binary) or computed from content (text)
       -- by trying parseMetadata on the raw content
       parseMetadataFile fullPath >>= \case
-        Just _ -> pure (BinaryEntry relPath h sz)   -- has hash:/size: format → binary
-        Nothing -> pure (TextEntry relPath)          -- content IS the file → text
-    Nothing -> pure (TextEntry relPath)  -- shouldn't happen, but safe fallback
+        Just _ -> pure (BinaryEntry (Path relPath) h sz)   -- has hash:/size: format → binary
+        Nothing -> pure (TextEntry (Path relPath))          -- content IS the file → text
+    Nothing -> pure (TextEntry (Path relPath))  -- shouldn't happen, but safe fallback
 
 -- | Read a single metadata entry from a git commit tree.
 readEntryFromCommit :: String -> FilePath -> IO MetadataEntry
@@ -149,12 +149,12 @@ readEntryFromCommit commitHash relPath = do
   (code, content, _) <- readProcessWithExitCode "git"
     [ "-C", bitIndexPath, "show", commitHash ++ ":" ++ relPath ] ""
   if code /= ExitSuccess
-    then pure (TextEntry relPath)
+    then pure (TextEntry (Path relPath))
     else case parseMetadata content of
       Just (MetaContent { metaHash = h, metaSize = sz }) ->
-        pure (BinaryEntry relPath h sz)
+        pure (BinaryEntry (Path relPath) h sz)
       Nothing ->
-        pure (TextEntry relPath)  -- text file: content IS the data, skip hash verify
+        pure (TextEntry (Path relPath))  -- text file: content IS the data, skip hash verify
 
 -- | Load only binary (hash-verifiable) metadata entries from the index.
 -- Text files are excluded. If you need all entries, use 'loadMetadata' directly.
@@ -171,7 +171,7 @@ verifyLocalAt root mCounter concurrency = do
   let indexDir = root </> ".bit/index"
   entries <- loadMetadata (FromFilesystem indexDir) concurrency
   -- Filter out .git directory entries
-  let filteredEntries = filter (\entry -> not (isGitPath (entryPath entry))) entries
+  let filteredEntries = filter (\entry -> not (isGitPath (unPath (entryPath entry)))) entries
   
   -- Determine concurrency level
   bound <- resolveConcurrency concurrency
@@ -182,7 +182,7 @@ verifyLocalAt root mCounter concurrency = do
   where
     checkOne rootPath indexPath entry = do
       let relPath = entryPath entry
-          actualPath = rootPath </> relPath
+          actualPath = rootPath </> unPath relPath
       exists <- doesFileExist actualPath
       result <- if not exists
         then pure [Missing relPath]
@@ -200,7 +200,7 @@ verifyLocalAt root mCounter concurrency = do
             actualHash <- hashFile actualPath
             actualSize <- fromIntegral . BS.length <$> BS.readFile actualPath
             -- For text files, we need to check against what's in the index
-            let indexFilePath = indexPath </> relPath
+            let indexFilePath = indexPath </> unPath relPath
             indexHash <- hashFile indexFilePath
             indexSize <- fromIntegral . BS.length <$> BS.readFile indexFilePath
             if actualHash == indexHash && actualSize == indexSize
@@ -278,7 +278,7 @@ verifyRemote _cwd remote mCounter _concurrency = do
           
           -- 4. Build maps for comparison (both use MD5 hashes)
           let remoteFileMap = Map.fromList
-                [ (normalise e.path, (h, e.kind))
+                [ (normalise (unPath e.path), (h, e.kind))
                 | e <- filteredRemoteFiles
                 , h <- maybeToList (syncHash e.kind)
                 ]
@@ -288,7 +288,7 @@ verifyRemote _cwd remote mCounter _concurrency = do
           
           -- 6. Check for files on remote that aren't known to the bundle
           -- Use allKnownPaths (binary + text) to avoid false positives for text files
-          let filePaths = Set.fromList (Map.keys remoteFileMap)
+          let filePaths = Set.fromList (map Path (Map.keys remoteFileMap))
               extraPaths = filePaths `Set.difference` allKnownPaths
               extraIssues = map (\p -> HashMismatch p "(not in metadata)" "(exists on remote)" 0 0) (Set.toList extraPaths)
           
@@ -297,7 +297,7 @@ verifyRemote _cwd remote mCounter _concurrency = do
     -- Check one file from metadata against remote (both use MD5)
     checkRemoteFile :: Map.Map FilePath (Hash 'MD5, EntryKind) -> (Path, Hash 'MD5, Integer) -> IO [VerifyIssue]
     checkRemoteFile remoteFileMap (relPath, expectedHash, expectedSize) = do
-      let normalizedPath = normalise relPath
+      let normalizedPath = normalise (unPath relPath)
       result <- case Map.lookup normalizedPath remoteFileMap of
         Nothing -> pure [Missing relPath]
         Just (actualHash, File _ actualSize _) ->

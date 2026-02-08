@@ -15,7 +15,7 @@ module Bit.Scan
   , EntryKind(..)
   ) where
 
-import Bit.Types (Hash(..), HashAlgo(..), FileEntry(..), EntryKind(..), ContentType(..), hashToText)
+import Bit.Types (Hash(..), HashAlgo(..), FileEntry(..), EntryKind(..), ContentType(..), hashToText, Path(..))
 import System.FilePath
 import System.Directory
     ( doesDirectoryExist,
@@ -252,7 +252,7 @@ scanWorkingDir root = do
     
       -- Separate directories from files to hash
       let (dirs, _files) = partition snd allPaths
-          dirEntries = [FileEntry { path = rel, kind = Directory } | (rel, _) <- dirs]
+          dirEntries = [FileEntry { path = Path rel, kind = Directory } | (rel, _) <- dirs]
           filesToHash = [(rel, root </> rel) | (rel, False) <- allPaths
                                              , not (Set.member (normalizePath rel) ignoredSet)]
     
@@ -274,7 +274,7 @@ scanWorkingDir root = do
                   -- Cache hit: reuse hash and isText
                   atomicModifyIORef' counter (\n -> (n + 1, ()))
                   pure $ FileEntry
-                      { path = rel
+                      { path = Path rel
                       , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = if ceIsText ce then TextContent else BinaryContent }
                       }
                 _ -> do
@@ -283,7 +283,7 @@ scanWorkingDir root = do
                   saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h isText)
                   atomicModifyIORef' counter (\n -> (n + 1, ()))
                   pure $ FileEntry
-                      { path = rel
+                      { path = Path rel
                       , kind = File { fHash = h, fSize = fromIntegral size, fContentType = if isText then TextContent else BinaryContent }
                       }
     
@@ -340,7 +340,7 @@ writeMetadataFiles root entries = do
         createDirectoryIfMissing True fullPath
     
       -- Second pass: create parent directories for files
-      let parentDirs = Set.fromList [takeDirectory (path e) | e <- files]
+      let parentDirs = Set.fromList [takeDirectory (unPath (path e)) | e <- files]
       forM_ parentDirs $ \dirPath -> do
         let fullPath = metaRoot </> dirPath
         createDirectoryIfMissing True fullPath
@@ -362,7 +362,7 @@ writeMetadataFiles root entries = do
       let concurrency = max 4 (caps * 4)
     
       let writeWithProgress entry = do
-              let metaPath = metaRoot </> path entry
+              let metaPath = metaRoot </> unPath (path entry)
               case kind entry of
                 File { fHash, fSize, fContentType } -> do
                   -- Check if file is unchanged before writing
@@ -372,7 +372,7 @@ writeMetadataFiles root entries = do
                       case fContentType of
                         TextContent -> do
                           -- For text files, copy the actual content directly
-                          let actualPath = root </> path entry
+                          let actualPath = root </> unPath (path entry)
                           copyFileWithMetadata actualPath metaPath
                         BinaryContent -> do
                           -- For binary files, write metadata (hash + size). Spec: raw hash value; atomic write.
@@ -402,7 +402,7 @@ writeMetadataFiles root entries = do
   where
     partitionEntries :: [FileEntry] -> ([FilePath], [FileEntry])
     partitionEntries es =
-      let dirs = [path e | e <- es, case kind e of Directory -> True; _ -> False]
+      let dirs = [unPath (path e) | e <- es, case kind e of Directory -> True; _ -> False]
           files = [e | e <- es, case kind e of File{} -> True; _ -> False]
       in (dirs, files)
     
@@ -429,7 +429,7 @@ shouldWriteFile root metaPath entry fHash fSize fContentType = do
     else case fContentType of
       TextContent -> do
         -- For text files: compare mtime and size of source vs destination
-        let sourcePath = root </> path entry
+        let sourcePath = root </> unPath (path entry)
         sourceMtime <- getModificationTime sourcePath
         sourceSize <- getFileSize sourcePath
         destMtime <- getModificationTime metaPath

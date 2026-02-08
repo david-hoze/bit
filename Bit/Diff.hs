@@ -114,7 +114,7 @@ computeDiff local remote =
       ]
 
 formatDiff :: GitDiff -> String
-formatDiff (Added f)      = "[+] Added:    " ++ f.filePath
-formatDiff (Deleted f)    = "[-] Deleted:  " ++ f.filePath
-formatDiff (Modified f)   = "[*] Modified: " ++ f.filePath
-formatDiff (Renamed o n)  = "[M] Moved:    " ++ o.filePath ++ " -> " ++ n.filePath
+formatDiff (Added f)      = "[+] Added:    " ++ unPath f.filePath
+formatDiff (Deleted f)    = "[-] Deleted:  " ++ unPath f.filePath
+formatDiff (Modified f)   = "[*] Modified: " ++ unPath f.filePath
+formatDiff (Renamed o n)  = "[M] Moved:    " ++ unPath o.filePath ++ " -> " ++ unPath n.filePath

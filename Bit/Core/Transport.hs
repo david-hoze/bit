@@ -43,7 +43,7 @@ import System.IO (stderr, hPutStrLn)
 import Bit.Utils (toPosix)
 import Bit.Plan (RcloneAction(..))
 import Bit.Remote (Remote)
-import Bit.Types (BitM, BitEnv(..))
+import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import qualified Bit.CopyProgress as CopyProgress
@@ -477,14 +477,14 @@ syncBinariesAfterMerge transport _remote oldHead = do
 executeCommand :: FilePath -> Remote -> RcloneAction -> IO ()
 executeCommand localRoot remote action = case action of
         Copy src dest -> do
-            let localPath = toPosix (localRoot </> src)
-            void $ Transport.copyToRemote localPath remote (toPosix dest)
+            let localPath = toPosix (localRoot </> unPath src)
+            void $ Transport.copyToRemote localPath remote (toPosix (unPath dest))
 
         Move src dest ->
-            void $ Transport.moveRemote remote (toPosix src) (toPosix dest)
+            void $ Transport.moveRemote remote (toPosix (unPath src)) (toPosix (unPath dest))
 
         Delete p ->
-            void $ Transport.deleteRemote remote (toPosix p)
+            void $ Transport.deleteRemote remote (toPosix (unPath p))
 
         Swap _ _ _ -> pure ()  -- not produced by planAction; future-proofing
 
@@ -493,26 +493,26 @@ executeCommand localRoot remote action = case action of
 executePullCommand :: FilePath -> Remote -> RcloneAction -> IO ()
 executePullCommand localRoot remote action = case action of
         Copy _src dest -> do
-            fromIndex <- isTextFileInIndex localRoot dest
+            fromIndex <- isTextFileInIndex localRoot (unPath dest)
             if fromIndex
-            then copyFromIndexToWorkTree localRoot dest
+            then copyFromIndexToWorkTree localRoot (unPath dest)
             else do
-                let localPath = toPosix (localRoot </> dest)
-                createDirectoryIfMissing True (takeDirectory (localRoot </> dest))
-                void $ Transport.copyFromRemote remote (toPosix dest) localPath
+                let localPath = toPosix (localRoot </> unPath dest)
+                createDirectoryIfMissing True (takeDirectory (localRoot </> unPath dest))
+                void $ Transport.copyFromRemote remote (toPosix (unPath dest)) localPath
         Move src dest -> do
-            fromIndex <- isTextFileInIndex localRoot src
+            fromIndex <- isTextFileInIndex localRoot (unPath src)
             if fromIndex
-            then copyFromIndexToWorkTree localRoot src
+            then copyFromIndexToWorkTree localRoot (unPath src)
             else do
-                let localSrcPath = localRoot </> src
+                let localSrcPath = localRoot </> unPath src
                 createDirectoryIfMissing True (takeDirectory localSrcPath)
-                void $ Transport.copyFromRemote remote (toPosix src) (toPosix localSrcPath)
-            let localDestPath = localRoot </> dest
+                void $ Transport.copyFromRemote remote (toPosix (unPath src)) (toPosix localSrcPath)
+            let localDestPath = localRoot </> unPath dest
             exists <- Dir.doesFileExist localDestPath
             when exists $ Dir.removeFile localDestPath
         Delete filePath -> do
-            let localPath = localRoot </> filePath
+            let localPath = localRoot </> unPath filePath
             exists <- Dir.doesFileExist localPath
             when exists $ Dir.removeFile localPath
         Swap _ _ _ -> pure ()

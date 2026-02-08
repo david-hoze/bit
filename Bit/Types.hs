@@ -1,9 +1,11 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
 
 module Bit.Types
-  ( Path
+  ( Path(..)
   , HashAlgo(..)
   , Hash(..)
   , hashToText
@@ -17,11 +19,14 @@ module Bit.Types
   ) where
 
 import Control.Monad.Trans.Reader (ReaderT, runReaderT)
+import Data.String (IsString)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Bit.Remote (Remote)
 
-type Path = String
+newtype Path = Path { unPath :: FilePath }
+  deriving stock (Show, Generic)
+  deriving newtype (Eq, Ord, IsString)
 
 data HashAlgo = MD5 | SHA256
   deriving (Show, Eq, Generic)
@@ -47,7 +52,7 @@ syncHash (File h _ _) = Just h
 syncHash _            = Nothing
 
 data FileEntry = FileEntry
-  { path :: FilePath
+  { path :: Path
   , kind :: EntryKind
   } deriving (Show, Eq, Generic)
 
