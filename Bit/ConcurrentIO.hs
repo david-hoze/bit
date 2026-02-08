@@ -90,11 +90,8 @@ writeFileStrict path = UnsafeConcurrentIO . BS.writeFile path
 -- | Read file, returning 'Nothing' on any error.
 -- Useful for "check if exists and read" patterns.
 readFileMaybeC :: FilePath -> ConcurrentIO (Maybe BS.ByteString)
-readFileMaybeC path = UnsafeConcurrentIO $ do
-  result <- try (BS.readFile path)
-  pure $ case result of
-    Left (_ :: SomeException) -> Nothing
-    Right bs -> Just bs
+readFileMaybeC path = UnsafeConcurrentIO $
+  either (const Nothing) Just <$> (try (BS.readFile path) :: IO (Either SomeException BS.ByteString))
 
 -- ============================================================================
 -- Concurrency primitives

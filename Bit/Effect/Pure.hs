@@ -11,6 +11,7 @@ import Control.Monad.Free (Free(..))
 import Control.Monad.State (State, runState, get, put, modify)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
+import Data.Foldable (traverse_)
 import qualified Data.Map as Map
 import Bit.Effect
 import System.Exit (ExitCode(..))
@@ -74,9 +75,8 @@ interpretPure (Free f) = case f of
   CopyFileE src dest next -> do
     trace (TCopy src dest)
     env <- get
-    case Map.lookup src (pureFiles env) of
-      Just content -> modify (\e -> e { pureFiles = Map.insert dest content (pureFiles e) })
-      Nothing -> pure ()
+    traverse_ (\content -> modify (\e -> e { pureFiles = Map.insert dest content (pureFiles e) }))
+      (Map.lookup src (pureFiles env))
     interpretPure next
   FileExistsE path k -> do
     env <- get

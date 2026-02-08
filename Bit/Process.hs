@@ -32,6 +32,7 @@ module Bit.Process
   ) where
 
 import Prelude (FilePath, IO, String, Maybe(..), Either(..), ($), pure, error)
+import Data.Foldable (traverse_)
 import Control.Concurrent.Async (async, wait)
 import Control.Exception (bracket, try, SomeException)
 import Control.Monad (void)
@@ -104,18 +105,10 @@ readProcessStrict cmd args = do
     cleanupProcess (mStdin, mStdout, _mStderr, ph) = do
       -- Try to close any handles that are still open
       -- (BS.hGetContents closes the handle, but we need cleanup for stdin)
-      case mStdin of
-        Just h -> void (try (hClose h) :: IO (Either SomeException ()))
-        Nothing -> pure ()
-      
-      case mStdout of
-        Just h -> void (try (hClose h) :: IO (Either SomeException ()))
-        Nothing -> pure ()
-      
-      case _mStderr of
-        Just h -> void (try (hClose h) :: IO (Either SomeException ()))
-        Nothing -> pure ()
-      
+      let tryClose h = void (try (hClose h) :: IO (Either SomeException ()))
+      traverse_ tryClose mStdin
+      traverse_ tryClose mStdout
+      traverse_ tryClose _mStderr
       -- Ensure process is cleaned up
       void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
 
@@ -163,13 +156,8 @@ readProcessStrictWithStderr cmd args = do
   where
     cleanupProcess (mStdin, mStdout, _mStderr, ph) = do
       -- Try to close any handles that are still open
-      case mStdin of
-        Just h -> void (try (hClose h) :: IO (Either SomeException ()))
-        Nothing -> pure ()
-      
-      case mStdout of
-        Just h -> void (try (hClose h) :: IO (Either SomeException ()))
-        Nothing -> pure ()
-      
+      let tryClose h = void (try (hClose h) :: IO (Either SomeException ()))
+      traverse_ tryClose mStdin
+      traverse_ tryClose mStdout
       -- Ensure process is cleaned up
       void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))

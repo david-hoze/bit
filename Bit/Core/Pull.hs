@@ -173,10 +173,10 @@ filesystemPullLogicImpl transport _remote remoteHash = do
             lift $ putStrLn $ "Checking out " ++ take 7 remoteHash ++ " (first pull)"
             checkoutCode <- lift $ Git.checkoutRemoteAsMain
             if checkoutCode == ExitSuccess
-                then do
-                    lift $ transportSyncAllFiles transport cwd
-                    lift $ putStrLn "Syncing binaries... done."
-                    lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
+                then lift $ do
+                    transportSyncAllFiles transport cwd
+                    putStrLn "Syncing binaries... done."
+                    void $ Git.updateRemoteTrackingBranchToHash remoteHash
                 else lift $ hPutStrLn stderr "Error: Failed to checkout remote branch."
         
         Just localHash -> do
@@ -201,33 +201,32 @@ filesystemPullLogicImpl transport _remote remoteHash = do
                     lift $ putStrLn "Syncing binaries... done."
                     lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
                 else do
-                    lift $ putStrLn finalMergeOut
-                    lift $ hPutStrLn stderr finalMergeErr
-                    lift $ putStrLn "Automatic merge failed."
-                    lift $ putStrLn "bit requires you to pick a version for each conflict."
-                    lift $ putStrLn ""
-                    lift $ putStrLn "Resolving conflicts..."
+                    lift $ do
+                        putStrLn finalMergeOut
+                        hPutStrLn stderr finalMergeErr
+                        putStrLn "Automatic merge failed."
+                        putStrLn "bit requires you to pick a version for each conflict."
+                        putStrLn ""
+                        putStrLn "Resolving conflicts..."
                     
                     conflicts <- lift Conflict.getConflictedFilesE
                     resolutions <- lift $ Conflict.resolveAll conflicts
                     let total = length resolutions
                     
                     invalid <- lift $ validateMetadataDir (cwd </> bitIndexPath)
-                    unless (null invalid) $ do
-                        lift $ void $ Git.runGitRaw ["merge", "--abort"]
-                        lift $ hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."
-                        lift $ throwIO (userError "Invalid metadata")
+                    unless (null invalid) $ lift $ do
+                        void $ Git.runGitRaw ["merge", "--abort"]
+                        hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."
+                        throwIO (userError "Invalid metadata")
                     
                     conflictsNow <- lift Conflict.getConflictedFilesE
-                    if null conflictsNow
-                        then do
-                            lift $ void $ Git.runGitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
-                            lift $ putStrLn $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
-                            -- CRITICAL: Always read actual HEAD after merge, never use remoteHash
-                            lift $ applyMergeToWorkingDir transport cwd localHash
-                            lift $ putStrLn "Syncing binaries... done."
-                            lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
-                        else pure ()
+                    when (null conflictsNow) $ lift $ do
+                        void $ Git.runGitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
+                        putStrLn $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
+                        -- CRITICAL: Always read actual HEAD after merge, never use remoteHash
+                        applyMergeToWorkingDir transport cwd localHash
+                        putStrLn "Syncing binaries... done."
+                        void $ Git.updateRemoteTrackingBranchToHash remoteHash
 
 -- | Filesystem pull --accept-remote implementation
 filesystemPullAcceptRemoteImpl :: FileTransport -> String -> BitM ()
@@ -244,13 +243,13 @@ filesystemPullAcceptRemoteImpl transport remoteHash = do
         then lift $ hPutStrLn stderr "Error: Failed to checkout remote state."
         else do
             -- Sync actual files based on what changed
-            case oldHead of
-                Just oh -> lift $ applyMergeToWorkingDir transport cwd oh
-                Nothing -> lift $ transportSyncAllFiles transport cwd
+            maybe (lift $ transportSyncAllFiles transport cwd)
+                  (\oh -> lift $ applyMergeToWorkingDir transport cwd oh) oldHead
             
             -- Update tracking ref
-            lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
-            lift $ putStrLn "Pull with --accept-remote completed."
+            lift $ do
+                void $ Git.updateRemoteTrackingBranchToHash remoteHash
+                putStrLn "Pull with --accept-remote completed."
 
 -- | Pull with --accept-remote: force-checkout the remote branch, then sync files.
 -- Git manages .bit/index/ (the metadata); we only sync actual files to the working tree.
@@ -283,9 +282,8 @@ pullAcceptRemoteImpl transport remote = do
                     -- 4. Sync actual files to working tree based on what changed in git
                     (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
                     let _newHash = takeWhile (/= '\n') remoteOut
-                    case oldHead of
-                        Just oh -> lift $ applyMergeToWorkingDir transport cwd oh
-                        Nothing -> lift $ transportSyncAllFiles transport cwd  -- First time, no diff available
+                    maybe (lift $ transportSyncAllFiles transport cwd)  -- First time, no diff available
+                          (\oh -> lift $ applyMergeToWorkingDir transport cwd oh) oldHead
 
                     -- 5. Update tracking ref
                     maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
@@ -361,15 +359,14 @@ pullWithCleanup :: FileTransport -> Remote -> PullOptions -> BitM ()
 pullWithCleanup transport remote opts = do
     env <- asks id
     result <- liftIO $ try @SomeException (runBitM env (pullLogic transport remote opts))
-    case result of
-        Left ex -> do
+    either (\ex -> do
             inProgress <- lift $ Git.isMergeInProgress
             if inProgress
-                then do
-                    lift $ void $ gitRaw ["merge", "--abort"]
-                    lift $ tell "Merge aborted. Your working tree is unchanged."
-                else lift $ throwIO ex
-        Right _ -> pure ()
+                then lift $ do
+                    void $ gitRaw ["merge", "--abort"]
+                    tell "Merge aborted. Your working tree is unchanged."
+                else lift $ throwIO ex)
+        (const $ pure ()) result
 
 pullLogic :: FileTransport -> Remote -> PullOptions -> BitM ()
 pullLogic transport remote opts = do
@@ -392,13 +389,13 @@ pullLogic transport remote opts = do
                 (remoteFileCount, remoteIssues) <- lift $ Verify.verifyRemote cwd remote Nothing (Parallel 0)
                 if null remoteIssues
                     then lift $ putStrLn $ "Verified " ++ show remoteFileCount ++ " remote files."
-                    else do
-                        lift $ hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
-                        lift $ mapM_ (printVerifyIssue id) remoteIssues
-                        lift $ hPutStrLn stderr "hint: Run 'bit verify --remote' to see all mismatches."
-                        lift $ hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
-                        lift $ hPutStrLn stderr "hint: Run 'bit push --force' to overwrite remote with local state."
-                        lift $ exitWith (ExitFailure 1)
+                    else lift $ do
+                        hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
+                        mapM_ (printVerifyIssue id) remoteIssues
+                        hPutStrLn stderr "hint: Run 'bit verify --remote' to see all mismatches."
+                        hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
+                        hPutStrLn stderr "hint: Run 'bit push --force' to overwrite remote with local state."
+                        exitWith (ExitFailure 1)
 
             oldHash <- lift getLocalHeadE
             (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
@@ -409,9 +406,9 @@ pullLogic transport remote opts = do
                     lift $ tell $ "Checking out " ++ take 7 newHash ++ " (first pull)"
                     checkoutCode <- lift $ Git.checkoutRemoteAsMain
                     if checkoutCode == ExitSuccess
-                        then do
-                            lift $ transportSyncAllFiles transport cwd
-                            lift $ tell "Syncing binaries... done."
+                        then lift $ do
+                            transportSyncAllFiles transport cwd
+                            tell "Syncing binaries... done."
                         else lift $ tellErr "Error: Failed to checkout remote branch."
 
                 Just localHead -> do
@@ -424,41 +421,42 @@ pullLogic transport remote opts = do
 
                     if finalMergeCode == ExitSuccess
                     then do
-                        lift $ tell $ "Updating " ++ take 7 localHead ++ ".." ++ take 7 newHash
-                        lift $ tell "Merge made by the 'recursive' strategy."
+                        lift $ do
+                            tell $ "Updating " ++ take 7 localHead ++ ".." ++ take 7 newHash
+                            tell "Merge made by the 'recursive' strategy."
                         hasChanges <- lift hasStagedChangesE
                         when hasChanges $ lift $ void $ gitRaw ["commit", "-m", "Merge remote"]
-                        lift $ applyMergeToWorkingDir transport cwd localHead
-                        lift $ tell "Syncing binaries... done."
+                        lift $ do
+                            applyMergeToWorkingDir transport cwd localHead
+                            tell "Syncing binaries... done."
                         maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
                         lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash) maybeRemoteHash
                     else do
-                        lift $ tell finalMergeOut
-                        lift $ tellErr finalMergeErr
-                        lift $ tell "Automatic merge failed."
-                        lift $ tell "bit requires you to pick a version for each conflict."
-                        lift $ tell ""
-                        lift $ tell "Resolving conflicts..."
+                        lift $ do
+                            tell finalMergeOut
+                            tellErr finalMergeErr
+                            tell "Automatic merge failed."
+                            tell "bit requires you to pick a version for each conflict."
+                            tell ""
+                            tell "Resolving conflicts..."
 
                         conflicts <- lift Conflict.getConflictedFilesE
                         resolutions <- lift $ Conflict.resolveAll conflicts
                         let total = length resolutions
 
                         invalid <- lift $ validateMetadataDir (cwd </> bitIndexPath)
-                        unless (null invalid) $ do
-                            lift $ void $ gitRaw ["merge", "--abort"]
-                            lift $ tellErr "fatal: Metadata files contain conflict markers. Merge aborted."
-                            lift $ throwIO (userError "Invalid metadata")
+                        unless (null invalid) $ lift $ do
+                            void $ gitRaw ["merge", "--abort"]
+                            tellErr "fatal: Metadata files contain conflict markers. Merge aborted."
+                            throwIO (userError "Invalid metadata")
 
                         conflictsNow <- lift Conflict.getConflictedFilesE
-                        if null conflictsNow
-                            then do
-                                lift $ void $ gitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
-                                lift $ tell $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
-                                lift $ applyMergeToWorkingDir transport cwd localHead
-                                lift $ tell "Syncing binaries... done."
-                                lift $ void $ Git.updateRemoteTrackingBranchToHash newHash
-                            else pure ()
+                        when (null conflictsNow) $ lift $ do
+                            void $ gitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
+                            tell $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
+                            applyMergeToWorkingDir transport cwd localHead
+                            tell "Syncing binaries... done."
+                            void $ Git.updateRemoteTrackingBranchToHash newHash
 
 -- ============================================================================
 -- Helper functions

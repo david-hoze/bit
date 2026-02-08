@@ -226,19 +226,17 @@ remoteCheck mName = do
                     maybe (pure ()) killThread reporterThread
                     when shouldShowProgress clearProgress
 
-                    case res of
-                        Left _ -> do
+                    either (const $ do
                             hPutStrLn stderr "fatal: rclone not found. Install rclone: https://rclone.org/install/"
-                            exitWith (ExitFailure 1)
-                        Right cr -> processCheckResult cwd cr
+                            exitWith (ExitFailure 1))
+                        (processCheckResult cwd) res
                 else liftIO $ do
                     putStrLn "Running remote check..."
                     res <- try @IOException (Transport.checkRemote cwd remote Nothing)
-                    case res of
-                        Left _ -> do
+                    either (const $ do
                             hPutStrLn stderr "fatal: rclone not found. Install rclone: https://rclone.org/install/"
-                            exitWith (ExitFailure 1)
-                        Right cr -> processCheckResult cwd cr
+                            exitWith (ExitFailure 1))
+                        (processCheckResult cwd) res
   where
     processCheckResult cwd cr = do
         let reportPath = cwd </> bitDir </> "last-check.txt"

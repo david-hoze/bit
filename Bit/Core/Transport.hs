@@ -85,9 +85,7 @@ mkCloudTransport remote = FileTransport
       -- which scans remote via rclone and syncs to local.
       localFiles <- Scan.scanWorkingDir cwd
       remoteResult <- Remote.Scan.fetchRemoteFiles remote
-      case remoteResult of
-        Left _ -> hPutStrLn stderr "Error: Failed to fetch remote file list."
-        Right remoteFiles -> do
+      either (const $ hPutStrLn stderr "Error: Failed to fetch remote file list.") (\remoteFiles -> do
           let actions = Pipeline.pullSyncFiles localFiles remoteFiles
           putStrLn "--- Pulling changes from remote ---"
           if null actions
@@ -103,6 +101,7 @@ mkCloudTransport remote = FileTransport
                   executePullCommand cwd remote a
                   CopyProgress.incrementFilesComplete progress
                   ) actions
+          ) remoteResult
   }
 
 -- | Build a filesystem transport that uses direct file copy.
@@ -133,54 +132,52 @@ mkFilesystemTransport remotePath = FileTransport
 applyMergeToWorkingDir :: FileTransport -> FilePath -> String -> IO ()
 applyMergeToWorkingDir transport cwd oldHead = do
     newHead <- getLocalHeadE
-    case newHead of
-        Nothing -> pure ()  -- shouldn't happen after merge commit
-        Just newH -> do
-            changes <- Git.getDiffNameStatus oldHead newH
-            putStrLn "--- Pulling changes from remote ---"
-            if null changes
-                then putStrLn "Working tree already up to date with remote."
-                else do
-                    -- First pass: collect paths that will be copied and their sizes
-                    filesToCopy <- fmap concat $ forM changes $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
-                        'A' -> pure [filePath]
-                        'M' -> pure [filePath]
-                        'R' -> pure (maybeToList mNewPath)
-                        _ -> pure []
-                    
-                    -- Gather file sizes for binary files (for progress tracking)
-                    fileInfo <- forM filesToCopy $ \filePath -> do
-                        fromIndex <- isTextFileInIndex cwd filePath
-                        if fromIndex
-                            then pure (filePath, True, (0 :: Integer))
-                            else do
-                                -- Binary file: try to get size for progress
-                                -- (size might not be available yet, that's ok)
-                                let _destPath = cwd </> filePath
-                                pure (filePath, False, 0)  -- Size will be tracked during copy
-                    
-                    let binaryFiles = [(p, s) | (p, False, s) <- fileInfo]
-                        totalFiles = length binaryFiles
-                    
-                    -- Create progress tracker
-                    progress <- CopyProgress.newSyncProgress totalFiles
-                    
-                    -- Second pass: apply changes with progress (parallelized)
-                    CopyProgress.withSyncProgressReporter progress $ do
-                        -- Use lower concurrency for file operations to avoid thrashing
-                        caps <- getNumCapabilities
-                        let concurrency = max 2 (caps * 2)
-                        void $ runConcurrentlyBounded concurrency (\(fileStatus, filePath, mNewPath) -> case fileStatus of
-                            'A' -> (transportDownloadFile transport) cwd filePath progress
-                            'M' -> (transportDownloadFile transport) cwd filePath progress
-                            'D' -> safeDeleteWorkFile cwd filePath
-                            'R' -> case mNewPath of
-                                Just newPath -> do
-                                    safeDeleteWorkFile cwd filePath
-                                    (transportDownloadFile transport) cwd newPath progress
-                                Nothing -> pure ()
-                            _ -> pure ()
-                            ) changes
+    traverse_ (\newH -> do
+        changes <- Git.getDiffNameStatus oldHead newH
+        putStrLn "--- Pulling changes from remote ---"
+        if null changes
+            then putStrLn "Working tree already up to date with remote."
+            else do
+                -- First pass: collect paths that will be copied and their sizes
+                filesToCopy <- fmap concat $ forM changes $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
+                    'A' -> pure [filePath]
+                    'M' -> pure [filePath]
+                    'R' -> pure (maybeToList mNewPath)
+                    _ -> pure []
+                
+                -- Gather file sizes for binary files (for progress tracking)
+                fileInfo <- forM filesToCopy $ \filePath -> do
+                    fromIndex <- isTextFileInIndex cwd filePath
+                    if fromIndex
+                        then pure (filePath, True, (0 :: Integer))
+                        else do
+                            -- Binary file: try to get size for progress
+                            -- (size might not be available yet, that's ok)
+                            let _destPath = cwd </> filePath
+                            pure (filePath, False, 0)  -- Size will be tracked during copy
+                
+                let binaryFiles = [(p, s) | (p, False, s) <- fileInfo]
+                    totalFiles = length binaryFiles
+                
+                -- Create progress tracker
+                progress <- CopyProgress.newSyncProgress totalFiles
+                
+                -- Second pass: apply changes with progress (parallelized)
+                CopyProgress.withSyncProgressReporter progress $ do
+                    -- Use lower concurrency for file operations to avoid thrashing
+                    caps <- getNumCapabilities
+                    let concurrency = max 2 (caps * 2)
+                    void $ runConcurrentlyBounded concurrency (\(fileStatus, filePath, mNewPath) -> case fileStatus of
+                        'A' -> (transportDownloadFile transport) cwd filePath progress
+                        'M' -> (transportDownloadFile transport) cwd filePath progress
+                        'D' -> safeDeleteWorkFile cwd filePath
+                        'R' -> traverse_ (\newPath -> do
+                            safeDeleteWorkFile cwd filePath
+                            (transportDownloadFile transport) cwd newPath progress
+                            ) mNewPath
+                        _ -> pure ()
+                        ) changes
+        ) newHead
 
 -- | Download a file from remote, or copy from index if it's a text file.
 -- Used by cloud transport.
@@ -406,11 +403,10 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
                     'A' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
                     'M' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
                     'D' -> filesystemDeleteFileAtRemote remotePath p
-                    'R' -> case mNewPath of
-                        Just newPath -> do
-                            filesystemDeleteFileAtRemote remotePath p
-                            filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
-                        Nothing -> pure ()
+                    'R' -> traverse_ (\newPath -> do
+                        filesystemDeleteFileAtRemote remotePath p
+                        filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
+                        ) mNewPath
                     _ -> pure ()
                     ) parsedChanges
         _ -> pure ()

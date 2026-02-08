@@ -406,9 +406,8 @@ readRemoteFile repoRoot remoteName = do
       Just (ParsedCloud url) -> pure (Just (TargetCloud url))
       Just (ParsedDevice device relPath) -> do
         mDev <- readDeviceFile repoRoot device
-        pure $ Just $ case mDev of
-          Just _ -> TargetDevice device relPath
-          Nothing -> TargetCloud (device ++ ":" ++ relPath)
+        pure $ Just $ maybe (TargetCloud (device ++ ":" ++ relPath))
+          (const $ TargetDevice device relPath) mDev
 
 writeRemoteFile :: FilePath -> String -> RemoteTarget -> IO ()
 writeRemoteFile repoRoot remoteName target = do
@@ -436,15 +435,13 @@ resolveRemoteTarget _repoRoot (TargetCloud url) = pure (Resolved url)
 resolveRemoteTarget _repoRoot (TargetLocalPath p) = pure (Resolved p)
 resolveRemoteTarget repoRoot (TargetDevice deviceName relPath) = do
   mInfo <- readDeviceFile repoRoot deviceName
-  case mInfo of
-    Nothing -> pure (NotConnected ("Device '" ++ deviceName ++ "' not found in .rgit/devices/"))
-    Just info -> do
+  maybe (pure (NotConnected ("Device '" ++ deviceName ++ "' not found in .rgit/devices/")))
+    (\info -> do
       mMount <- resolveDevice info
-      case mMount of
-        Nothing -> pure (NotConnected ("Device '" ++ deviceName ++ "' is not connected"))
-        Just mountRoot -> do
-          let fullPath = mountRoot </> relPath
-          pure (Resolved fullPath)
+      maybe (pure (NotConnected ("Device '" ++ deviceName ++ "' is not connected")))
+        (\mountRoot -> pure (Resolved (mountRoot </> relPath)))
+        mMount
+    ) mInfo
 
 -- | Search for a device and return its volume root if found
 resolveDevice :: DeviceInfo -> IO (Maybe FilePath)

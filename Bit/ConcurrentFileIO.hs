@@ -69,18 +69,14 @@ readFileUtf8Strict path = liftIO $ do
 -- avoiding TOCTOU race conditions.
 readFileMaybe :: MonadIO m => FilePath -> m (Maybe BS.ByteString)
 readFileMaybe path = liftIO $ do
-  result <- try (BS.readFile path)
-  pure $ case result of
-    Left (_ :: SomeException) -> Nothing
-    Right bs -> Just bs
+  (result :: Either SomeException BS.ByteString) <- try (BS.readFile path)
+  pure $ either (const Nothing) Just result
 
 -- | Read file as UTF-8, returning 'Nothing' on any error (including invalid UTF-8).
 readFileUtf8Maybe :: MonadIO m => FilePath -> m (Maybe T.Text)
 readFileUtf8Maybe path = liftIO $ do
-  result <- try (BS.readFile path)
-  pure $ case result of
-    Left (_ :: SomeException) -> Nothing
-    Right bs -> either (const Nothing) Just (T.decodeUtf8' bs)
+  (result :: Either SomeException BS.ByteString) <- try (BS.readFile path)
+  pure $ either (const Nothing) (either (const Nothing) Just . T.decodeUtf8') result
 
 -- ============================================================================
 -- Writing (strict)

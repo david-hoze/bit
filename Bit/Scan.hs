@@ -433,11 +433,10 @@ shouldWriteFile root metaPath entry fHash fSize fContentType = do
       BinaryContent -> do
         -- For binary files: read existing metadata and compare hash/size
         existing <- readMetadataOrComputeHash metaPath
-        case existing of
-          Nothing -> pure True  -- Failed to read, must write
-          Just (MetaContent existingHash existingSize) ->
+        pure $ maybe True  -- Failed to read, must write
+          (\(MetaContent existingHash existingSize) ->
             -- Write if hash or size differs
-            pure (existingHash /= fHash || existingSize /= fSize)
+            existingHash /= fHash || existingSize /= fSize) existing
 
 -- | Parse a metadata file (hash/size lines) or read a text file and compute hash/size.
 -- Returns Nothing if file is missing or invalid.

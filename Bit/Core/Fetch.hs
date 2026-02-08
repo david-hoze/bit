@@ -100,11 +100,8 @@ filesystemFetch _cwd remote = do
 -- | Classify remote state (empty, valid bit, non-bit, corrupted, network error)
 -- This is domain logic: it knows what .bit/ means and interprets remote contents
 classifyRemoteState :: Remote -> IO RemoteState
-classifyRemoteState remote = do
-    result <- Transport.listRemoteItems remote 1
-    case result of
-        Left err -> pure (StateNetworkError err)
-        Right items -> pure (interpretRemoteItems items)
+classifyRemoteState remote =
+    either StateNetworkError interpretRemoteItems <$> Transport.listRemoteItems remote 1
 
 -- | Pure interpretation of remote items into domain state
 interpretRemoteItems :: [Transport.TransportItem] -> RemoteState
