@@ -1,0 +1,68 @@
+---
+description: Haskell code style, type safety, and project vocabulary
+globs: **/*.hs
+alwaysApply: true
+---
+
+# Haskell coding standards
+
+When working with any `.hs` file — reading, reviewing, or modifying — consult:
+- `docs/haskell-type-safety.md` — type safety principles (newtypes, sum types, totality, parse don't validate)
+- `docs/idiomatic-haskell.md` — idiomatic style patterns (combinators, do-notation, extensions, DRY)
+
+## Project vocabulary
+
+Key types and conventions used throughout this codebase:
+
+| Type / Value | What it is | Defined in |
+|---|---|---|
+| `BitM` | `ReaderT BitEnv IO` — main application monad | `Bit.Types` |
+| `BitEnv` | Reader environment: cwd, local files, remote, force mode | `Bit.Types` |
+| `Path` | `newtype` over `FilePath` — unwrap with `unPath` | `Bit.Types` |
+| `Hash 'MD5` | `newtype` over `Text` with phantom `HashAlgo` kind | `Bit.Types` |
+| `FileEntry` | A tracked file: carries `Path` + `EntryKind` | `Bit.Types` |
+| `EntryKind` | Sum type: `File` (hash, size, content type) / `Directory` / `Symlink` | `Bit.Types` |
+| `ContentType` | `TextContent` or `BinaryContent` — replaces old `Bool` flag | `Bit.Types` |
+| `ForceMode` | `NoForce` / `Force` / `ForceWithLease` — replaces old `Bool` flag | `Bit.Types` |
+| `PullMode` | `PullNormal` / `PullAcceptRemote` / `PullManualMerge` | `Bit.Core.Helpers` |
+| `PullOptions` | `{ pullMode :: PullMode, pullSkipVerify :: Bool }` | `Bit.Core.Helpers` |
+| `Remote` | Opaque type — use `remoteName`/`remoteUrl`, not constructor | `Bit.Remote` |
+| `RemoteTarget` | `TargetCloud` / `TargetDevice` / `TargetLocalPath` | `Bit.Device` |
+| `isFilesystemTarget` | Predicate collapsing `TargetDevice` + `TargetLocalPath` | `Bit.Device` |
+| `RemoteState` | Classification of remote: `StateEmpty` / `StateValidRgit` / ... | `Bit.Remote` |
+| `FetchResult` | `BundleFound FilePath` / `RemoteEmpty` / `NetworkError String` | `Bit.Remote` |
+| `FileTransport` | Record of functions abstracting cloud vs filesystem transfer | `Bit.Core.Transport` |
+| `Concurrency` | `Parallel Int` / `Sequential` | `Bit.Concurrency` |
+| `BundleName` | `newtype` over `String` — logical bundle name, not a path | `Internal.Config` |
+| `GitRelPath` | `newtype` — path relative to `.bit/index/` (for git commands) | `Internal.Config` |
+| `CwdPath` | `newtype` — path relative to CWD (for filesystem operations) | `Internal.Config` |
+| `fetchedBundle` | Constant `BundleName "fetched_remote"` | `Internal.Config` |
+
+### Architecture patterns
+- **`BitM` actions** use `asks envCwd` to get the working directory, `asks envRemote` for the remote, etc.
+- **`lift`** is used to run `IO` inside `BitM` (since `BitM = ReaderT BitEnv IO`, `lift = liftIO`).
+- **`Remote` is opaque** — constructor is hidden. Use `mkRemote` to create, `remoteName`/`remoteUrl` to read.
+- **`.bit/index/`** is a git repo tracking metadata. Binary files get hash/size metadata files; text files get actual content.
+- **Transport abstraction**: `FileTransport` is a record of functions, not a typeclass. Cloud remotes use rclone; filesystem remotes use direct copy. Created via `mkCloudTransport` or `mkFilesystemTransport`.
+
+## Quick checklist for writing
+
+### Type safety
+- Pattern match on sum types (`case code of ExitSuccess -> ...`), never compare with `==`
+- No partial functions: `head`, `tail`, `fromJust`, `read`, `!!`, `Map.!` — use total alternatives
+- Use `newtype` not `type` for domain concepts
+- Use custom sum types instead of `Bool` parameters (boolean blindness)
+- Collapse duplicate `case` branches with a predicate + pattern guard
+
+### Idiomatic style
+- `traverse_ f mx` not `maybe (pure ()) f mx`
+- `void action` not `_ <- action`
+- `const expr` not `\_ -> expr`
+- `pure` not `return`
+- `isRight`/`isLeft` not `either (const False) (const True)`
+- `MultiWayIf` for nested `if-else-if` chains
+- `foldl'` never lazy `foldl`
+- `dropWhileEnd` not `reverse . dropWhile . reverse`
+- Consolidate multiple `liftIO` calls into `liftIO $ do`
+- Extract repeated lambdas into named helpers
+- Reuse utility functions (e.g. `toPosix` from `Bit.Utils`) instead of inline duplicates
