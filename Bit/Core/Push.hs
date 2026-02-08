@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Bit.Core.Push
     ( push
@@ -82,8 +83,7 @@ push = withRemote $ \remote -> do
     -- Determine if this is a filesystem or cloud remote
     mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
     case mTarget of
-        Just (Device.TargetDevice _ _) -> liftIO $ filesystemPush cwd remote
-        Just (Device.TargetLocalPath _) -> liftIO $ filesystemPush cwd remote
+        Just t | Device.isFilesystemTarget t -> liftIO $ filesystemPush cwd remote
         _ -> cloudPush remote  -- Cloud remote or no target info (use cloud flow)
 
 -- | Push to a cloud remote (original flow, unchanged).
@@ -114,14 +114,14 @@ cloudPush remote = do
                     processExistingRemote
                 _ -> liftIO $ hPutStrLn stderr "Error: Remote .bit found but metadata is missing."
 
-        StateNonRgitOccupied samples -> do
-            if fMode == Force
-                then do
+        StateNonRgitOccupied samples ->
+            case fMode of
+                Force -> do
                     liftIO $ hPutStrLn stderr "Warning: --force used. Overwriting non-bit remote..."
                     syncRemoteFiles
                     liftIO $ pushBundle remote
                     updateLocalBundleAfterPush
-                else liftIO $ do
+                _ -> liftIO $ do
                     hPutStrLn stderr "-------------------------------------------------------"
                     hPutStrLn stderr "[!] STOP: Remote is NOT a bit repository!"
                     hPutStrLn stderr $ "Found existing files: " ++ List.intercalate ", " samples
@@ -223,9 +223,9 @@ pushBundle remote = do
 
     -- bracket <setup> <cleanup> <action>
     bracket
-        (Git.createBundle tempBundle) -- 1. Acquire
-        (\_ -> cleanupTemp tempBundleCwdPath) -- 2. Release (Always runs)
-        (\gCode -> case gCode of       -- 3. Work
+        (Git.createBundle tempBundle)              -- 1. Acquire
+        (const $ cleanupTemp tempBundleCwdPath)    -- 2. Release (Always runs)
+        (\case                                     -- 3. Work
             ExitSuccess -> uploadToRemote tempBundleCwdPath remote
             _ -> hPutStrLn stderr "Error creating bundle"
         )
@@ -257,8 +257,9 @@ pushToRemote remote = do
 updateLocalBundleAfterPush :: BitM ()
 updateLocalBundleAfterPush = do
     code <- liftIO $ Git.createBundle fetchedBundle
-    when (code == ExitSuccess) $ do
-        void $ liftIO $ Git.updateRemoteTrackingBranch fetchedBundle
+    case code of
+        ExitSuccess -> void $ liftIO $ Git.updateRemoteTrackingBranch fetchedBundle
+        _ -> pure ()
 
 syncRemoteFiles :: BitM ()
 syncRemoteFiles = withRemote $ \remote -> do

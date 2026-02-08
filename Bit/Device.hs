@@ -33,6 +33,8 @@ module Bit.Device
   , resolveRemoteTarget
   , parseRemoteTarget
   , generateStoreUuid
+    -- Predicates
+  , isFilesystemTarget
   ) where
 
 import Data.List (dropWhileEnd, isPrefixOf, intercalate)
@@ -79,6 +81,12 @@ data RemoteTarget
   | TargetDevice String FilePath -- device_name : relative_path
   | TargetLocalPath FilePath     -- Legacy: path when .bit-store at volume root cannot be created
   deriving (Show, Eq)
+
+-- | True for targets that resolve to a local filesystem path (device or direct path).
+isFilesystemTarget :: RemoteTarget -> Bool
+isFilesystemTarget (TargetDevice _ _) = True
+isFilesystemTarget (TargetLocalPath _) = True
+isFilesystemTarget (TargetCloud _) = False
 
 data ResolveResult
   = Resolved FilePath     -- Runtime path (e.g. E:\Backup)

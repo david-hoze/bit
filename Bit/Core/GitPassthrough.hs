@@ -134,8 +134,7 @@ mergeContinue = do
                         traverse_ (\remote -> do
                                 mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
                                 let transport = case mTarget of
-                                      Just (Device.TargetDevice _ _) -> Transport.mkFilesystemTransport (remoteUrl remote)
-                                      Just (Device.TargetLocalPath _) -> Transport.mkFilesystemTransport (remoteUrl remote)
+                                      Just t | Device.isFilesystemTarget t -> Transport.mkFilesystemTransport (remoteUrl remote)
                                       _ -> Transport.mkCloudTransport remote
                                 Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
                     _ -> liftIO $ do
@@ -163,8 +162,7 @@ mergeContinue = do
                 traverse_ (\remote -> do
                         mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
                         let transport = case mTarget of
-                              Just (Device.TargetDevice _ _) -> Transport.mkFilesystemTransport (remoteUrl remote)
-                              Just (Device.TargetLocalPath _) -> Transport.mkFilesystemTransport (remoteUrl remote)
+                              Just t | Device.isFilesystemTarget t -> Transport.mkFilesystemTransport (remoteUrl remote)
                               _ -> Transport.mkCloudTransport remote
                         Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
 

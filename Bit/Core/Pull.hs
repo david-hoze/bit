@@ -87,8 +87,7 @@ pull opts = withRemote $ \remote -> do
     -- Determine if this is a filesystem or cloud remote
     mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
     case mTarget of
-        Just (Device.TargetDevice _ _) -> liftIO $ filesystemPull cwd remote opts
-        Just (Device.TargetLocalPath _) -> liftIO $ filesystemPull cwd remote opts
+        Just t | Device.isFilesystemTarget t -> liftIO $ filesystemPull cwd remote opts
         _ -> cloudPull remote opts  -- Cloud remote or no target info (use cloud flow)
 
 -- | Pull from a cloud remote (uses unified transport abstraction).

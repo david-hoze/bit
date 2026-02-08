@@ -52,8 +52,7 @@ fetch = withRemote $ \remote -> do
     -- Determine if this is a filesystem or cloud remote
     mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
     case mTarget of
-        Just (Device.TargetDevice _ _) -> liftIO $ filesystemFetch cwd remote
-        Just (Device.TargetLocalPath _) -> liftIO $ filesystemFetch cwd remote
+        Just t | Device.isFilesystemTarget t -> liftIO $ filesystemFetch cwd remote
         _ -> cloudFetch remote  -- Cloud remote or no target info (use cloud flow)
 
 -- | Fetch from a cloud remote (original flow, unchanged).

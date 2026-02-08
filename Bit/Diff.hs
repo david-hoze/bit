@@ -81,8 +81,8 @@ computeDiff local remote =
     modified =
       [ Modified (LightFileEntry p lHash)
       | p <- Set.toList (Set.intersection lFilePaths rFilePaths)
-      , let lHash = lFiles Map.! p
-      , let rHash = rFiles Map.! p
+      , Just lHash <- [Map.lookup p lFiles]
+      , Just rHash <- [Map.lookup p rFiles]
       , lHash /= rHash
       ]
 

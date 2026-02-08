@@ -258,13 +258,13 @@ runCommand args = do
 
         -- ── Full scanned env (needs working directory state) ─
         ("add":rest)                    -> do
-            _ <- scannedEnv
+            void scannedEnv
             Bit.add rest >>= exitWith
         ("commit":rest)                 -> do
-            _ <- scannedEnv
+            void scannedEnv
             Bit.commit rest >>= exitWith
         ("diff":rest)                   -> do
-            _ <- scannedEnv
+            void scannedEnv
             Bit.diff rest >>= exitWith
         ("status":rest)                 -> runScanned (Bit.status rest) >>= exitWith
         ("restore":rest)                -> runScanned (Bit.restore rest) >>= exitWith
