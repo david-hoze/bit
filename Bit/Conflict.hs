@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE MultiWayIf #-}
 
 module Bit.Conflict
   ( Resolution(..)
@@ -54,11 +55,11 @@ parseConflictInfo path out =
       has1 = 1 `elem` stageNums
       has2 = 2 `elem` stageNums
       has3 = 3 `elem` stageNums
-  in if has2 && has3 && has1 then ContentConflict path
-     else if has2 && has3 && not has1 then AddAdd path
-     else if has2 && not has3 then ModifyDelete path False
-     else if has3 && not has2 then ModifyDelete path True
-     else ContentConflict path
+  in if | has2 && has3 && has1     -> ContentConflict path
+        | has2 && has3 && not has1 -> AddAdd path
+        | has2 && not has3         -> ModifyDelete path False
+        | has3 && not has2         -> ModifyDelete path True
+        | otherwise                -> ContentConflict path
 
 -- | Print a conflict type announcement (git-style message).
 announceConflict :: ConflictInfo -> IO ()

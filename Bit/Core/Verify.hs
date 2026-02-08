@@ -8,6 +8,7 @@ module Bit.Core.Verify
 
 import System.FilePath ((</>))
 import Control.Monad (when)
+import Data.Foldable (traverse_)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (asks)
 import Control.Exception (finally)
@@ -47,21 +48,21 @@ verify isRemote concurrency
           (actualCount, issues) <- finally
             (Verify.verifyRemote cwd remote (Just counter) concurrency)
             (do
-              maybe (pure ()) killThread reporterThread
+              traverse_ killThread reporterThread
               when shouldShowProgress clearProgress
             )
 
           if null issues
             then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
             else do
-              mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
+              mapM_ (printVerifyIssue truncateHash) issues
               putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
         else liftIO $ do
           (actualCount, issues) <- Verify.verifyRemote cwd remote Nothing concurrency
           if null issues
             then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
             else do
-              mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
+              mapM_ (printVerifyIssue truncateHash) issues
               putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
 
   | otherwise = do
@@ -83,21 +84,21 @@ verify isRemote concurrency
           (actualCount, issues) <- finally
             (Verify.verifyLocal cwd (Just counter) concurrency)
             (do
-              maybe (pure ()) killThread reporterThread
+              traverse_ killThread reporterThread
               when shouldShowProgress clearProgress
             )
 
           if null issues
             then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
             else do
-              mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
+              mapM_ (printVerifyIssue truncateHash) issues
               putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found. Run 'bit status' for details."
         else liftIO $ do
           (actualCount, issues) <- Verify.verifyLocal cwd Nothing concurrency
           if null issues
             then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
             else do
-              mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
+              mapM_ (printVerifyIssue truncateHash) issues
               putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found. Run 'bit status' for details."
 
 verifyProgressLoop :: IORef Int -> Int -> IO ()
@@ -109,6 +110,10 @@ verifyProgressLoop counter total = go
       reportProgress $ "Checking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
       threadDelay 100000
       when (n < total) go
+
+-- | Truncate a hash string to 16 characters with ellipsis.
+truncateHash :: String -> String
+truncateHash s = take 16 s ++ if length s > 16 then "..." else ""
 
 fsck :: FilePath -> Concurrency -> IO ()
 fsck = Fsck.doFsck

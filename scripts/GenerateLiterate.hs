@@ -10,7 +10,7 @@
 module Main where
 
 import Control.Exception (SomeException, try)
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Data.Char (toLower)
 import Data.List (isPrefixOf, sort)
 import System.Directory (doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory, createDirectoryIfMissing)
@@ -31,7 +31,7 @@ findRepoRoot :: FilePath -> IO FilePath
 findRepoRoot dir = do
   exists <- doesFileExist (dir </> "bit.cabal")
   if exists
-    then return dir
+    then pure dir
     else let parent = takeDirectory dir
          in  if parent == dir
                then fail "Could not find repo root (bit.cabal)"
@@ -56,16 +56,16 @@ gatherHsFiles root = go ""
       fmap concat $ mapM (visit rel) entries
 
     visit rel name
-      | name `elem` excludedDirs = return []
-      | name == "test"           = return []  -- test/ handled separately
-      | head name == '.'         = return []
+      | name `elem` excludedDirs = pure []
+      | name == "test"           = pure []  -- test/ handled separately
+      | isPrefixOf "." name      = pure []
       | otherwise = do
           let relPath  = if null rel then name else rel </> name
               fullPath = root </> relPath
           isDir <- doesDirectoryExist fullPath
           if isDir
             then go relPath
-            else return [ relPath | takeExtension name == ".hs" ]
+            else pure [ relPath | takeExtension name == ".hs" ]
 
 -- | Collect all files under test/, relative to @root@.
 gatherTestFiles :: FilePath -> IO [FilePath]
@@ -74,35 +74,35 @@ gatherTestFiles root = go "test"
     go rel = do
       let full = root </> rel
       exists <- doesDirectoryExist full
-      if not exists then return []
+      if not exists then pure []
       else do
         entries <- listDirectory full
         fmap concat $ mapM (visit rel) entries
 
     visit rel name
-      | name `elem` excludedTestDirs  = return []
-      | name `elem` excludedTestFiles = return []
-      | head name == '.'              = return []
+      | name `elem` excludedTestDirs  = pure []
+      | name `elem` excludedTestFiles = pure []
+      | isPrefixOf "." name           = pure []
       | otherwise = do
           let relPath  = rel </> name
               fullPath = root </> relPath
           isDir <- doesDirectoryExist fullPath
           if isDir
             then go relPath
-            else return [relPath]
+            else pure [relPath]
 
 -- | Collect all .md files under docs/, relative to @root@.
 gatherDocsFiles :: FilePath -> IO [FilePath]
 gatherDocsFiles root = do
   let docsDir = root </> "docs"
   exists <- doesDirectoryExist docsDir
-  if not exists then return []
+  if not exists then pure []
   else do
     entries <- listDirectory docsDir
     let mdFiles = [ "docs" </> name | name <- entries
                   , takeExtension name == ".md"
-                  , head name /= '.' ]
-    return (sort mdFiles)
+                  , not (isPrefixOf "." name) ]
+    pure (sort mdFiles)
 
 -- | Map file extension to fenced-code-block language tag.
 getLang :: FilePath -> String
@@ -137,7 +137,7 @@ toPosix = map (\c -> if c == '\\' then '/' else c)
 gitIn :: FilePath -> [String] -> IO Bool
 gitIn dir args = do
   (code, _out, _err) <- readProcessWithExitCode "git" (["-C", dir] ++ args) ""
-  return (code == ExitSuccess)
+  pure (code == ExitSuccess)
 
 main :: IO ()
 main = do
@@ -243,9 +243,8 @@ writeDocument outputPath title description root files =
             Right content -> do
               let contentStr = T.unpack content
               hPutStr h contentStr
-              if not (T.null content) && T.last content /= '\n'
-                then hPutStrLn h ""
-                else return ()
+              when (not (T.null content) && T.last content /= '\n') $
+                hPutStrLn h ""
             Left err ->
               hPutStrLn h $ "-- Error decoding UTF-8: " ++ show err
         Left err ->

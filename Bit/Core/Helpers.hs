@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
 
 module Bit.Core.Helpers
     ( -- Types
@@ -227,10 +228,10 @@ restoreCheckoutPaths args =
                      "--unified=" `isPrefixOf` arg ||
                      "-U" `isPrefixOf` arg
         (_, paths) = foldl' (\(afterDash, acc) arg ->
-            if arg == "--" then (True, acc)
-            else if afterDash then (True, arg:acc)
-            else if isFlag arg then (False, acc)
-            else (False, arg:acc)
+            if | arg == "--" -> (True, acc)
+               | afterDash   -> (True, arg:acc)
+               | isFlag arg  -> (False, acc)
+               | otherwise   -> (False, arg:acc)
             ) (False, []) args
     in reverse paths
 

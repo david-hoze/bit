@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE MultiWayIf #-}
 
 module Bit.Core.GitPassthrough
     ( -- Git passthrough
@@ -120,27 +121,26 @@ mergeContinue = do
 
     gitConflicts <- liftIO Conflict.getConflictedFilesE
 
-    if not (null gitConflicts)
-        then liftIO $ hPutStrLn stderr "error: you have not resolved your conflicts yet."
-        else if not conflictsExist
-            then do
-                (code, _, _) <- liftIO $ Git.runGitWithOutput ["rev-parse", "--verify", "MERGE_HEAD"]
-                case code of
-                    ExitSuccess -> do
-                        oldHead <- liftIO getLocalHeadE
-                        liftIO $ do
-                            void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
-                            putStrLn "Merge complete."
-                        traverse_ (\remote -> do
-                                mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
-                                let transport = case mTarget of
-                                      Just t | Device.isFilesystemTarget t -> Transport.mkFilesystemTransport (remoteUrl remote)
-                                      _ -> Transport.mkCloudTransport remote
-                                Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
-                    _ -> liftIO $ do
-                        hPutStrLn stderr "error: no merge in progress."
-                        exitWith (ExitFailure 1)
-            else do
+    if | not (null gitConflicts) ->
+            liftIO $ hPutStrLn stderr "error: you have not resolved your conflicts yet."
+       | not conflictsExist -> do
+            (code, _, _) <- liftIO $ Git.runGitWithOutput ["rev-parse", "--verify", "MERGE_HEAD"]
+            case code of
+                ExitSuccess -> do
+                    oldHead <- liftIO getLocalHeadE
+                    liftIO $ do
+                        void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
+                        putStrLn "Merge complete."
+                    traverse_ (\remote -> do
+                            mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
+                            let transport = case mTarget of
+                                  Just t | Device.isFilesystemTarget t -> Transport.mkFilesystemTransport (remoteUrl remote)
+                                  _ -> Transport.mkCloudTransport remote
+                            Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
+                _ -> liftIO $ do
+                    hPutStrLn stderr "error: no merge in progress."
+                    exitWith (ExitFailure 1)
+       | otherwise -> do
                 invalid <- liftIO $ Metadata.validateMetadataDir (cwd </> bitIndexPath)
                 unless (null invalid) $ liftIO $ do
                     hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."

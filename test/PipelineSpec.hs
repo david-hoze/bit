@@ -8,9 +8,8 @@ import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.Tasty.HUnit
 
-import Data.List (sort, group)
+import Data.List (nub)
 import Bit.Types
-import Bit.Diff (GitDiff(..), LightFileEntry(..), FileIndex, buildIndexFromFileEntries, computeDiff)
 import Bit.Plan (RcloneAction(..))
 import Bit.Pipeline (diffAndPlan)
 import qualified Data.Text as T
@@ -26,7 +25,7 @@ instance Arbitrary EntryKind where
     sz <- choose (0, 10000000)
     isText <- arbitrary
     let ct = if isText then TextContent else BinaryContent
-    return $ File h sz ct
+    pure $ File h sz ct
 
 instance Arbitrary FileEntry where
   arbitrary = do
@@ -35,7 +34,7 @@ instance Arbitrary FileEntry where
     segments <- vectorOf depth (vectorOf 5 (elements "abcdefghijklmnop"))
     let filePath = foldl1 (\a b -> a ++ "/" ++ b) segments
     k <- arbitrary
-    return $ FileEntry (Path filePath) k
+    pure $ FileEntry (Path filePath) k
 
 main :: IO ()
 main = defaultMain tests
@@ -65,8 +64,7 @@ prop_noDuplicateTargets :: [FileEntry] -> [FileEntry] -> Bool
 prop_noDuplicateTargets source target =
   let actions = diffAndPlan source target
       targets = concatMap actionTargets actions
-      uniqueTargets = map head (group (sort targets))
-  in  length targets == length uniqueTargets
+  in  length targets == length (nub targets)
   where
     actionTargets (Copy _ d)    = [d]
     actionTargets (Move _ d)    = [d]
@@ -96,10 +94,9 @@ test_singleAddedFile = do
       source = [FileEntry "foo.bin" (File h 100 BinaryContent)]
       target = []
       actions = diffAndPlan source target
-  length actions @?= 1
-  case head actions of
-    Copy "foo.bin" "foo.bin" -> return ()
-    other -> assertFailure $ "Expected Copy, got: " ++ show other
+  case actions of
+    [Copy "foo.bin" "foo.bin"] -> pure ()
+    _ -> assertFailure $ "Expected [Copy], got: " ++ show actions
 
 test_singleDeletedFile :: Assertion
 test_singleDeletedFile = do
@@ -107,10 +104,9 @@ test_singleDeletedFile = do
       source = []
       target = [FileEntry "foo.bin" (File h 100 BinaryContent)]
       actions = diffAndPlan source target
-  length actions @?= 1
-  case head actions of
-    Delete "foo.bin" -> return ()
-    other -> assertFailure $ "Expected Delete, got: " ++ show other
+  case actions of
+    [Delete "foo.bin"] -> pure ()
+    _ -> assertFailure $ "Expected [Delete], got: " ++ show actions
 
 test_modifiedFile :: Assertion
 test_modifiedFile = do
@@ -119,7 +115,6 @@ test_modifiedFile = do
       source = [FileEntry "foo.bin" (File h1 100 BinaryContent)]
       target = [FileEntry "foo.bin" (File h2 200 BinaryContent)]
       actions = diffAndPlan source target
-  length actions @?= 1
-  case head actions of
-    Copy "foo.bin" "foo.bin" -> return ()
-    other -> assertFailure $ "Expected Copy (overwrite), got: " ++ show other
+  case actions of
+    [Copy "foo.bin" "foo.bin"] -> pure ()
+    _ -> assertFailure $ "Expected [Copy (overwrite)], got: " ++ show actions

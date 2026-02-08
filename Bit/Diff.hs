@@ -13,7 +13,6 @@ module Bit.Diff
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import Data.Maybe (listToMaybe)
 import Bit.Types
 
 -- Lightweight identity for planning
@@ -109,7 +108,7 @@ computeDiff local remote =
       , oldPath <- Set.toList oldPathSet
       , let localPathsWithHash = Set.filter (/= oldPath) (Map.findWithDefault Set.empty hash local.byHash)
       , Set.size localPathsWithHash == 1
-      , newPath <- maybe [] (:[]) (listToMaybe (Set.toList localPathsWithHash))
+      , newPath <- take 1 (Set.toList localPathsWithHash)
       , Map.member newPath lFiles
       ]
 

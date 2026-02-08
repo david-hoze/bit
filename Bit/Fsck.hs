@@ -13,6 +13,7 @@ import Bit.Concurrency (Concurrency(..))
 import System.FilePath ((</>))
 import System.Exit (ExitCode(..), exitWith)
 import Control.Monad (when, unless)
+import Data.Foldable (traverse_)
 import System.IO (hPutStr, hPutStrLn, hFlush, hSetBuffering, BufferMode(..), stderr, hIsTerminalDevice)
 import Data.IORef (newIORef, readIORef, IORef)
 import Control.Concurrent (forkIO, threadDelay, killThread)
@@ -51,7 +52,7 @@ doFsck cwd concurrency = do
         (Verify.verifyLocal cwd (Just counter) concurrency)
         (do
           -- Clean up: kill reporter thread and clear line
-          maybe (pure ()) killThread reporterThread
+          traverse_ killThread reporterThread
           when shouldShowProgress clearProgress
         )
       pure result

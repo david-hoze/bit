@@ -4,7 +4,7 @@ import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath ((</>), takeExtension)
 import Control.Monad (filterM)
 import Data.Char (toLower, isSpace)
-import Data.List (isInfixOf, isPrefixOf)
+import Data.List (foldl', isInfixOf, isPrefixOf)
 
 main :: IO ()
 main = do
@@ -149,7 +149,7 @@ splitTestCases linesWithNums =
 parseTestCase :: [(Int, String)] -> TestCase
 parseTestCase [] = TestCase 0 Nothing [] [] [] []
 parseTestCase block@((startLine, _):_) =
-    let (cmd, stdin, stdout, stderr, exitCode) = foldl classifyAndAccumulate (Nothing, [], [], [], []) block
+    let (cmd, stdin, stdout, stderr, exitCode) = foldl' classifyAndAccumulate (Nothing, [], [], [], []) block
     in TestCase startLine cmd stdin stdout stderr exitCode
   where
     classifyAndAccumulate (cmd, stdin, stdout, stderr, exitCode) (lineNum, lineText) =
@@ -223,17 +223,17 @@ findTestFiles :: FilePath -> IO [FilePath]
 findTestFiles dir = do
     exists <- doesDirectoryExist dir
     if not exists
-        then return []
+        then pure []
         else do
             entries <- listDirectory dir
             let fullPaths = map (dir </>) entries
             files <- filterM (\p -> do
                 isDir <- doesDirectoryExist p
-                return $ not isDir && takeExtension p == ".test"
+                pure $ not isDir && takeExtension p == ".test"
                 ) fullPaths
             dirs <- filterM doesDirectoryExist fullPaths
             subFiles <- mapM findTestFiles dirs
-            return $ files ++ concat subFiles
+            pure $ files ++ concat subFiles
 
 -- | Create a test case for a single test file
 createTestForFile :: FilePath -> IO TestTree
@@ -242,9 +242,9 @@ createTestForFile path = do
     let patternViolations = scanForViolations path content
     let formatViolations = validateShelltestFormat path content
     let allViolations = patternViolations ++ formatViolations
-    return $ testCase path $ do
+    pure $ testCase path $ do
         case allViolations of
-            [] -> return ()  -- No violations, test passes
+            [] -> pure ()  -- No violations, test passes
             (v:_) -> assertFailure v  -- Report first violation
 
 -- | Scan a file for dangerous patterns and return violation messages

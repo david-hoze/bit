@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
 
 module Bit.Core.RemoteManagement
     ( remoteAdd
@@ -17,6 +18,7 @@ module Bit.Core.RemoteManagement
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
 import Control.Monad (unless, void, when, forM_)
+import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
@@ -223,7 +225,7 @@ remoteCheck mName = do
 
                     res <- try @IOException (Transport.checkRemote cwd remote (Just counter))
 
-                    maybe (pure ()) killThread reporterThread
+                    traverse_ killThread reporterThread
                     when shouldShowProgress clearProgress
 
                     either (const $ do
@@ -249,19 +251,18 @@ remoteCheck mName = do
             errs = Transport.checkErrors cr
             nMatch = length matches
             hasDiff = not (null differs && null missingDest && null missingSrc && null errs)
-        if not hasDiff && Transport.checkExitCode cr == ExitSuccess
-            then do
+        let exitCode = Transport.checkExitCode cr
+        if | not hasDiff && exitCode == ExitSuccess -> do
                 putStrLn $ show nMatch ++ " files match between local and remote."
                 exitWith ExitSuccess
-            else if Transport.checkExitCode cr /= ExitSuccess && Transport.checkExitCode cr /= ExitFailure 1
-            then do
+           | exitCode /= ExitSuccess && exitCode /= ExitFailure 1 -> do
                 hPutStrLn stderr "fatal: Could not read from remote."
                 hPutStrLn stderr ""
                 hPutStrLn stderr "Please make sure you have the correct access rights"
                 hPutStrLn stderr "and the remote exists."
                 unless (null (Transport.checkStderr cr)) $ hPutStrLn stderr (Transport.checkStderr cr)
                 exitWith (ExitFailure 1)
-            else do
+           | otherwise -> do
                 putStrLn ""
                 unless (null differs) $ mapM_ putStrLn ("  content differs:" : formatPathList differs)
                 unless (null missingDest) $ mapM_ putStrLn ("  local only (not on remote):" : formatPathList missingDest)

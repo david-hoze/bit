@@ -12,7 +12,7 @@ import System.FilePath ((</>))
 import Control.Monad (unless, void)
 import qualified Internal.Git as Git
 import System.Process (readProcessWithExitCode)
-import Bit.Utils (atomicWriteFileStr)
+import Bit.Utils (atomicWriteFileStr, toPosix)
 
 init :: IO ()
 init = initializeRepo
@@ -49,7 +49,7 @@ initializeRepoAt targetDir = do
         -- Fix for Windows external/USB drives: add to safe.directory
         -- git 2.35.2+ rejects directories with different ownership
         absIndex <- Dir.makeAbsolute targetBitIndexPath
-        let safePath = map (\c -> if c == '\\' then '/' else c) absIndex
+        let safePath = toPosix absIndex
         void $ readProcessWithExitCode "git" ["config", "--global", "--add", "safe.directory", safePath] ""
 
     -- 3a. Create .git/bundles directory for storing bundle files

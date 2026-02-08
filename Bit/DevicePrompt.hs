@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
 
 -- | Device name acquisition for filesystem remotes.
 -- Supports injectable I/O for testing the interactive path.
@@ -78,9 +79,7 @@ acquireDeviceNameAuto
 acquireDeviceNameAuto mLabel nameExists = do
   isTTY <- hIsTerminalDevice stdin
   useStdin <- (== Just "1") <$> lookupEnv "BIT_USE_STDIN"
-  let src = if isTTY
-            then Interactive getLine
-            else if useStdin
-                 then Interactive getLine  -- For tests: pipe input to stdin
-                 else NonInteractive
+  let src = if | isTTY    -> Interactive getLine
+               | useStdin -> Interactive getLine  -- For tests: pipe input to stdin
+               | otherwise -> NonInteractive
   acquireDeviceName src mLabel nameExists

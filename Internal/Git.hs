@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiWayIf #-}
+
 module Internal.Git
     ( add
     , commit
@@ -396,11 +398,11 @@ getConflictType path = do
   let has1 = 1 `elem` stageNums
   let has2 = 2 `elem` stageNums
   let has3 = 3 `elem` stageNums
-  if has2 && has3 && has1 then pure (ContentConflict path)
-  else if has2 && has3 && not has1 then pure (AddAdd path)
-  else if has2 && not has3 then pure (ModifyDelete path False)  -- deleted in theirs
-  else if has3 && not has2 then pure (ModifyDelete path True)   -- deleted in ours (HEAD)
-  else pure (ContentConflict path)
+  pure $ if | has2 && has3 && has1     -> ContentConflict path
+            | has2 && has3 && not has1 -> AddAdd path
+            | has2 && not has3         -> ModifyDelete path False  -- deleted in theirs
+            | has3 && not has2         -> ModifyDelete path True   -- deleted in ours (HEAD)
+            | otherwise                -> ContentConflict path
 
 -- | Check out our version for path (work-tree path under .rgit/index).
 checkoutOurs :: FilePath -> IO ExitCode

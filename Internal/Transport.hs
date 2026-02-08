@@ -266,8 +266,8 @@ checkRemote localPath remote mCounter = do
   where
     cleanup (_, mOut, mErr, ph) = do
         -- Try to close any handles that are still open
-        maybe (pure ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mOut
-        maybe (pure ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mErr
+        traverse_ (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mOut
+        traverse_ (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mErr
         -- Ensure process is cleaned up
         void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
     

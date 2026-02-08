@@ -273,7 +273,7 @@ verifyRemote _cwd remote mCounter _concurrency = do
       
       -- 3. Fetch actual remote files
       Remote.Scan.fetchRemoteFiles remote >>= either
-        (\_ -> hPutStrLn stderr "Error: Could not fetch remote file list." >> pure (0, []))
+        (const $ hPutStrLn stderr "Error: Could not fetch remote file list." >> pure (0, []))
         (\remoteFiles -> do
           let filteredRemoteFiles = filterOutBitPaths remoteFiles
           

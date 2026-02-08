@@ -167,7 +167,7 @@ filesystemPush cwd remote = do
             _ -> Nothing
     
     -- 4. Check if remote HEAD is ancestor of what we're pushing (fast-forward check)
-    traverse_ (\_ -> do
+    traverse_ (const $ do
         (checkCode, _, _) <- Git.runGitAt remoteIndex 
             ["merge-base", "--is-ancestor", "HEAD", "refs/remotes/origin/main"]
         when (checkCode /= ExitSuccess) $ do
@@ -267,7 +267,7 @@ syncRemoteFiles = withRemote $ \remote -> do
     localFiles <- asks envLocalFiles
     remoteResult <- liftIO $ Remote.Scan.fetchRemoteFiles remote
     either
-        (\_ -> liftIO $ hPutStrLn stderr "Error: Failed to fetch remote file list.")
+        (const $ liftIO $ hPutStrLn stderr "Error: Failed to fetch remote file list.")
         (\remoteFiles -> do
             let actions = Pipeline.pushSyncFiles localFiles remoteFiles
             liftIO $ putStrLn "--- Pushing Changes to Remote ---"

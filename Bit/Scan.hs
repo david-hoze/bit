@@ -27,13 +27,15 @@ import System.Directory
       getModificationTime )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, stderr)
 import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf, partition)
+import Data.Either (isRight)
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
 import Control.Monad (void, when, forM_)
+import Data.Foldable (traverse_)
 import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
 import qualified Internal.ConfigFile as ConfigFile
-import Bit.Utils (atomicWriteFileStr)
+import Bit.Utils (atomicWriteFileStr, toPosix)
 import Bit.Internal.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
 import qualified Data.Set as Set
 import qualified Crypto.Hash.MD5 as MD5
@@ -68,7 +70,7 @@ hashAndClassifyFile filePath size config = do
             withFile filePath ReadMode $ \handle -> do
                 firstChunk <- BS.hGet handle 8192
                 let isText = not (BS.elem 0 firstChunk) &&
-                             either (const False) (const True) (decodeUtf8' firstChunk)
+                             isRight (decodeUtf8' firstChunk)
                 
                 -- Continue streaming hash from where we left off
                 let loop !ctx = do
@@ -175,7 +177,7 @@ saveCacheEntry root relPath entry = do
 
 -- | Normalize a file path for consistent comparison (forward slashes, trimmed)
 normalizePath :: FilePath -> FilePath
-normalizePath = map (\c -> if c == '\\' then '/' else c) . filter (/= '\r')
+normalizePath = toPosix . filter (/= '\r')
 
 -- | Check if a filename matches a gitignore-style pattern.
 -- Supports: *.ext (extension match), filename (exact match)
@@ -383,7 +385,7 @@ writeMetadataFiles root entries = do
           (void $ mapConcurrentlyBounded concurrency writeWithProgress files)
           (do
               -- Clean up: kill reporter thread and finalize progress line
-              maybe (pure ()) killThread reporterThread
+              traverse_ killThread reporterThread
               when shouldShowProgress $ do
                   n <- readIORef counter
                   s <- readIORef skipped
