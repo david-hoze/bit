@@ -128,8 +128,9 @@ mergeContinue = do
                 if code == ExitSuccess
                     then do
                         oldHead <- liftIO getLocalHeadE
-                        liftIO $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
-                        liftIO $ putStrLn "Merge complete."
+                        liftIO $ do
+                            void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
+                            putStrLn "Merge complete."
                         traverse_ (\remote -> do
                                 mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
                                 let transport = case mTarget of
@@ -137,14 +138,14 @@ mergeContinue = do
                                       Just (Device.TargetLocalPath _) -> Transport.mkFilesystemTransport (remoteUrl remote)
                                       _ -> Transport.mkCloudTransport remote
                                 Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
-                    else do
-                        liftIO $ hPutStrLn stderr "error: no merge in progress."
-                        liftIO $ exitWith (ExitFailure 1)
+                    else liftIO $ do
+                        hPutStrLn stderr "error: no merge in progress."
+                        exitWith (ExitFailure 1)
             else do
                 invalid <- liftIO $ Metadata.validateMetadataDir (cwd </> bitIndexPath)
-                unless (null invalid) $ do
-                    liftIO $ hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."
-                    liftIO $ throwIO (userError "Invalid metadata")
+                unless (null invalid) $ liftIO $ do
+                    hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."
+                    throwIO (userError "Invalid metadata")
 
                 oldHead <- liftIO getLocalHeadE
                 (code, _, _) <- liftIO $ Git.runGitWithOutput ["rev-parse", "--verify", "MERGE_HEAD"]
@@ -153,11 +154,11 @@ mergeContinue = do
                     when (mergeCode /= ExitSuccess) $
                         liftIO $ hPutStrLn stderr "warning: Could not start merge. Proceeding anyway."
 
-                liftIO $ void $ Git.runGitRaw ["commit", "-m", "Merge remote (manual merge resolved)"]
-                liftIO $ putStrLn "Merge complete."
-
-                liftIO $ removeDirectoryRecursive conflictsDir
-                liftIO $ putStrLn "Conflict directories cleaned up."
+                liftIO $ do
+                    void $ Git.runGitRaw ["commit", "-m", "Merge remote (manual merge resolved)"]
+                    putStrLn "Merge complete."
+                    removeDirectoryRecursive conflictsDir
+                    putStrLn "Conflict directories cleaned up."
 
                 traverse_ (\remote -> do
                         mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)

@@ -43,9 +43,7 @@ data Concurrency
 --
 -- Minimum of 4 ensures reasonable performance even on single-core systems.
 ioConcurrency :: IO Int
-ioConcurrency = do
-    caps <- getNumCapabilities
-    pure (max 4 (caps * 4))
+ioConcurrency = max 4 . (* 4) <$> getNumCapabilities
 
 -- | Lower concurrency for network/subprocess operations.
 --
@@ -57,9 +55,7 @@ ioConcurrency = do
 -- We use a lower multiplier (2× cores) and cap at 8 to avoid overwhelming
 -- remote services or the network stack.
 networkConcurrency :: IO Int
-networkConcurrency = do
-    caps <- getNumCapabilities
-    pure (min 8 (max 2 (caps * 2)))
+networkConcurrency = min 8 . max 2 . (* 2) <$> getNumCapabilities
 
 -- | Run an action over a list with the specified concurrency level.
 --

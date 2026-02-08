@@ -44,9 +44,7 @@ readTextConfig = do
     then pure defaultTextConfig
     else do
       bs <- BS.readFile configPath
-      let content = case T.decodeUtf8' bs of
-            Left _ -> T.empty  -- Invalid UTF-8, use defaults
-            Right txt -> txt
+      let content = either (const T.empty) id (T.decodeUtf8' bs)
       pure $ parseConfig content
 
 -- | Read config file (for future expansion)
@@ -74,13 +72,11 @@ extractSection :: String -> [T.Text] -> [T.Text]
 extractSection sectionName linesOfText =
   let sectionHeader = "[" ++ sectionName ++ "]"
       -- Find start of section
-      startIdx = case findIndex' (\l -> T.strip l == T.pack sectionHeader) linesOfText of
-        Nothing -> length linesOfText  -- Section not found
-        Just idx -> idx + 1
+      startIdx = maybe (length linesOfText) (+ 1) $
+        findIndex' (\l -> T.strip l == T.pack sectionHeader) linesOfText
       -- Find end of section (next [section] or EOF)
-      endIdx = case findIndex' (\l -> T.stripStart l `T.isPrefixOf` T.pack "[") (drop startIdx linesOfText) of
-        Nothing -> length linesOfText
-        Just idx -> startIdx + idx
+      endIdx = maybe (length linesOfText) (+ startIdx) $
+        findIndex' (\l -> T.stripStart l `T.isPrefixOf` T.pack "[") (drop startIdx linesOfText)
   in map T.strip $ take (endIdx - startIdx) (drop startIdx linesOfText)
 
 -- | Parse size-limit from section lines
@@ -88,10 +84,7 @@ parseSizeLimit :: [T.Text] -> Maybe Integer
 parseSizeLimit linesOfText =
   let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- linesOfText, T.stripStart l `T.isPrefixOf` T.pack prefix]
       sizeLines = findLine "size-limit"
-  in case sizeLines of
-    [] -> Nothing
-    (sizeStr:_) -> 
-      -- Remove comments and parse
+  in listToMaybe sizeLines >>= \sizeStr ->
       let cleaned = takeWhile (/= '#') sizeStr
           trimmed = dropWhile isSpace $ dropWhileEnd isSpace cleaned
       in case reads trimmed of
@@ -103,13 +96,9 @@ parseExtensions :: [T.Text] -> Maybe [String]
 parseExtensions linesOfText =
   let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- linesOfText, T.stripStart l `T.isPrefixOf` T.pack prefix]
       extLines = findLine "extensions"
-  in case extLines of
-    [] -> Nothing
-    (extStr:_) ->
-      -- Remove comments and parse comma-separated list
+  in listToMaybe extLines >>= \extStr ->
       let cleaned = takeWhile (/= '#') extStr
           trimmed = dropWhile isSpace $ dropWhileEnd isSpace cleaned
-          -- Split by comma and clean each extension
           exts = map (dropWhile isSpace . dropWhileEnd isSpace) $ splitComma trimmed
       in Just exts
   where

@@ -150,9 +150,9 @@ init :: FilePath -> IO ExitCode
 init dir = runGitCommand (Init dir)
 
 createBundle :: BundleName -> IO ExitCode
-createBundle bundleName = do
+createBundle bundleName =
     let (GitRelPath relPath) = bundleGitRelPath bundleName
-    runGitCommand (CreateBundle relPath)
+    in runGitCommand (CreateBundle relPath)
 
 config :: String -> String -> IO ExitCode
 config configName configValue = runGitCommand (Config configName configValue)
@@ -160,9 +160,8 @@ config configName configValue = runGitCommand (Config configName configValue)
 -- | Check if @localHash@ is ahead of @remoteHash@ (i.e., remote is an ancestor of local).
 -- Parameter order: remote hash first, local hash second — matching @git merge-base --is-ancestor@.
 checkIsAhead :: String -> String -> IO Bool
-checkIsAhead remoteHash localHash = do
-    code <- runGitCommand (IsAncestor remoteHash localHash)
-    pure (code == ExitSuccess)
+checkIsAhead remoteHash localHash =
+    (== ExitSuccess) <$> runGitCommand (IsAncestor remoteHash localHash)
 
 replace :: String -> String -> String -> String
 replace _ _ [] = []

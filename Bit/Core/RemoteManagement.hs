@@ -149,16 +149,16 @@ remoteShow mRemoteName = do
                             display <- formatRemoteDisplay cwd name mTarget
                             putStrLn display
         Just name -> do
-            mRemote <- liftIO $ resolveRemote cwd name
-            mTarget <- liftIO $ Device.readRemoteFile cwd name
+            (mRemote, mTarget) <- liftIO $ (,) <$> resolveRemote cwd name <*> Device.readRemoteFile cwd name
             display <- liftIO $ case mTarget of
                 Just _ -> formatRemoteDisplay cwd name mTarget
                 Nothing -> pure (name ++ " → " ++ maybe "(not configured)" displayRemote mRemote)
             case mRemote of
                 Nothing -> liftIO $ putStrLn "No remotes configured. Use 'bit remote add <name> <url>' to add one."
                 Just remote -> do
-                    liftIO $ putStrLn display
-                    liftIO $ putStrLn ""
+                    liftIO $ do
+                        putStrLn display
+                        putStrLn ""
                     let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
                     hasBundle <- liftIO $ Dir.doesFileExist fetchedPath
                     if hasBundle
@@ -187,25 +187,22 @@ remoteShow mRemoteName = do
 remoteCheck :: Maybe String -> BitM ()
 remoteCheck mName = do
     cwd <- asks envCwd
-    (mRemote, _name) <- liftIO $ case mName of
-        Nothing -> do
-            name <- Git.getTrackedRemoteName
-            mRemote <- resolveRemote cwd name
-            pure (mRemote, name)
-        Just name -> do
-            mRemote <- resolveRemote cwd name
-            pure (mRemote, name)
+    (mRemote, _name) <- liftIO $ do
+        name <- maybe Git.getTrackedRemoteName pure mName
+        mRemote <- resolveRemote cwd name
+        pure (mRemote, name)
     case mRemote of
-        Nothing -> do
-            liftIO $ maybe
+        Nothing -> liftIO $ do
+            maybe
                 (hPutStrLn stderr "fatal: No remote configured.")
                 (\name -> hPutStrLn stderr $ "fatal: '" ++ name ++ "' does not appear to be a git remote.")
                 mName
-            liftIO $ hPutStrLn stderr "hint: Set remote with 'bit remote add <name> <url>'"
-            liftIO $ exitWith (ExitFailure 1)
+            hPutStrLn stderr "hint: Set remote with 'bit remote add <name> <url>'"
+            exitWith (ExitFailure 1)
         Just remote -> do
-            liftIO $ putStrLn $ "Checking local against remote: " ++ displayRemote remote
-            liftIO $ putStrLn ""
+            liftIO $ do
+                putStrLn $ "Checking local against remote: " ++ displayRemote remote
+                putStrLn ""
 
             (_, filesOutput, _) <- liftIO $ Git.runGitWithOutput ["ls-files"]
             let fileCount = length . filter (not . null) . lines $ filesOutput

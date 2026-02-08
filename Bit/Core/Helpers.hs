@@ -89,14 +89,14 @@ getLocalHeadE = do
 -- | Check if @localHash@ is ahead of @remoteHash@ (i.e., remote is an ancestor of local).
 -- Parameter order: remote hash first, local hash second — matching @git merge-base --is-ancestor@.
 checkIsAheadE :: String -> String -> IO Bool
-checkIsAheadE remoteHash localHash = do
-    (code, _, _) <- Git.runGitWithOutput ["merge-base", "--is-ancestor", remoteHash, localHash]
-    pure (code == ExitSuccess)
+checkIsAheadE remoteHash localHash =
+    (\(code, _, _) -> code == ExitSuccess) <$>
+    Git.runGitWithOutput ["merge-base", "--is-ancestor", remoteHash, localHash]
 
 hasStagedChangesE :: IO Bool
-hasStagedChangesE = do
-    (code, _, _) <- Git.runGitWithOutput ["diff", "--cached", "--quiet"]
-    pure (code == ExitFailure 1)
+hasStagedChangesE =
+    (\(code, _, _) -> code == ExitFailure 1) <$>
+    Git.runGitWithOutput ["diff", "--cached", "--quiet"]
 
 -- | Determine the remote target type from a remote name.
 -- Returns the RemoteTarget if the remote is configured, Nothing otherwise.

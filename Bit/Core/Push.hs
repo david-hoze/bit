@@ -70,13 +70,13 @@ push = withRemote $ \remote -> do
         (fileCount, issues) <- liftIO $ Verify.verifyLocal cwd Nothing (Parallel 0)
         if null issues
             then liftIO $ putStrLn $ "Verified " ++ show fileCount ++ " files. All match metadata."
-            else do
-                liftIO $ hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length issues) ++ " issues)."
-                liftIO $ mapM_ (printVerifyIssue id) issues  -- full hash, no truncation
-                liftIO $ hPutStrLn stderr "hint: Run 'bit verify' to see all mismatches."
-                liftIO $ hPutStrLn stderr "hint: Run 'bit add' to update metadata, or 'bit restore' to restore files."
-                liftIO $ hPutStrLn stderr "hint: Run 'bit push --force' to push anyway (unsafe)."
-                liftIO $ exitWith (ExitFailure 1)
+            else liftIO $ do
+                hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length issues) ++ " issues)."
+                mapM_ (printVerifyIssue id) issues  -- full hash, no truncation
+                hPutStrLn stderr "hint: Run 'bit verify' to see all mismatches."
+                hPutStrLn stderr "hint: Run 'bit add' to update metadata, or 'bit restore' to restore files."
+                hPutStrLn stderr "hint: Run 'bit push --force' to push anyway (unsafe)."
+                exitWith (ExitFailure 1)
     
     -- Determine if this is a filesystem or cloud remote
     mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
@@ -89,8 +89,9 @@ push = withRemote $ \remote -> do
 cloudPush :: Remote -> BitM ()
 cloudPush remote = do
     fMode <- asks envForceMode
-    liftIO $ putStrLn $ "Inspecting remote: " ++ displayRemote remote
-    state <- liftIO $ classifyRemoteState remote
+    state <- liftIO $ do
+        putStrLn $ "Inspecting remote: " ++ displayRemote remote
+        classifyRemoteState remote
 
     case state of
         StateEmpty -> do
@@ -100,13 +101,15 @@ cloudPush remote = do
             updateLocalBundleAfterPush
 
         StateValidRgit -> do
-            liftIO $ putStrLn "Remote is a bit repo. Checking history..."
-            fetchResult <- liftIO $ fetchBundle remote
+            fetchResult <- liftIO $ do
+                putStrLn "Remote is a bit repo. Checking history..."
+                fetchBundle remote
             case fetchResult of
                 BundleFound bPath -> do
                     let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
-                    liftIO $ copyFile bPath fetchedPath
-                    liftIO $ safeRemove bPath
+                    liftIO $ do
+                        copyFile bPath fetchedPath
+                        safeRemove bPath
                     processExistingRemote
                 _ -> liftIO $ hPutStrLn stderr "Error: Remote .bit found but metadata is missing."
 
@@ -117,12 +120,12 @@ cloudPush remote = do
                     syncRemoteFiles
                     liftIO $ pushBundle remote
                     updateLocalBundleAfterPush
-                else do
-                    liftIO $ hPutStrLn stderr "-------------------------------------------------------"
-                    liftIO $ hPutStrLn stderr "[!] STOP: Remote is NOT a bit repository!"
-                    liftIO $ hPutStrLn stderr $ "Found existing files: " ++ List.intercalate ", " samples
-                    liftIO $ hPutStrLn stderr "To initialize anyway (destructive): bit init --force"
-                    liftIO $ hPutStrLn stderr "-------------------------------------------------------"
+                else liftIO $ do
+                    hPutStrLn stderr "-------------------------------------------------------"
+                    hPutStrLn stderr "[!] STOP: Remote is NOT a bit repository!"
+                    hPutStrLn stderr $ "Found existing files: " ++ List.intercalate ", " samples
+                    hPutStrLn stderr "To initialize anyway (destructive): bit init --force"
+                    hPutStrLn stderr "-------------------------------------------------------"
 
         StateNetworkError err ->
             liftIO $ hPutStrLn stderr $ "Aborting: Network error -> " ++ err

@@ -23,6 +23,7 @@ import System.Exit (ExitCode(..))
 import System.IO (hGetLine, hIsEOF, hClose, Handle)
 import System.FilePath (normalise)
 import Control.Monad (unless, void)
+import Data.Foldable (traverse_)
 import Control.Concurrent.Async (async, wait)
 import Data.List (dropWhileEnd, isInfixOf)
 import qualified Data.Aeson as Aeson
@@ -62,9 +63,9 @@ readProcessBytes cmd args = do
     -- Cleanup: close any handles that might still be open and wait for process
     cleanupProcess (mStdin, mStdout, mStderr, ph) = do
         -- Try to close handles (may already be closed by hGetContents)
-        maybe (pure ()) (const $ pure ()) mStdin
-        maybe (pure ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStdout
-        maybe (pure ()) (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStderr
+        traverse_ (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStdin
+        traverse_ (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStdout
+        traverse_ (\h -> void (try (hClose h) :: IO (Either SomeException ()))) mStderr
         -- Ensure process is cleaned up
         void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
     
@@ -133,17 +134,15 @@ data CheckResult = CheckResult
 
 -- | Copy local file to remote at relative path
 copyToRemote :: FilePath -> Remote -> FilePath -> IO ExitCode
-copyToRemote localPath remote relPath = do
+copyToRemote localPath remote relPath =
     let fullRemote = remoteFilePath remote relPath
-    (code, _, _) <- readProcessWithExitCode "rclone" ["copyto", localPath, fullRemote] ""
-    pure code
+    in (\(code, _, _) -> code) <$> readProcessWithExitCode "rclone" ["copyto", localPath, fullRemote] ""
 
 -- | Copy file from remote (relative path) to local
 copyFromRemote :: Remote -> FilePath -> FilePath -> IO ExitCode
-copyFromRemote remote relPath localPath = do
+copyFromRemote remote relPath localPath =
     let fullRemote = remoteFilePath remote relPath
-    (code, _, _) <- readProcessWithExitCode "rclone" ["copyto", fullRemote, localPath] ""
-    pure code
+    in (\(code, _, _) -> code) <$> readProcessWithExitCode "rclone" ["copyto", fullRemote, localPath] ""
 
 -- | Copy from remote with detailed error classification
 copyFromRemoteDetailed :: Remote -> FilePath -> FilePath -> IO CopyResult
@@ -159,32 +158,25 @@ copyFromRemoteDetailed remote relPath localPath = do
 
 -- | Move a file on remote (both paths relative to remote root)
 moveRemote :: Remote -> FilePath -> FilePath -> IO ExitCode
-moveRemote remote srcRel destRel = do
+moveRemote remote srcRel destRel =
     let src = remoteFilePath remote srcRel
         dest = remoteFilePath remote destRel
-    (code, _, _) <- readProcessWithExitCode "rclone" ["moveto", src, dest] ""
-    pure code
+    in (\(code, _, _) -> code) <$> readProcessWithExitCode "rclone" ["moveto", src, dest] ""
 
 -- | Delete a file on remote (relative path)
 deleteRemote :: Remote -> FilePath -> IO ExitCode
-deleteRemote remote relPath = do
-    let fullRemote = remoteFilePath remote relPath
-    (code, _, _) <- readProcessWithExitCode "rclone" ["deletefile", fullRemote] ""
-    pure code
+deleteRemote remote relPath =
+    (\(code, _, _) -> code) <$> readProcessWithExitCode "rclone" ["deletefile", remoteFilePath remote relPath] ""
 
 -- | Purge entire remote (no relative path — purges the remote root)
 purgeRemote :: Remote -> IO ExitCode
-purgeRemote remote = do
-    let fullRemote = remoteUrl remote
-    (code, _, _) <- readProcessWithExitCode "rclone" ["purge", fullRemote] ""
-    pure code
+purgeRemote remote =
+    (\(code, _, _) -> code) <$> readProcessWithExitCode "rclone" ["purge", remoteUrl remote] ""
 
 -- | Create directory on remote (relative path)
 mkdirRemote :: Remote -> FilePath -> IO ExitCode
-mkdirRemote remote relPath = do
-    let fullRemote = remoteFilePath remote relPath
-    (code, _, _) <- readProcessWithExitCode "rclone" ["mkdir", fullRemote] ""
-    pure code
+mkdirRemote remote relPath =
+    (\(code, _, _) -> code) <$> readProcessWithExitCode "rclone" ["mkdir", remoteFilePath remote relPath] ""
 
 -- | List remote directory as JSON (at remote root)
 -- Returns (ExitCode, ByteString, String) where stdout is raw bytes for proper UTF-8 handling
