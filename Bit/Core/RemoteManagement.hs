@@ -32,7 +32,7 @@ import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Bit.Progress (reportProgress, clearProgress)
-import Bit.Remote (Remote, remoteName, remoteUrl, displayRemote, resolveRemote)
+import Bit.Remote (Remote, remoteUrl, displayRemote, resolveRemote)
 import Bit.Core.Helpers (formatPathList)
 import qualified Bit.Core.Fetch as Fetch
 import Bit.Utils (atomicWriteFileStr)
@@ -168,7 +168,10 @@ remoteShow mRemoteName = do
                             maybeBundlePath <- liftIO $ Fetch.fetchRemoteBundle remote
                             case maybeBundlePath of
                                 Just bPath -> do
-                                    liftIO $ Fetch.saveFetchedBundle remote (Just bPath)
+                                    outcome <- liftIO $ Fetch.saveFetchedBundle remote (Just bPath)
+                                    case outcome of
+                                        Fetch.FetchError err -> liftIO $ hPutStrLn stderr $ "Warning: " ++ err
+                                        _ -> pure ()  -- No need to render fetch output in remote show
                                     liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
                                 Nothing -> liftIO $ do
                                     putStrLn $ "  Fetch URL: " ++ remoteUrl remote

@@ -10,6 +10,7 @@ module Bit.Core.Fetch
     , saveFetchedBundle
     , classifyRemoteState
     , interpretRemoteItems
+    , FetchOutcome(..)
     ) where
 
 import qualified System.Directory as Dir
@@ -23,11 +24,22 @@ import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(.
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
-import Internal.Config (fromCwdPath, bundleCwdPath, BundleName(..), fetchedBundle)
-import Bit.Core.Helpers (getRemoteTargetType, getLocalHeadE, withRemote, safeRemove, tell, tellErr)
+import Internal.Config (fromCwdPath, bundleCwdPath, fetchedBundle)
+import Bit.Core.Helpers (getRemoteTargetType, withRemote, safeRemove)
 import qualified Bit.Device as Device
 import System.Directory (copyFile)
 import Control.Monad (void)
+
+-- ============================================================================
+-- Types
+-- ============================================================================
+
+data FetchOutcome
+    = UpToDate
+    | Updated String String  -- old hash -> new hash
+    | FetchedFirst String    -- new hash
+    | FetchError String
+    deriving (Show, Eq)
 
 -- ============================================================================
 -- Fetch operations
@@ -48,7 +60,8 @@ fetch = withRemote $ \remote -> do
 cloudFetch :: Remote -> BitM ()
 cloudFetch remote = do
     mb <- liftIO $ fetchRemoteBundle remote
-    liftIO $ saveFetchedBundle remote mb
+    outcome <- liftIO $ saveFetchedBundle remote mb
+    liftIO $ renderFetchOutcome remote outcome
 
 -- | Fetch from a filesystem remote. Fetches commits without merging or syncing files.
 filesystemFetch :: FilePath -> Remote -> IO ()
@@ -161,8 +174,8 @@ fetchRemoteBundle remote = do
                 hPutStrLn stderr $ "Aborting: [X] Corrupted remote -> " ++ msg
                 pure Nothing
 
-saveFetchedBundle :: Remote -> Maybe FilePath -> IO ()
-saveFetchedBundle _remote Nothing = pure ()
+saveFetchedBundle :: Remote -> Maybe FilePath -> IO FetchOutcome
+saveFetchedBundle _remote Nothing = pure (FetchError "No bundle to save")
 saveFetchedBundle remote (Just bPath) = do
     let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
     hadPrevious <- Dir.doesFileExist fetchedPath
@@ -181,24 +194,31 @@ saveFetchedBundle remote (Just bPath) = do
     -- This ensures "git fetch origin/main" works correctly for pull/merge.
     void $ Git.setupRemote (remoteUrl remote)
 
-    -- Compare hashes
+    -- Update remote tracking branch and determine outcome
     case (maybeOldHash, maybeNewHash) of
-        -- If we already had a fetched bundle and the hash is unchanged, be silent.
+        -- If we already had a fetched bundle and the hash is unchanged, silent.
         -- Tests expect `bit fetch` to produce no output in this case.
-        (Just oldHash, Just newHash) | oldHash == newHash -> pure ()
+        (Just oldHash, Just newHash) | oldHash == newHash -> pure UpToDate
         (Just oldHash, Just newHash) -> do
-            putStrLn "Scanning remote..."
             void $ Git.updateRemoteTrackingBranch fetchedBundle
-            putStrLn $ "Updated: " ++ oldHash ++ " -> " ++ newHash
+            pure (Updated oldHash newHash)
         (Nothing, Just newHash) -> do
-            putStrLn "Scanning remote..."
             void $ Git.updateRemoteTrackingBranch fetchedBundle
-            hPutStrLn stderr $ "From " ++ remoteName remote
-            hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
-            putStrLn $ "Fetched: " ++ newHash
-        _ -> hPutStrLn stderr "Warning: Could not extract hash from bundle."
+            pure (FetchedFirst newHash)
+        _ -> pure (FetchError "Could not extract hash from bundle")
 
-    -- Only print completion if we actually printed something above.
-    case (maybeOldHash, maybeNewHash) of
-        (Just oldHash, Just newHash) | oldHash == newHash -> pure ()
-        _ -> putStrLn "Fetch complete."
+-- | Render fetch outcome to stdout/stderr.
+renderFetchOutcome :: Remote -> FetchOutcome -> IO ()
+renderFetchOutcome _remote UpToDate = pure ()  -- Silent on up-to-date
+renderFetchOutcome _remote (Updated oldHash newHash) = do
+    putStrLn "Scanning remote..."
+    putStrLn $ "Updated: " ++ oldHash ++ " -> " ++ newHash
+    putStrLn "Fetch complete."
+renderFetchOutcome remote (FetchedFirst newHash) = do
+    putStrLn "Scanning remote..."
+    hPutStrLn stderr $ "From " ++ remoteName remote
+    hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
+    putStrLn $ "Fetched: " ++ newHash
+    putStrLn "Fetch complete."
+renderFetchOutcome _remote (FetchError err) = do
+    hPutStrLn stderr $ "Warning: " ++ err

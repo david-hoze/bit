@@ -45,7 +45,6 @@ import Bit.Types (BitM, BitEnv(..), Hash, HashAlgo(..), EntryKind(..), syncHash,
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
-import qualified Bit.Internal.Metadata as Metadata
 import Bit.Internal.Metadata (MetaContent(..), serializeMetadata, displayHash, validateMetadataDir)
 import Bit.Concurrency (Concurrency(..))
 import qualified Bit.Device as Device
@@ -73,7 +72,7 @@ import Bit.Core.Transport
     , applyMergeToWorkingDir
     , transportSyncAllFiles
     )
-import Bit.Core.Fetch (fetchRemoteBundle, saveFetchedBundle)
+import Bit.Core.Fetch (fetchRemoteBundle, saveFetchedBundle, FetchOutcome(..))
 
 -- ============================================================================
 -- Pull operations
@@ -264,7 +263,10 @@ pullAcceptRemoteImpl transport remote = do
     case maybeBundlePath of
         Nothing -> lift $ tellErr "Error: Could not fetch remote bundle."
         Just bPath -> do
-            lift $ saveFetchedBundle remote (Just bPath)
+            outcome <- lift $ saveFetchedBundle remote (Just bPath)
+            case outcome of
+                FetchError err -> lift $ tellErr $ "Error: " ++ err
+                _ -> pure ()  -- No need to render fetch output during pull
 
             -- 2. Record current HEAD before checkout (for diff-based sync)
             oldHead <- lift getLocalHeadE
@@ -302,7 +304,10 @@ pullManualMergeImpl remote = do
     case maybeBundlePath of
         Nothing -> lift $ tellErr "Error: Could not fetch remote bundle."
         Just bPath -> do
-            lift $ saveFetchedBundle remote (Just bPath)
+            outcome <- lift $ saveFetchedBundle remote (Just bPath)
+            case outcome of
+                FetchError err -> lift $ tellErr $ "Error: " ++ err
+                _ -> pure ()  -- No need to render fetch output during pull
 
             (remoteMeta, _allBundlePaths) <- lift $ Verify.loadMetadataFromBundle fetchedBundle
             lift $ tell "Scanning remote files... done."
@@ -374,7 +379,10 @@ pullLogic transport remote opts = do
     case maybeBundlePath of
         Nothing -> pure ()
         Just bPath -> do
-            lift $ saveFetchedBundle remote (Just bPath)
+            outcome <- lift $ saveFetchedBundle remote (Just bPath)
+            case outcome of
+                FetchError err -> lift $ tellErr $ "Error: " ++ err
+                _ -> pure ()  -- No need to render fetch output during pull
             (_, countOut, _) <- lift $ gitQuery ["rev-list", "--count", "refs/remotes/origin/main"]
             let n = takeWhile (`elem` ['0'..'9']) (filter (/= '\n') countOut)
             lift $ tell $ "remote: Counting objects: " ++ (if null n then "0" else n) ++ ", done."
