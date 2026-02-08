@@ -172,12 +172,12 @@ filesystemPullLogicImpl transport _remote remoteHash = do
         Nothing -> do
             lift $ putStrLn $ "Checking out " ++ take 7 remoteHash ++ " (first pull)"
             checkoutCode <- lift $ Git.checkoutRemoteAsMain
-            if checkoutCode == ExitSuccess
-                then lift $ do
+            case checkoutCode of
+                ExitSuccess -> lift $ do
                     transportSyncAllFiles transport cwd
                     putStrLn "Syncing binaries... done."
                     void $ Git.updateRemoteTrackingBranchToHash remoteHash
-                else lift $ hPutStrLn stderr "Error: Failed to checkout remote branch."
+                _ -> lift $ hPutStrLn stderr "Error: Failed to checkout remote branch."
         
         Just localHash -> do
             (mergeCode, mergeOut, mergeErr) <- lift $ Git.runGitWithOutput 
@@ -190,8 +190,8 @@ filesystemPullLogicImpl transport _remote remoteHash = do
                     Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
                 else pure (mergeCode, mergeOut, mergeErr)
             
-            if finalMergeCode == ExitSuccess
-                then do
+            case finalMergeCode of
+                ExitSuccess -> do
                     lift $ putStrLn $ "Updating " ++ take 7 localHash ++ ".." ++ take 7 remoteHash
                     lift $ putStrLn "Merge made by the 'recursive' strategy."
                     hasChanges <- lift hasStagedChangesE
@@ -200,7 +200,7 @@ filesystemPullLogicImpl transport _remote remoteHash = do
                     lift $ applyMergeToWorkingDir transport cwd localHash
                     lift $ putStrLn "Syncing binaries... done."
                     lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
-                else do
+                _ -> do
                     lift $ do
                         putStrLn finalMergeOut
                         hPutStrLn stderr finalMergeErr
@@ -239,9 +239,8 @@ filesystemPullAcceptRemoteImpl transport remoteHash = do
     
     -- Force-checkout the remote branch
     checkoutCode <- lift Git.checkoutRemoteAsMain
-    if checkoutCode /= ExitSuccess
-        then lift $ hPutStrLn stderr "Error: Failed to checkout remote state."
-        else do
+    case checkoutCode of
+        ExitSuccess -> do
             -- Sync actual files based on what changed
             maybe (lift $ transportSyncAllFiles transport cwd)
                   (\oh -> lift $ applyMergeToWorkingDir transport cwd oh) oldHead
@@ -250,6 +249,7 @@ filesystemPullAcceptRemoteImpl transport remoteHash = do
             lift $ do
                 void $ Git.updateRemoteTrackingBranchToHash remoteHash
                 putStrLn "Pull with --accept-remote completed."
+        _ -> lift $ hPutStrLn stderr "Error: Failed to checkout remote state."
 
 -- | Pull with --accept-remote: force-checkout the remote branch, then sync files.
 -- Git manages .bit/index/ (the metadata); we only sync actual files to the working tree.
@@ -276,9 +276,8 @@ pullAcceptRemoteImpl transport remote = do
             --    text files get actual content, binary files get hash/size.
             lift $ tell "Scanning remote files..."
             checkoutCode <- lift Git.checkoutRemoteAsMain
-            if checkoutCode /= ExitSuccess
-                then lift $ tellErr "Error: Failed to checkout remote state."
-                else do
+            case checkoutCode of
+                ExitSuccess -> do
                     -- 4. Sync actual files to working tree based on what changed in git
                     (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
                     let _newHash = takeWhile (/= '\n') remoteOut
@@ -290,6 +289,7 @@ pullAcceptRemoteImpl transport remote = do
                     lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash) maybeRemoteHash
 
                     lift $ tell "Pull with --accept-remote completed."
+                _ -> lift $ tellErr "Error: Failed to checkout remote state."
 
 -- | Pull with --manual-merge: detect remote divergence and create conflict directories.
 pullManualMergeImpl :: Remote -> BitM ()
@@ -405,11 +405,11 @@ pullLogic transport remote opts = do
                 Nothing -> do
                     lift $ tell $ "Checking out " ++ take 7 newHash ++ " (first pull)"
                     checkoutCode <- lift $ Git.checkoutRemoteAsMain
-                    if checkoutCode == ExitSuccess
-                        then lift $ do
+                    case checkoutCode of
+                        ExitSuccess -> lift $ do
                             transportSyncAllFiles transport cwd
                             tell "Syncing binaries... done."
-                        else lift $ tellErr "Error: Failed to checkout remote branch."
+                        _ -> lift $ tellErr "Error: Failed to checkout remote branch."
 
                 Just localHead -> do
                     (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", "refs/remotes/origin/main"]
@@ -419,8 +419,8 @@ pullLogic transport remote opts = do
                         then do tell "Merging unrelated histories..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
                         else pure (mergeCode, mergeOut, mergeErr)
 
-                    if finalMergeCode == ExitSuccess
-                    then do
+                    case finalMergeCode of
+                      ExitSuccess -> do
                         lift $ do
                             tell $ "Updating " ++ take 7 localHead ++ ".." ++ take 7 newHash
                             tell "Merge made by the 'recursive' strategy."
@@ -431,7 +431,7 @@ pullLogic transport remote opts = do
                             tell "Syncing binaries... done."
                         maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
                         lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash) maybeRemoteHash
-                    else do
+                      _ -> do
                         lift $ do
                             tell finalMergeOut
                             tellErr finalMergeErr

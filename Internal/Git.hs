@@ -236,8 +236,9 @@ addRemote remoteName url = do
 getRemoteUrl :: String -> IO (Maybe String)
 getRemoteUrl remoteName = do
     (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["remote", "get-url", remoteName]) ""
-    if code /= ExitSuccess then pure Nothing
-    else pure (Just (filter (/= '\n') out))
+    pure $ case code of
+        ExitSuccess -> Just (filter (/= '\n') out)
+        _ -> Nothing
 
 -- | Get the remote name that the current branch tracks (branch.main.remote).
 -- Falls back to "origin" if not configured — this means commands work with
@@ -246,8 +247,9 @@ getRemoteUrl remoteName = do
 getTrackedRemoteName :: IO String
 getTrackedRemoteName = do
     (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["config", "--get", "branch.main.remote"]) ""
-    if code /= ExitSuccess then pure "origin"
-    else pure (filter (/= '\n') out)
+    pure $ case code of
+        ExitSuccess -> filter (/= '\n') out
+        _ -> "origin"
 
 -- | Set up a git remote named "origin" pointing to the given URL (legacy / internal use)
 setupRemote :: String -> IO ExitCode
@@ -367,7 +369,9 @@ checkoutRemoteAsMain = do
 getConflictedFiles :: IO [FilePath]
 getConflictedFiles = do
   (code, out, _) <- runGitWithOutput ["diff", "--name-only", "--diff-filter=U"]
-  if code /= ExitSuccess then pure [] else pure (filter (not . null) (lines out))
+  pure $ case code of
+    ExitSuccess -> filter (not . null) (lines out)
+    _ -> []
 
 -- | Conflict type for Git-like messages. Path is work-tree relative (e.g. index/src/model.bin).
 data ConflictType
@@ -419,17 +423,17 @@ checkoutTheirs path = do
 readFileFromRef :: String -> FilePath -> IO (Maybe String)
 readFileFromRef gitRef path = do
   (code, out, _err) <- runGitWithOutput ["show", gitRef ++ ":" ++ path]
-  if code == ExitSuccess && not (null out)
-    then pure (Just out)
-    else pure Nothing
+  pure $ case code of
+    ExitSuccess | not (null out) -> Just out
+    _ -> Nothing
 
 -- | List all files in a Git ref's tree (recursive). Returns paths relative to work tree root.
 listFilesInRef :: String -> IO [FilePath]
 listFilesInRef gitRef = do
   (code, out, _) <- runGitWithOutput ["ls-tree", "-r", "--name-only", gitRef]
-  if code == ExitSuccess
-    then pure (filter (not . null) (lines out))
-    else pure []
+  pure $ case code of
+    ExitSuccess -> filter (not . null) (lines out)
+    _ -> []
 
 -- | Run git fsck to check metadata history integrity.
 -- Returns (exitCode, output, errorOutput).
@@ -449,8 +453,9 @@ hasStagedChanges = do
 getDiffNameStatus :: String -> String -> IO [(Char, FilePath, Maybe FilePath)]
 getDiffNameStatus oldHead newHead = do
     (code, out, _) <- runGitWithOutput ["diff", "--name-status", oldHead, newHead]
-    if code /= ExitSuccess then pure []
-    else pure (parseNameStatus out)
+    pure $ case code of
+        ExitSuccess -> parseNameStatus out
+        _ -> []
 
 parseNameStatus :: String -> [(Char, FilePath, Maybe FilePath)]
 parseNameStatus = mapMaybe parseLine . lines
@@ -473,8 +478,9 @@ parseNameStatus = mapMaybe parseLine . lines
 getFilesAtCommit :: String -> IO [FilePath]
 getFilesAtCommit gitRef = do
     (code, out, _) <- runGitWithOutput ["ls-tree", "-r", "--name-only", gitRef]
-    if code /= ExitSuccess then pure []
-    else pure (filter (not . null) (lines out))
+    pure $ case code of
+        ExitSuccess -> filter (not . null) (lines out)
+        _ -> []
 
 -- | Run a git command targeting a specific index path (for filesystem remotes).
 -- This is used when operating on a remote filesystem repo directly.

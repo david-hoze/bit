@@ -84,7 +84,9 @@ defaultPullOptions = PullOptions PullNormal False
 getLocalHeadE :: IO (Maybe String)
 getLocalHeadE = do
     (code, out, _) <- Git.runGitWithOutput ["rev-parse", "HEAD"]
-    pure $ if code == ExitSuccess then Just (filter (not . isSpace) out) else Nothing
+    pure $ case code of
+        ExitSuccess -> Just (filter (not . isSpace) out)
+        _ -> Nothing
 
 -- | Check if @localHash@ is ahead of @remoteHash@ (i.e., remote is an ancestor of local).
 -- Parameter order: remote hash first, local hash second — matching @git merge-base --is-ancestor@.

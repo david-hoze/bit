@@ -17,6 +17,7 @@ module Bit.Core.Push
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
 import Control.Monad (when, unless, void)
+import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
@@ -161,31 +162,27 @@ filesystemPush cwd remote = do
     
     -- 3. Capture remote HEAD before merge
     (oldHeadCode, oldHeadOut, _) <- Git.runGitAt remoteIndex ["rev-parse", "HEAD"]
-    let mOldHead = if oldHeadCode == ExitSuccess 
-                   then Just (filter (not . isSpace) oldHeadOut)
-                   else Nothing
+    let mOldHead = case oldHeadCode of
+            ExitSuccess -> Just (filter (not . isSpace) oldHeadOut)
+            _ -> Nothing
     
     -- 4. Check if remote HEAD is ancestor of what we're pushing (fast-forward check)
-    case mOldHead of
-        Just _oldHead -> do
-            (checkCode, _, _) <- Git.runGitAt remoteIndex 
-                ["merge-base", "--is-ancestor", "HEAD", "refs/remotes/origin/main"]
-            when (checkCode /= ExitSuccess) $ do
-                hPutStrLn stderr "error: Remote has local commits that you don't have."
-                hPutStrLn stderr "hint: Run 'bit pull' to merge remote changes first, then push again."
-                exitWith (ExitFailure 1)
-        Nothing -> pure ()  -- First push, no check needed
+    traverse_ (\_ -> do
+        (checkCode, _, _) <- Git.runGitAt remoteIndex 
+            ["merge-base", "--is-ancestor", "HEAD", "refs/remotes/origin/main"]
+        when (checkCode /= ExitSuccess) $ do
+            hPutStrLn stderr "error: Remote has local commits that you don't have."
+            hPutStrLn stderr "hint: Run 'bit pull' to merge remote changes first, then push again."
+            exitWith (ExitFailure 1)
+        ) mOldHead
     
     -- 5. Merge at remote (ff-only)
     putStrLn "Merging at remote (fast-forward only)..."
     (mergeCode, _mergeOut, mergeErr) <- Git.runGitAt remoteIndex 
         ["merge", "--ff-only", "refs/remotes/origin/main"]
     
-    if mergeCode /= ExitSuccess
-        then do
-            hPutStrLn stderr $ "error: Failed to merge at remote: " ++ mergeErr
-            exitWith (ExitFailure 1)
-        else do
+    case mergeCode of
+        ExitSuccess -> do
             -- 6. Get new HEAD at remote
             (newHeadCode, newHeadOut, _) <- Git.runGitAt remoteIndex ["rev-parse", "HEAD"]
             when (newHeadCode /= ExitSuccess) $ do
@@ -210,6 +207,9 @@ filesystemPush cwd remote = do
             void $ Git.updateRemoteTrackingBranchToHead
             
             putStrLn "Push complete."
+        _ -> do
+            hPutStrLn stderr $ "error: Failed to merge at remote: " ++ mergeErr
+            exitWith (ExitFailure 1)
 
 -- ============================================================================
 -- Push helper functions
@@ -225,10 +225,9 @@ pushBundle remote = do
     bracket
         (Git.createBundle tempBundle) -- 1. Acquire
         (\_ -> cleanupTemp tempBundleCwdPath) -- 2. Release (Always runs)
-        (\gCode -> do                 -- 3. Work
-            if gCode /= ExitSuccess
-                then hPutStrLn stderr "Error creating bundle"
-                else uploadToRemote tempBundleCwdPath remote
+        (\gCode -> case gCode of       -- 3. Work
+            ExitSuccess -> uploadToRemote tempBundleCwdPath remote
+            _ -> hPutStrLn stderr "Error creating bundle"
         )
 
 -- Helper for the upload logic to keep the bracket clean
@@ -236,9 +235,9 @@ uploadToRemote :: FilePath -> Remote -> IO ()
 uploadToRemote src remote = do
     putStrLn "Uploading bundle to remote..."
     rCode <- Transport.copyToRemote src remote ".bit/bit.bundle"
-    if rCode == ExitSuccess
-        then putStrLn "Metadata push complete."
-        else hPutStrLn stderr "Error uploading bundle."
+    case rCode of
+        ExitSuccess -> putStrLn "Metadata push complete."
+        _ -> hPutStrLn stderr "Error uploading bundle."
 
 -- Helper for cleanup that doesn't crash if the file was never made
 cleanupTemp :: FilePath -> IO ()

@@ -6,7 +6,6 @@ module Bit.Core.Verify
     , fsck
     ) where
 
-import qualified System.Directory as Dir
 import System.FilePath ((</>))
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)

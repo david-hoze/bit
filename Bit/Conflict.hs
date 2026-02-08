@@ -34,7 +34,9 @@ data ConflictInfo
 getConflictedFilesE :: IO [FilePath]
 getConflictedFilesE = do
   (code, out, _) <- Git.runGitWithOutput ["diff", "--name-only", "--diff-filter=U"]
-  pure $ if code /= ExitSuccess then [] else filter (not . null) (lines out)
+  pure $ case code of
+    ExitSuccess -> filter (not . null) (lines out)
+    _ -> []
 
 -- | Detect conflict type
 getConflictInfoE :: FilePath -> IO ConflictInfo

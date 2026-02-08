@@ -123,11 +123,11 @@ loadMetadata (FromCommit commitHash) _concurrency = do
   -- ls-tree at ROOT level (no prefix!) to enumerate all files
   (code, out, _) <- readProcessWithExitCode "git"
     [ "-C", bitIndexPath, "ls-tree", "-r", "--name-only", commitHash ] ""
-  if code /= ExitSuccess
-    then pure []
-    else do
+  case code of
+    ExitSuccess -> do
       let paths = filter isUserFile $ filter (not . null) $ lines out
       mapM (readEntryFromCommit commitHash) paths
+    _ -> pure []
 
 -- | Read a single metadata entry from a filesystem path.
 readEntryFromFilesystem :: FilePath -> FilePath -> IO MetadataEntry
@@ -149,13 +149,13 @@ readEntryFromCommit commitHash relPath = do
   -- NOTE: path is at root level in the commit tree, NOT under index/
   (code, content, _) <- readProcessWithExitCode "git"
     [ "-C", bitIndexPath, "show", commitHash ++ ":" ++ relPath ] ""
-  if code /= ExitSuccess
-    then pure (TextEntry (Path relPath))
-    else case parseMetadata content of
+  pure $ case code of
+    ExitSuccess -> case parseMetadata content of
       Just (MetaContent { metaHash = h, metaSize = sz }) ->
-        pure (BinaryEntry (Path relPath) h sz)
+        BinaryEntry (Path relPath) h sz
       Nothing ->
-        pure (TextEntry (Path relPath))  -- text file: content IS the data, skip hash verify
+        TextEntry (Path relPath)  -- text file: content IS the data, skip hash verify
+    _ -> TextEntry (Path relPath)
 
 -- | Load only binary (hash-verifiable) metadata entries from the index.
 -- Text files are excluded. If you need all entries, use 'loadMetadata' directly.
@@ -228,9 +228,8 @@ loadMetadataFromBundle :: BundleName -> IO ([(Path, Hash 'MD5, Integer)], Set.Se
 loadMetadataFromBundle bundleName = do
   -- First, fetch the bundle into the repo so we can read from it
   fetchCode <- Git.fetchFromBundle bundleName
-  if fetchCode /= ExitSuccess
-    then pure ([], Set.empty)
-    else do
+  case fetchCode of
+    ExitSuccess -> do
       -- Get the remote HEAD hash (now available as refs/remotes/origin/main)
       (_code, out, _) <- readProcessWithExitCode "git"
         [ "-C", bitIndexPath
@@ -242,6 +241,7 @@ loadMetadataFromBundle bundleName = do
         headHash -> do
           entries <- loadMetadata (FromCommit headHash) Sequential
           pure (binaryEntries entries, allEntryPaths entries)
+    _ -> pure ([], Set.empty)
 
 -- | Verify remote files match remote metadata.
 -- Returns (number of files checked, list of issues).

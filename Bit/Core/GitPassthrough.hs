@@ -125,8 +125,8 @@ mergeContinue = do
         else if not conflictsExist
             then do
                 (code, _, _) <- liftIO $ Git.runGitWithOutput ["rev-parse", "--verify", "MERGE_HEAD"]
-                if code == ExitSuccess
-                    then do
+                case code of
+                    ExitSuccess -> do
                         oldHead <- liftIO getLocalHeadE
                         liftIO $ do
                             void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
@@ -138,7 +138,7 @@ mergeContinue = do
                                       Just (Device.TargetLocalPath _) -> Transport.mkFilesystemTransport (remoteUrl remote)
                                       _ -> Transport.mkCloudTransport remote
                                 Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
-                    else liftIO $ do
+                    _ -> liftIO $ do
                         hPutStrLn stderr "error: no merge in progress."
                         exitWith (ExitFailure 1)
             else do
@@ -178,11 +178,8 @@ doMergeAbort = do
     
     -- Abort git merge
     code <- Git.mergeAbort
-    if code /= ExitSuccess
-        then do
-            hPutStrLn stderr "error: no merge in progress."
-            exitWith (ExitFailure 1)
-        else do
+    case code of
+        ExitSuccess -> do
             putStrLn "Merge aborted. Your working tree is unchanged."
             
             -- Clean up conflict directories
@@ -190,6 +187,9 @@ doMergeAbort = do
             when conflictsExist $ do
                 removeDirectoryRecursive conflictsDir
                 putStrLn "Conflict directories cleaned up."
+        _ -> do
+            hPutStrLn stderr "error: no merge in progress."
+            exitWith (ExitFailure 1)
 
 unsetUpstream :: IO ()
 unsetUpstream = void Git.unsetBranchUpstream

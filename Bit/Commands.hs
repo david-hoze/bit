@@ -127,9 +127,9 @@ runRemoteCommand remoteName args = do
                         bCode <- rawSystem "git" ["-C", wsPath, "bundle", "create", bundlePath, "main"]
                         when (bCode == ExitSuccess) $ do
                             rCode <- Transport.copyToRemote bundlePath remote ".bit/bit.bundle"
-                            if rCode == ExitSuccess
-                                then putStrLn "Remote is now a bit repository."
-                                else hPutStrLn stderr "Error uploading bundle to remote."
+                            case rCode of
+                                ExitSuccess -> putStrLn "Remote is now a bit repository."
+                                _ -> hPutStrLn stderr "Error uploading bundle to remote."
                             -- Cleanup bundle
                             Dir.removeFile bundlePath `catch` (\(_ :: SomeException) -> pure ())
                     exitWith code

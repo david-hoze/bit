@@ -106,12 +106,13 @@ classifyRemotePath path = do
 getRcloneRemotes :: IO [String]
 getRcloneRemotes = do
   (code, out, _) <- readProcessWithExitCode "rclone" ["listremotes"] ""
-  if code /= ExitSuccess then pure []
-  else pure
-    [ takeWhile (/= ':') (takeWhile (/= '\n') line)
-    | line <- lines out
-    , not (null (trimLine line))
-    ]
+  pure $ case code of
+    ExitSuccess ->
+      [ takeWhile (/= ':') (takeWhile (/= '\n') line)
+      | line <- lines out
+      , not (null (trimLine line))
+      ]
+    _ -> []
   where trimLine = dropWhileEnd (== ' ') . dropWhile (== ' ')
 
 -- ---------------------------------------------------------------------------
@@ -146,9 +147,9 @@ winVolumeRoot p
 linuxVolumeRootIO :: FilePath -> IO FilePath
 linuxVolumeRootIO path = do
   (code, out, _) <- readProcessWithExitCode "sh" ["-c", "findmnt -n -o TARGET -T " ++ shellEscape path ++ " 2>/dev/null || echo " ++ shellEscape path] ""
-  if code == ExitSuccess && not (null (trim out))
-    then pure (trim out)
-    else pure path
+  pure $ case code of
+    ExitSuccess | not (null (trim out)) -> trim out
+    _ -> path
   where
     shellEscape s = "'" ++ concatMap (\c -> if c == '\'' then "'\\''" else [c]) s ++ "'"
 
@@ -196,21 +197,22 @@ detectStorageTypeWindows volRoot = do
         "try { (Get-PSDrive -Name " ++ [d] ++ " -ErrorAction SilentlyContinue).Root } catch { '' }"] ""
       (code2, out2, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
         "[int]([System.IO.DriveInfo]::new('" ++ drive ++ "').DriveType)"] ""
-      if code2 == ExitSuccess
-        then case trim out2 of
-          "4" -> pure Network  -- DriveType.Network
-          _   -> pure Physical
-        else pure Physical
+      pure $ case code2 of
+        ExitSuccess -> case trim out2 of
+          "4" -> Network  -- DriveType.Network
+          _   -> Physical
+        _ -> Physical
 
 detectStorageTypeLinux :: FilePath -> IO StorageType
 detectStorageTypeLinux _ = do
   -- Read /proc/mounts and check mount type for the path's mount point
   (code, out, _) <- readProcessWithExitCode "findmnt" ["-n", "-o", "FSTYPE", "-T", "/"] ""
-  if code == ExitSuccess
-    then let fstype = trim out
-         in pure $ if fstype `elem` ["nfs", "nfs4", "cifs", "smb", "smbfs", "sshfs"]
-                    then Network else Physical
-    else pure Physical
+  pure $ case code of
+    ExitSuccess ->
+      let fstype = trim out
+      in if fstype `elem` ["nfs", "nfs4", "cifs", "smb", "smbfs", "sshfs"]
+            then Network else Physical
+    _ -> Physical
 
 trim :: String -> String
 trim = dropWhileEnd (== ' ') . dropWhile (== ' ')
@@ -228,22 +230,23 @@ getHardwareSerialWindows volRoot = do
   else do
     -- Map partition to physical disk via partition number, then get disk serial
     (code, out, _) <- readProcessWithExitCode "wmic" ["diskdrive", "get", "SerialNumber,Index"] ""
-    if code /= ExitSuccess then pure Nothing
-    else do
-      (_code2, _out2, _) <- readProcessWithExitCode "wmic" ["path", "win32_logicaldisk", "where", "DeviceID='" ++ drive ++ ":\\'", "get", "VolumeSerialNumber"] ""
-      -- VolumeSerialNumber is the FAT/NTFS serial, not disk serial. Use diskdrive.
-      let lines' = filter (not . null . trim) (lines out)
-          parseSerial = case lines' of
-            _:rest -> listToMaybe [ trim (drop 12 l) | l <- rest, length l > 12 ]
-            _      -> Nothing
-      pure (parseSerial)
+    case code of
+      ExitSuccess -> do
+        (_code2, _out2, _) <- readProcessWithExitCode "wmic" ["path", "win32_logicaldisk", "where", "DeviceID='" ++ drive ++ ":\\'", "get", "VolumeSerialNumber"] ""
+        -- VolumeSerialNumber is the FAT/NTFS serial, not disk serial. Use diskdrive.
+        let lines' = filter (not . null . trim) (lines out)
+            parseSerial = case lines' of
+              _:rest -> listToMaybe [ trim (drop 12 l) | l <- rest, length l > 12 ]
+              _      -> Nothing
+        pure parseSerial
+      _ -> pure Nothing
 
 getHardwareSerialLinux :: FilePath -> IO (Maybe String)
 getHardwareSerialLinux _ = do
   (code, out, _) <- readProcessWithExitCode "sh" ["-c", "lsblk -o SERIAL,MOUNTPOINT -n 2>/dev/null | head -20"] ""
-  if code == ExitSuccess
-    then pure (listToMaybe [ trim (takeWhile (/= ' ') l) | l <- lines out, "/" `isPrefixOf` (drop 20 l) ])
-    else pure Nothing
+  pure $ case code of
+    ExitSuccess -> listToMaybe [ trim (takeWhile (/= ' ') l) | l <- lines out, "/" `isPrefixOf` (drop 20 l) ]
+    _ -> Nothing
 
 -- | Get volume label for device name suggestion
 getVolumeLabel :: FilePath -> IO (Maybe String)
@@ -258,20 +261,21 @@ getVolumeLabelWindows volRoot = do
   else do
     -- vol is a cmd built-in, not an executable; run via cmd /c
     (code, out, _) <- readProcessWithExitCode "cmd" ["/c", "vol", drive] ""
-    if code /= ExitSuccess then pure Nothing
-    else
-      let lines' = lines out
-          volLine = listToMaybe [ l | l <- lines', "Volume" `isPrefixOf` l ]
-      in pure $ case volLine of
-        Just l -> let after = dropWhile (/= ' ') (drop 6 l) in Just (trim after)
-        _      -> Nothing
+    pure $ case code of
+      ExitSuccess ->
+        let lines' = lines out
+            volLine = listToMaybe [ l | l <- lines', "Volume" `isPrefixOf` l ]
+        in case volLine of
+          Just l -> let after = dropWhile (/= ' ') (drop 6 l) in Just (trim after)
+          _      -> Nothing
+      _ -> Nothing
 
 getVolumeLabelLinux :: FilePath -> IO (Maybe String)
 getVolumeLabelLinux _ = do
   (code, out, _) <- readProcessWithExitCode "sh" ["-c", "lsblk -o LABEL,MOUNTPOINT -n 2>/dev/null | head -5"] ""
-  if code == ExitSuccess
-    then pure (listToMaybe [ trim (takeWhile (/= ' ') l) | l <- lines out, not (null (trim l)) ])
-    else pure Nothing
+  pure $ case code of
+    ExitSuccess -> listToMaybe [ trim (takeWhile (/= ' ') l) | l <- lines out, not (null (trim l)) ]
+    _ -> Nothing
 
 -- ---------------------------------------------------------------------------
 -- .bit-store (on device at volume root)
@@ -481,33 +485,36 @@ getLinuxMountPoints :: (String -> Bool) -> IO [FilePath]
 getLinuxMountPoints _typeFilter = do
   -- Parse /proc/mounts for mount points; full impl would filter by fstype
   (code, out, _) <- readProcessWithExitCode "sh" ["-c", "awk '{print $2}' /proc/mounts 2>/dev/null | sort -u"] ""
-  if code /= ExitSuccess then pure ["/"]
-  else pure (filter (not . null) (lines out))
+  pure $ case code of
+    ExitSuccess -> filter (not . null) (lines out)
+    _ -> ["/"]
 
 getWindowsPhysicalMounts :: IO [FilePath]
 getWindowsPhysicalMounts = do
   (code, out, _) <- readProcessWithExitCode "wmic" ["logicaldisk", "where", "DriveType=2 or DriveType=3", "get", "DeviceID"] ""
-  if code /= ExitSuccess then pure []
-  else pure
-    [ trim l ++ "\\"
-    | l <- lines out
-    , let t = trim l
-    , length t == 2
-    , case reverse t of
-        (':':_) -> True
-        _ -> False
-    ]
+  pure $ case code of
+    ExitSuccess ->
+      [ trim l ++ "\\"
+      | l <- lines out
+      , let t = trim l
+      , length t == 2
+      , case reverse t of
+          (':':_) -> True
+          _ -> False
+      ]
+    _ -> []
 
 getWindowsNetworkMounts :: IO [FilePath]
 getWindowsNetworkMounts = do
   (code, out, _) <- readProcessWithExitCode "wmic" ["logicaldisk", "where", "DriveType=4", "get", "DeviceID"] ""
-  if code /= ExitSuccess then pure []
-  else pure
-    [ trim l ++ "\\"
-    | l <- lines out
-    , let t = trim l
-    , length t == 2
-    , case reverse t of
-        (':':_) -> True
-        _ -> False
-    ]
+  pure $ case code of
+    ExitSuccess ->
+      [ trim l ++ "\\"
+      | l <- lines out
+      , let t = trim l
+      , length t == 2
+      , case reverse t of
+          (':':_) -> True
+          _ -> False
+      ]
+    _ -> []

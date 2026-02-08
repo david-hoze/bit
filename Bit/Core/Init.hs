@@ -9,8 +9,7 @@ module Bit.Core.Init
 import Prelude hiding (init)
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
-import Control.Monad (when, unless, void)
-import System.Exit (ExitCode(..))
+import Control.Monad (unless, void)
 import qualified Internal.Git as Git
 import System.Process (readProcessWithExitCode)
 import Bit.Utils (atomicWriteFileStr)
@@ -63,9 +62,7 @@ initializeRepoAt targetDir = do
     void $ Git.runGitAt targetBitIndexPath ["config", "core.quotePath", "false"]
     
     -- 5. Rename the initial branch to "main" if it's "master"
-    (code, _, _) <- Git.runGitAt targetBitIndexPath ["branch", "-m", "master", "main"]
-    when (code /= ExitSuccess) $
-        pure ()
+    void $ Git.runGitAt targetBitIndexPath ["branch", "-m", "master", "main"]
 
     -- 6. Create other .bit subdirectories
     Dir.createDirectoryIfMissing True targetBitDevicesDir
