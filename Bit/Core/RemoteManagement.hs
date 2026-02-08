@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Bit.Core.RemoteManagement
     ( remoteAdd
@@ -71,9 +72,7 @@ addRemoteFilesystem cwd name filePath = do
     volRoot <- Device.getVolumeRoot absPath
     let relPath = Device.getRelativePath volRoot absPath
     mStoreUuid <- Device.readBitStore volRoot
-    mExistingDevice <- case mStoreUuid of
-        Just u -> Device.findDeviceByUuid cwd u
-        Nothing -> pure Nothing
+    mExistingDevice <- maybe (pure Nothing) (Device.findDeviceByUuid cwd) mStoreUuid
     result <- try @IOException $ case (mStoreUuid, mExistingDevice) of
         (Just _u, Just dev) -> do
             putStrLn $ "Using existing device '" ++ dev ++ "'."
@@ -283,17 +282,16 @@ remoteCheck mName = do
 
 -- | Format remote display line (e.g. "origin → black_usb:Backup (physical, connected at E:\)")
 formatRemoteDisplay :: FilePath -> String -> Maybe Device.RemoteTarget -> IO String
-formatRemoteDisplay cwd name mTarget = case mTarget of
-    Just (Device.TargetLocalPath p) -> pure (name ++ " → " ++ p ++ " (local path)")
-    Just (Device.TargetDevice dev devPath) -> do
+formatRemoteDisplay cwd name = maybe (pure (name ++ " → (no target)")) $ \case
+    Device.TargetLocalPath p -> pure (name ++ " → " ++ p ++ " (local path)")
+    Device.TargetDevice dev devPath -> do
         res <- Device.resolveRemoteTarget cwd (Device.TargetDevice dev devPath)
         mInfo <- Device.readDeviceFile cwd dev
         let typ = maybe "unknown" (\i -> case Device.deviceType i of Device.Physical -> "physical"; Device.Network -> "network") mInfo
         case res of
             Device.Resolved mount -> pure (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", connected at " ++ mount ++ ")")
             Device.NotConnected _ -> pure (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", NOT CONNECTED)")
-    Just (Device.TargetCloud u) -> pure (name ++ " → " ++ u ++ " (cloud)")
-    Nothing -> pure (name ++ " → (no target)")
+    Device.TargetCloud u -> pure (name ++ " → " ++ u ++ " (cloud)")
 
 showRemoteStatusFromBundle :: String -> Maybe String -> IO ()
 showRemoteStatusFromBundle name mUrl = do

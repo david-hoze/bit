@@ -27,12 +27,12 @@ module Bit.Core.Transport
 import qualified System.Directory as Dir
 import System.Directory (copyFile, createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
-import Control.Monad (when, unless, void, forM, forM_)
+import Control.Monad (when, void, forM)
+import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..))
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (bitIndexPath, fetchedBundle)
-import Data.Char (isSpace)
 import qualified Bit.Scan as Scan
 import qualified Bit.Pipeline as Pipeline
 import qualified Bit.Remote.Scan as Remote.Scan
@@ -57,7 +57,6 @@ import Bit.Core.Helpers
     ( getLocalHeadE
     , parseFilesystemDiffOutput
     , readFileMaybe
-    , safeRemove
     )
 
 -- ============================================================================
@@ -195,6 +194,7 @@ downloadOrCopyFromIndex cwd remote filePath = do
             void $ Transport.copyFromRemote remote (toPosix filePath) (toPosix localPath)
 
 -- | Download a file from remote or copy from index for filesystem pull.
+-- Parameter order: localRoot, remotePath, filePath (relative), progress.
 filesystemDownloadOrCopyFromIndex :: FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
 filesystemDownloadOrCopyFromIndex localRoot remotePath filePath progress = do
     fromIndex <- isTextFileInIndex localRoot filePath
@@ -269,6 +269,8 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
                 ) fileInfo
 
 -- | Copy a file from local to remote (handles both text and binary).
+-- Parameter order: localRoot, remotePath, remoteIndex, filePath (relative).
+-- TRANSPOSITION NOTE: 4 FilePaths — rely on naming conventions.
 filesystemCopyFileToRemote :: FilePath -> FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
 filesystemCopyFileToRemote localRoot remotePath remoteIndex filePath progress = do
     -- Check if it's a text file (content in index) or binary (hash/size in index)
@@ -356,6 +358,7 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
         _ -> pure ()
 
 -- | Sync only changed files between two commits.
+-- Parameter order: localRoot, remotePath, oldHead (commit hash), newHead (commit hash).
 filesystemSyncChangedFiles :: FilePath -> FilePath -> String -> String -> IO ()
 filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
     let remoteIndex = remotePath </> ".bit" </> "index"
@@ -431,9 +434,7 @@ isTextFileInIndex localRoot filePath = do
     if not exists then pure False
     else do
         mcontent <- readFileMaybe metaPath
-        pure $ case mcontent of
-            Nothing -> False
-            Just content -> not (any ("hash: " `isPrefixOf`) (lines content))
+        pure $ maybe False (\content -> not (any ("hash: " `isPrefixOf`) (lines content))) mcontent
 
 -- | Copy a file from the index to the working tree. Call only when the path
 -- is a text file (content in index). Creates parent dirs as needed.
@@ -463,15 +464,10 @@ syncBinariesAfterMerge :: FileTransport -> Remote -> Maybe String -> BitM ()
 syncBinariesAfterMerge transport _remote oldHead = do
     cwd <- asks envCwd
     liftIO $ putStrLn "Syncing binaries... done."
-    case oldHead of
-        Just oh -> liftIO $ applyMergeToWorkingDir transport cwd oh
-        Nothing -> do
-            -- Fallback: use transportSyncAllFiles (syncs from current HEAD)
-            liftIO $ transportSyncAllFiles transport cwd
+    -- Apply diff-based sync or full sync depending on whether we have an old HEAD
+    liftIO $ maybe (transportSyncAllFiles transport cwd) (applyMergeToWorkingDir transport cwd) oldHead
     maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
-    case maybeRemoteHash of
-        Just rHash -> liftIO $ void $ Git.updateRemoteTrackingBranchToHash rHash
-        Nothing    -> pure ()
+    liftIO $ traverse_ (void . Git.updateRemoteTrackingBranchToHash) maybeRemoteHash
 
 -- | Executes/Prints the command to be run in the shell (push: local -> remote).
 executeCommand :: FilePath -> Remote -> RcloneAction -> IO ()

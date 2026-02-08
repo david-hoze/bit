@@ -13,6 +13,7 @@ module Bit.Types
   , EntryKind(..)
   , FileEntry(..)
   , syncHash
+  , ForceMode(..)
   , BitEnv(..)
   , BitM
   , runBitM
@@ -56,12 +57,18 @@ data FileEntry = FileEntry
   , kind :: EntryKind
   } deriving (Show, Eq, Generic)
 
+-- | How to handle force pushing.
+data ForceMode
+    = NoForce         -- ^ Normal push (check ancestry)
+    | Force           -- ^ Overwrite remote unconditionally
+    | ForceWithLease  -- ^ Overwrite only if remote matches last fetch
+    deriving (Show, Eq)
+
 data BitEnv = BitEnv
     { envCwd            :: FilePath
     , envLocalFiles     :: [FileEntry]
     , envRemote         :: Maybe Remote
-    , envForce          :: Bool
-    , envForceWithLease :: Bool
+    , envForceMode      :: ForceMode
     , envSkipVerify     :: Bool
     }
 

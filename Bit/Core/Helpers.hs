@@ -4,7 +4,8 @@
 
 module Bit.Core.Helpers
     ( -- Types
-      PullOptions(..)
+      PullMode(..)
+    , PullOptions(..)
     , defaultPullOptions
       -- Git helpers
     , getLocalHeadE
@@ -56,20 +57,25 @@ import Internal.Config (bitIndexPath)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8')
-import Bit.Internal.Metadata (displayHash)
 
 -- ============================================================================
 -- Types
 -- ============================================================================
 
+-- | How to handle the merge during pull.
+data PullMode
+    = PullNormal        -- ^ Normal merge (fast-forward or three-way)
+    | PullAcceptRemote  -- ^ Force-checkout remote branch
+    | PullManualMerge   -- ^ Interactive per-file conflict resolution
+    deriving (Show, Eq)
+
 data PullOptions = PullOptions
-    { pullAcceptRemote :: Bool
-    , pullManualMerge :: Bool
+    { pullMode       :: PullMode
     , pullSkipVerify :: Bool
     } deriving (Show)
 
 defaultPullOptions :: PullOptions
-defaultPullOptions = PullOptions False False False
+defaultPullOptions = PullOptions PullNormal False
 
 -- ============================================================================
 -- Git helpers via effect layer
@@ -80,9 +86,11 @@ getLocalHeadE = do
     (code, out, _) <- Git.runGitWithOutput ["rev-parse", "HEAD"]
     pure $ if code == ExitSuccess then Just (filter (not . isSpace) out) else Nothing
 
+-- | Check if @localHash@ is ahead of @remoteHash@ (i.e., remote is an ancestor of local).
+-- Parameter order: remote hash first, local hash second — matching @git merge-base --is-ancestor@.
 checkIsAheadE :: String -> String -> IO Bool
-checkIsAheadE rHash lHash = do
-    (code, _, _) <- Git.runGitWithOutput ["merge-base", "--is-ancestor", rHash, lHash]
+checkIsAheadE remoteHash localHash = do
+    (code, _, _) <- Git.runGitWithOutput ["merge-base", "--is-ancestor", remoteHash, localHash]
     pure (code == ExitSuccess)
 
 hasStagedChangesE :: IO Bool

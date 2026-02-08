@@ -38,6 +38,7 @@ import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
 import System.IO (hPutStrLn, stderr)
 import Control.Monad (when, unless)
+import Data.Foldable (traverse_)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.IORef (IORef, atomicModifyIORef')
@@ -207,7 +208,7 @@ verifyLocalAt root mCounter concurrency = do
               then pure []
               else pure [HashMismatch relPath (T.unpack (hashToText indexHash)) (T.unpack (hashToText actualHash)) indexSize actualSize]
       -- Increment counter after checking file (atomicModifyIORef' is thread-safe)
-      maybe (pure ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
+      traverse_ (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
       pure result
 
 -- | Verify local working tree against metadata in .rgit/index.
@@ -306,7 +307,7 @@ verifyRemote _cwd remote mCounter _concurrency = do
             else pure [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
         Just _ -> pure []
       -- Increment counter after checking file
-      maybe (pure ()) (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
+      traverse_ (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
       pure result
 
 -- Helper to safely remove a file

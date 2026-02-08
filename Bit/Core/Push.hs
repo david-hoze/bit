@@ -30,7 +30,7 @@ import Control.Concurrent (getNumCapabilities)
 import System.IO (stderr, hPutStrLn)
 import Control.Exception (bracket)
 import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), displayRemote)
-import Bit.Types (BitM, BitEnv(..))
+import Bit.Types (BitM, BitEnv(..), ForceMode(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
@@ -61,11 +61,11 @@ import Bit.Core.Fetch (classifyRemoteState, fetchBundle)
 push :: BitM ()
 push = withRemote $ \remote -> do
     cwd <- asks envCwd
-    force <- asks envForce
+    fMode <- asks envForceMode
     skipVerify <- asks envSkipVerify
     
     -- NEW: Proof of possession — verify local before pushing
-    unless (force || skipVerify) $ do
+    unless (fMode == Force || skipVerify) $ do
         liftIO $ putStrLn "Verifying local files..."
         (fileCount, issues) <- liftIO $ Verify.verifyLocal cwd Nothing (Parallel 0)
         if null issues
@@ -88,7 +88,7 @@ push = withRemote $ \remote -> do
 -- | Push to a cloud remote (original flow, unchanged).
 cloudPush :: Remote -> BitM ()
 cloudPush remote = do
-    force <- asks envForce
+    fMode <- asks envForceMode
     liftIO $ putStrLn $ "Inspecting remote: " ++ displayRemote remote
     state <- liftIO $ classifyRemoteState remote
 
@@ -111,7 +111,7 @@ cloudPush remote = do
                 _ -> liftIO $ hPutStrLn stderr "Error: Remote .bit found but metadata is missing."
 
         StateNonRgitOccupied samples -> do
-            if force
+            if fMode == Force
                 then do
                     liftIO $ hPutStrLn stderr "Warning: --force used. Overwriting non-bit remote..."
                     syncRemoteFiles
@@ -285,18 +285,13 @@ syncRemoteFiles = withRemote $ \remote -> do
 
 processExistingRemote :: BitM ()
 processExistingRemote = do
-    force <- asks envForce
-    forceWithLease <- asks envForceWithLease
+    fMode <- asks envForceMode
     mRemote <- asks envRemote
-    -- Handle --force: skip all checks and push anyway
-    if force
-        then do
+    case fMode of
+      Force -> do
             lift $ tellErr "Warning: --force used. Overwriting remote history..."
             maybe (lift $ tellErr "Error: No remote configured.") pushToRemote mRemote
-        else do
-            -- Handle --force-with-lease: compare remote bundle hash against fetched_remote.bundle
-            if forceWithLease
-                then do
+      ForceWithLease -> do
                     maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
                     let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
                     hasFetchedBundle <- lift $ fileExistsE fetchedPath
@@ -319,7 +314,7 @@ processExistingRemote = do
                             lift $ tellErr "Warning: No local fetched bundle found. Proceeding with push (--force-with-lease)..."
                             maybe (lift $ tellErr "Error: No remote configured.") pushToRemote mRemote
                         (Nothing, _) -> lift $ tellErr "Error: Could not extract hash from remote bundle."
-                else do
+      NoForce -> do
                     maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
                     maybeLocalHash <- lift getLocalHeadE
 

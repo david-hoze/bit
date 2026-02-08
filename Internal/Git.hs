@@ -157,9 +157,11 @@ createBundle bundleName = do
 config :: String -> String -> IO ExitCode
 config configName configValue = runGitCommand (Config configName configValue)
 
+-- | Check if @localHash@ is ahead of @remoteHash@ (i.e., remote is an ancestor of local).
+-- Parameter order: remote hash first, local hash second — matching @git merge-base --is-ancestor@.
 checkIsAhead :: String -> String -> IO Bool
-checkIsAhead rHash lHash = do
-    code <- runGitCommand (IsAncestor rHash lHash)
+checkIsAhead remoteHash localHash = do
+    code <- runGitCommand (IsAncestor remoteHash localHash)
     pure (code == ExitSuccess)
 
 replace :: String -> String -> String -> String
@@ -267,14 +269,8 @@ fetchFromBundle bundleName = do
 -- | Update the remote tracking branch refs/remotes/origin/main to point to the hash from the bundle.
 -- Use when the objects are already in the repo (e.g. after push); for fetch/pull use fetchFromBundle.
 updateRemoteTrackingBranch :: BundleName -> IO ExitCode
-updateRemoteTrackingBranch bundleName = do
-    maybeHash <- getHashFromBundle bundleName
-    case maybeHash of
-        Just hash -> do
-            -- Update the remote tracking branch ref
-            -- Use update-ref to create or update refs/remotes/origin/main
-            updateRemoteTrackingBranchToHash hash
-        Nothing -> pure (ExitFailure 1)
+updateRemoteTrackingBranch bundleName =
+    getHashFromBundle bundleName >>= maybe (pure (ExitFailure 1)) updateRemoteTrackingBranchToHash
 
 -- | Set refs/remotes/origin/main to a specific hash. Use after a successful pull so status shows
 -- "up to date with 'origin/main'" instead of "ahead by N commits".
@@ -387,10 +383,13 @@ getConflictType :: FilePath -> IO ConflictType
 getConflictType path = do
   (_, out, _) <- runGitWithOutput ["ls-files", "-u", "--", path]
   let beforeTab line = takeWhile (/= '\t') line
-  let stageNum line = case reverse (words (beforeTab line)) of
-        (s:_) | s `elem` ["1","2","3"] -> Just (read s :: Int)
+  let stageNums :: [Int]
+      stageNums = mapMaybe stageNum (lines out)
+      stageNum line = case reverse (words (beforeTab line)) of
+        ("1":_) -> Just (1 :: Int)
+        ("2":_) -> Just 2
+        ("3":_) -> Just 3
         _ -> Nothing
-  let stageNums = mapMaybe stageNum (lines out)
   let has1 = 1 `elem` stageNums
   let has2 = 2 `elem` stageNums
   let has3 = 3 `elem` stageNums

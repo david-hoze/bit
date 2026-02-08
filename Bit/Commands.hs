@@ -4,7 +4,7 @@
 module Bit.Commands (run) where
 
 import qualified Bit.Core as Bit
-import Bit.Types (BitEnv(..), runBitM)
+import Bit.Types (BitEnv(..), ForceMode(..), runBitM)
 import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
 import Bit.Remote (getDefaultRemote, resolveRemote)
 import Bit.Utils (atomicWriteFileStr)
@@ -193,13 +193,17 @@ syncBitignoreToIndex cwd = do
 
 runCommand :: [String] -> IO ()
 runCommand args = do
-    let isForce = "--force" `elem` args || "-f" `elem` args
-    let isForceWithLease = "--force-with-lease" `elem` args
+    let hasForce = "--force" `elem` args || "-f" `elem` args
+    let hasForceWithLease = "--force-with-lease" `elem` args
     let isSequential = "--sequential" `elem` args
     let isSkipVerify = "--skip-verify" `elem` args
-    when (isForce && isForceWithLease) $ do
+    when (hasForce && hasForceWithLease) $ do
         hPutStrLn stderr "fatal: Cannot use both --force and --force-with-lease"
         exitWith (ExitFailure 1)
+    let forceMode
+          | hasForce          = Force
+          | hasForceWithLease = ForceWithLease
+          | otherwise         = NoForce
     let cmd = filter (`notElem` ["--force", "-f", "--force-with-lease", "--sequential", "--skip-verify"]) args
 
     cwd <- Dir.getCurrentDirectory
@@ -208,7 +212,7 @@ runCommand args = do
     -- Lightweight env (no scan) — for read-only commands
     let baseEnv = do
             mRemote <- getDefaultRemote cwd
-            pure $ BitEnv cwd [] mRemote isForce isForceWithLease isSkipVerify
+            pure $ BitEnv cwd [] mRemote forceMode isSkipVerify
 
     -- Full env (scan + bitignore sync + metadata write) — for write commands
     let scannedEnv = do
@@ -216,7 +220,7 @@ runCommand args = do
             localFiles <- Scan.scanWorkingDir cwd
             Scan.writeMetadataFiles cwd localFiles
             mRemote <- getDefaultRemote cwd
-            pure $ BitEnv cwd localFiles mRemote isForce isForceWithLease isSkipVerify
+            pure $ BitEnv cwd localFiles mRemote forceMode isSkipVerify
 
     -- Repo existence check (skip for init)
     let needsRepo = cmd /= ["init"]
@@ -277,12 +281,12 @@ runCommand args = do
         -- pull
         ["pull"]                        -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullSkipVerify = isSkipVerify }
         ["pull", name]                  -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullSkipVerify = isSkipVerify }
-        ["pull", "--accept-remote"]     -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True, Bit.pullSkipVerify = isSkipVerify }
-        ["pull", "--manual-merge"]      -> runScanned $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True, Bit.pullSkipVerify = isSkipVerify }
-        ["pull", name, "--accept-remote"] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True, Bit.pullSkipVerify = isSkipVerify }
-        ["pull", "--accept-remote", name] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullAcceptRemote = True, Bit.pullSkipVerify = isSkipVerify }
-        ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True, Bit.pullSkipVerify = isSkipVerify }
-        ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions { Bit.pullManualMerge = True, Bit.pullSkipVerify = isSkipVerify }
+        ["pull", "--accept-remote"]     -> runScanned $ Bit.pull (Bit.PullOptions Bit.PullAcceptRemote isSkipVerify)
+        ["pull", "--manual-merge"]      -> runScanned $ Bit.pull (Bit.PullOptions Bit.PullManualMerge isSkipVerify)
+        ["pull", name, "--accept-remote"] -> runScannedWithRemote name $ Bit.pull (Bit.PullOptions Bit.PullAcceptRemote isSkipVerify)
+        ["pull", "--accept-remote", name] -> runScannedWithRemote name $ Bit.pull (Bit.PullOptions Bit.PullAcceptRemote isSkipVerify)
+        ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull (Bit.PullOptions Bit.PullManualMerge isSkipVerify)
+        ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull (Bit.PullOptions Bit.PullManualMerge isSkipVerify)
         
         -- fetch
         ["fetch"]                       -> runScanned Bit.fetch

@@ -43,12 +43,13 @@ module Bit.Core
     , unsetUpstream
 
       -- Types re-exported for Commands.hs
+    , PullMode(..)
     , PullOptions(..)
     , defaultPullOptions
     ) where
 
 import Prelude hiding (init, log)
-import Bit.Core.Helpers (PullOptions(..), defaultPullOptions)
+import Bit.Core.Helpers (PullMode(..), PullOptions(..), defaultPullOptions)
 import Bit.Core.Init (init, initializeRepoAt)
 import Bit.Core.GitPassthrough
     ( add

@@ -25,6 +25,7 @@ import Prelude hiding (log)
 import qualified System.Directory as Dir
 import System.FilePath ((</>), normalise, takeDirectory)
 import Control.Monad (when, unless, void, forM_)
+import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
@@ -41,7 +42,7 @@ import Control.Exception (try, SomeException, throwIO)
 import Bit.Utils (toPosix, filterOutBitPaths)
 import Data.Maybe (maybeToList)
 import Bit.Remote (Remote, remoteName, remoteUrl)
-import Bit.Types (BitM, BitEnv(..), Hash, HashAlgo(..), EntryKind(..), syncHash, runBitM, unPath)
+import Bit.Types (BitM, BitEnv(..), ForceMode(..), Hash, HashAlgo(..), EntryKind(..), syncHash, runBitM, unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
@@ -49,7 +50,8 @@ import Bit.Internal.Metadata (MetaContent(..), serializeMetadata, displayHash, v
 import Bit.Concurrency (Concurrency(..))
 import qualified Bit.Device as Device
 import Bit.Core.Helpers
-    ( PullOptions(..)
+    ( PullMode(..)
+    , PullOptions(..)
     , defaultPullOptions
     , getRemoteTargetType
     , withRemote
@@ -93,11 +95,10 @@ pull opts = withRemote $ \remote -> do
 cloudPull :: Remote -> PullOptions -> BitM ()
 cloudPull remote opts =
     let transport = mkCloudTransport remote
-    in if pullAcceptRemote opts
-        then pullAcceptRemoteImpl transport remote
-        else if pullManualMerge opts
-            then pullManualMergeImpl remote
-            else pullWithCleanup transport remote opts
+    in case pullMode opts of
+        PullAcceptRemote -> pullAcceptRemoteImpl transport remote
+        PullManualMerge  -> pullManualMergeImpl remote
+        PullNormal       -> pullWithCleanup transport remote opts
 
 -- | Pull from a filesystem remote. Fetches directly from the remote's .bit/index/.git.
 filesystemPull :: FilePath -> Remote -> PullOptions -> IO ()
@@ -136,7 +137,7 @@ filesystemPull cwd remote opts = do
     let remoteHash = filter (not . isSpace) remoteHeadOut
     
     -- NEW: Proof of possession — verify filesystem remote before pulling
-    unless (pullAcceptRemote opts || pullSkipVerify opts) $ do
+    unless (pullMode opts == PullAcceptRemote || pullSkipVerify opts) $ do
         putStrLn "Verifying remote repository..."
         (remoteCount, remoteIssues) <- Verify.verifyLocalAt remotePath Nothing (Parallel 0)
         if null remoteIssues
@@ -154,12 +155,12 @@ filesystemPull cwd remote opts = do
     
     -- Create a minimal BitEnv to call the shared logic
     localFiles <- Scan.scanWorkingDir cwd
-    let env = BitEnv cwd localFiles (Just remote) False False (pullSkipVerify opts)
+    let env = BitEnv cwd localFiles (Just remote) NoForce (pullSkipVerify opts)
     
     -- Delegate to the unified path
-    if pullAcceptRemote opts
-        then runBitM env (filesystemPullAcceptRemoteImpl transport remoteHash)
-        else runBitM env (filesystemPullLogicImpl transport remote remoteHash)
+    case pullMode opts of
+        PullAcceptRemote -> runBitM env (filesystemPullAcceptRemoteImpl transport remoteHash)
+        _                -> runBitM env (filesystemPullLogicImpl transport remote remoteHash)
 
 -- | Filesystem pull logic (simplified - no bundle fetching, just merge + sync)
 filesystemPullLogicImpl :: FileTransport -> Remote -> String -> BitM ()
@@ -288,9 +289,7 @@ pullAcceptRemoteImpl transport remote = do
 
                     -- 5. Update tracking ref
                     maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
-                    case maybeRemoteHash of
-                        Just rHash -> lift $ void $ Git.updateRemoteTrackingBranchToHash rHash
-                        Nothing    -> pure ()
+                    lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash) maybeRemoteHash
 
                     lift $ tell "Pull with --accept-remote completed."
 
@@ -432,9 +431,7 @@ pullLogic transport remote opts = do
                         lift $ applyMergeToWorkingDir transport cwd localHead
                         lift $ tell "Syncing binaries... done."
                         maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
-                        case maybeRemoteHash of
-                            Just rHash -> lift $ void $ Git.updateRemoteTrackingBranchToHash rHash
-                            Nothing    -> pure ()
+                        lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash) maybeRemoteHash
                     else do
                         lift $ tell finalMergeOut
                         lift $ tellErr finalMergeErr
