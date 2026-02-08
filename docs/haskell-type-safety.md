@@ -362,6 +362,9 @@ Partial functions—those that crash on certain inputs—are one of Haskell's wo
 | `read` | Parse failure | `readMaybe` from `Text.Read` |
 | `!!` | Out of bounds | `Data.Vector.!?` or bounds-checked indexing |
 | `maximum` | Empty list | `maximumMay` from `safe` or use `NonEmpty` |
+| `Map.!` | Missing key | `Map.lookup` + pattern match or pattern guard |
+| `last` | Empty list | Pattern match on reversed list, or `NonEmpty` |
+| `init` | Empty list | Pattern match, or use length check first |
 
 Replace partial patterns with total ones:
 
@@ -388,6 +391,41 @@ headMay []       -- Nothing
 headDef 0 []     -- 0
 readMay "42" :: Maybe Int  -- Just 42
 readMay "abc" :: Maybe Int -- Nothing
+```
+
+**`Map.!` is a common source of runtime crashes** in code that uses `Data.Map`. Replace with `Map.lookup` and handle the `Maybe`:
+
+```haskell
+-- BAD: crashes if key is missing (even if you "know" it's there)
+let lHash = lFiles Map.! p
+
+-- GOOD: pattern guard handles both cases explicitly
+[ Modified (LightFileEntry p lHash)
+| p <- Set.toList intersection
+, Just lHash <- [Map.lookup p lFiles]    -- fails gracefully, skips this entry
+, Just rHash <- [Map.lookup p rFiles]
+, lHash /= rHash
+]
+```
+
+**Watch for `head` used in comparisons** — it crashes on empty input even though it "looks" safe:
+
+```haskell
+-- BAD: crashes if name is ""
+| head name == '.'  = pure []
+
+-- GOOD: total — isPrefixOf handles empty strings correctly
+| isPrefixOf "." name  = pure []
+```
+
+Similarly, **`map head (group (sort xs))`** extracts unique elements from a sorted/grouped list. This uses partial `head` on each group. Replace with `nub xs` (or `Set.toList . Set.fromList` for O(n log n)):
+
+```haskell
+-- BAD: partial head on each group
+uniqueTargets = map head (group (sort targets))
+
+-- GOOD: total, clearer intent
+length targets == length (nub targets)
 ```
 
 A subtler danger: **`fromIntegral` silently truncates or overflows** across some type pairs. `fromIntegral (256 :: Int) :: Word8` produces `0` with no error. Write explicit, named conversion functions for numeric types.
@@ -706,7 +744,71 @@ Algebraic properties make excellent properties: commutativity, associativity, id
 
 ---
 
-## 16. Custom sum types cure boolean blindness
+## 16. Pattern match on sum types — don't compare with `==`
+
+Standard library types like `ExitCode`, `Ordering`, and your own sum types should be **pattern matched**, not compared with `==`. Pattern matching gives the compiler structural knowledge to check exhaustiveness and guide type refinement:
+
+```haskell
+-- BAD: boolean blindness — compiler doesn't know what True/False mean here
+if code == ExitSuccess
+    then doSuccess
+    else doFailure
+
+-- BAD: negated comparison is even harder to read
+if code /= ExitSuccess then handleError else proceed
+
+-- GOOD: pattern match makes the sum type explicit
+case code of
+    ExitSuccess -> doSuccess
+    _           -> doFailure
+```
+
+This is especially important with `ExitCode` because `ExitFailure` carries an `Int` payload. Pattern matching lets you extract it; equality comparison discards it:
+
+```haskell
+-- GOOD: can inspect the failure code
+case code of
+    ExitSuccess      -> pure result
+    ExitFailure 127  -> throwIO $ ProgramNotFound cmd
+    ExitFailure n    -> throwIO $ ProcessFailed cmd n
+```
+
+The same principle applies to your own sum types. After replacing a `Bool` parameter with a sum type like `ForceMode`, use `case` rather than `==`:
+
+```haskell
+-- BAD: treats the sum type as if it were still a Bool
+if fMode == Force then forcePush else normalPush
+
+-- GOOD: pattern match — compiler checks exhaustiveness
+case fMode of
+    Force   -> forcePush
+    NoForce -> normalPush
+```
+
+When multiple constructors share the same handler, use a **predicate + pattern guard** to collapse duplicate branches rather than duplicating the handler body:
+
+```haskell
+-- BAD: duplicated handler for two constructors
+case mTarget of
+    Just (TargetDevice _ _) -> filesystemAction
+    Just (TargetLocalPath _) -> filesystemAction   -- exact same code
+    _ -> cloudAction
+
+-- GOOD: predicate collapses the duplicate branches
+case mTarget of
+    Just t | isFilesystemTarget t -> filesystemAction
+    _ -> cloudAction
+
+-- The predicate is defined once, alongside the data type:
+isFilesystemTarget :: RemoteTarget -> Bool
+isFilesystemTarget (TargetDevice _ _) = True
+isFilesystemTarget (TargetLocalPath _) = True
+isFilesystemTarget (TargetCloud _) = False
+```
+
+---
+
+## 17. Custom sum types cure boolean blindness
 
 The term "boolean blindness," popularized by Robert Harper, describes the problem: **a `Bool` carries no information about its provenance.** `True` from `isAdmin user` looks identical to `True` from `isRed car`—the compiler cannot distinguish them.
 
@@ -744,7 +846,7 @@ Other examples: `data Parity = Even | Odd` instead of `isEven :: Int -> Bool`; `
 
 ---
 
-## 17. Parse, don't validate
+## 18. Parse, don't validate
 
 Alexis King's 2019 blog post articulated the most influential Haskell design principle of the past decade. **A parser consumes less-structured input and produces more-structured output. A validator checks a property and throws away the result.**
 
@@ -796,17 +898,18 @@ King's practical guidelines:
 
 ## The progression of type safety techniques
 
-These 17 techniques form a **layered defense** from simplest to most advanced. Each layer catches bugs the previous layers miss:
+These 18 techniques form a **layered defense** from simplest to most advanced. Each layer catches bugs the previous layers miss:
 
 1. **Newtypes** — prevent argument confusion at zero runtime cost
 2. **Custom sum types** — cure boolean blindness, enable exhaustive matching
-3. **Smart constructors + opaque modules** — enforce invariants at construction time
-4. **Phantom types** — track state, permissions, and units at the type level
-5. **GADTs** — encode state machines and complex invariants in constructors
-6. **DataKinds + type families** — type-level computation for dimensions, sizes, and indices
-7. **Liquid Haskell** — SMT-verified refinement types for mathematical properties
-8. **Purity + strictness** — eliminate mutation bugs and space leaks
-9. **`-Wall` + totality** — catch missing cases and partial functions
-10. **Property-based testing** — validate algebraic properties with automatic shrinking
+3. **Pattern match on sum types** — use `case` not `==`, enabling exhaustiveness checks and payload extraction
+4. **Smart constructors + opaque modules** — enforce invariants at construction time
+5. **Phantom types** — track state, permissions, and units at the type level
+6. **GADTs** — encode state machines and complex invariants in constructors
+7. **DataKinds + type families** — type-level computation for dimensions, sizes, and indices
+8. **Liquid Haskell** — SMT-verified refinement types for mathematical properties
+9. **Purity + strictness** — eliminate mutation bugs and space leaks
+10. **`-Wall` + totality** — catch missing cases and partial functions (including `Map.!`, `head` in guards)
+11. **Property-based testing** — validate algebraic properties with automatic shrinking
 
-An AI code assistant generating Haskell should default to these patterns: use newtypes for all domain concepts, prefer `NonEmpty` over `[]` and `Natural` over `Int`, hide constructors behind smart constructors, enable `-Wall -Wincomplete-uni-patterns -Wredundant-constraints`, avoid all partial Prelude functions, and use sum types instead of booleans. The result is code where the compiler catches the bugs before the tests even run.
+An AI code assistant generating Haskell should default to these patterns: use newtypes for all domain concepts, prefer `NonEmpty` over `[]` and `Natural` over `Int`, hide constructors behind smart constructors, enable `-Wall -Wincomplete-uni-patterns -Wredundant-constraints`, avoid all partial Prelude functions (including `Map.!` and `head` in guard positions), pattern match on sum types instead of comparing with `==`, and use custom sum types instead of booleans. The result is code where the compiler catches the bugs before the tests even run.

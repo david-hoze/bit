@@ -117,12 +117,40 @@ peekWord8' >>= \case
     _    -> empty
 ```
 
-GHC 9.4+ adds **`\cases`** for multi-argument lambda case. **MultiWayIf** provides guard-style syntax in expression position:
+GHC 9.4+ adds **`\cases`** for multi-argument lambda case. **MultiWayIf** provides guard-style syntax in expression position, eliminating nested `if-else-if` chains:
 
 ```haskell
-classify x y = if | x == 0    -> "zero"
-                  | y < 0     -> "negative y"
-                  | otherwise -> "other"
+-- ❌ Nested if-else-if — hard to read, error-prone indentation
+if has2 && has3 && has1 then ContentConflict path
+else if has2 && has3 && not has1 then AddAdd path
+else if has2 && not has3 then ModifyDelete path False
+else ContentConflict path
+
+-- ✅ MultiWayIf — flat, aligned, easy to extend
+if | has2 && has3 && has1     -> ContentConflict path
+   | has2 && has3 && not has1 -> AddAdd path
+   | has2 && not has3         -> ModifyDelete path False
+   | has3 && not has2         -> ModifyDelete path True
+   | otherwise                -> ContentConflict path
+```
+
+MultiWayIf is especially useful inside `do` blocks, lambdas, and `foldl'` accumulators where top-level guards aren't available:
+
+```haskell
+-- Inside a fold accumulator
+foldl' (\(afterDash, acc) arg ->
+    if | arg == "--" -> (True, acc)
+       | afterDash   -> (True, arg:acc)
+       | isFlag arg  -> (False, acc)
+       | otherwise   -> (False, arg:acc)
+    ) (False, []) args
+```
+
+It also works well with `pure` to factor out the monadic wrapper:
+
+```haskell
+-- ❌ if cond1 then pure result1 else if cond2 then pure result2 else pure result3
+-- ✅ pure $ if | cond1 -> result1 | cond2 -> result2 | otherwise -> result3
 ```
 
 **Pattern guards** allow failable pattern matches inside guards:
@@ -189,6 +217,43 @@ void $ forkIO someAction                     -- discard return value
 guard (age >= 18) $> ticket                  -- Maybe/list filter
 join (Just (Just 3))                         -- Just 3 (flatten nested monad)
 getUserName userId <&> Text.toUpper          -- <&> is flipped <$>, pipeline style
+```
+
+**`traverse_` is the idiomatic way to perform an action on a `Maybe` value**, replacing the verbose `maybe (pure ()) action` pattern:
+
+```haskell
+-- ❌ maybe (pure ()) killThread mThread
+-- ✅ traverse_ killThread mThread
+
+-- ❌ case mHandle of Just h -> hClose h; Nothing -> pure ()
+-- ✅ traverse_ hClose mHandle
+```
+
+**`void` replaces `_ <- action`** when discarding a monadic result:
+
+```haskell
+-- ❌ _ <- scannedEnv
+-- ✅ void scannedEnv
+
+-- ❌ _ <- Git.runGitRaw ["commit", "-m", msg]
+-- ✅ void $ Git.runGitRaw ["commit", "-m", msg]
+```
+
+**`const` replaces `\_ -> expr`** for ignored lambda arguments:
+
+```haskell
+-- ❌ bracket acquire (\_ -> cleanup) action
+-- ✅ bracket acquire (const cleanup) action
+
+-- ❌ either (\_ -> handleErr) process result
+-- ✅ either (const handleErr) process result
+```
+
+**`isRight`/`isLeft`** from `Data.Either` replace `either (const False) (const True)`:
+
+```haskell
+-- ❌ either (const False) (const True) (decodeUtf8' bs)
+-- ✅ isRight (decodeUtf8' bs)
 ```
 
 **`foldM`** is the monadic fold, **`filterM`** the monadic filter, and **`concatMapM f = fmap concat . mapM f`** (not in base but trivially composed).
@@ -396,6 +461,7 @@ The most impactful extensions for terse, modern Haskell:
 
 - **`OverloadedStrings`**: string literals work as `Text`, `ByteString`, etc.
 - **`LambdaCase`**: `\case` eliminates throwaway pattern match variables
+- **`MultiWayIf`**: flat guard syntax in expression position, replacing nested `if-else-if`
 - **`BlockArguments`** (GHC2024): `when condition do ...` without `$`
 - **`TupleSections`**: `(,3)` instead of `\x -> (x, 3)`
 - **`TypeApplications`**: `read @Int` instead of type annotations
@@ -455,6 +521,59 @@ Avoid deeply nesting `where` inside `where` — extract helpers to the top level
 
 ---
 
+## Consolidation and DRY patterns
+
+**Consolidate multiple `liftIO` calls** into a single `liftIO $ do` block when consecutive actions all need lifting:
+
+```haskell
+-- ❌ Repetitive lifting
+liftIO $ putStrLn "Updating..."
+liftIO $ void $ Git.runGitRaw ["commit", "-m", msg]
+liftIO $ putStrLn "Done."
+
+-- ✅ Single lift, cleaner do-block
+liftIO $ do
+    putStrLn "Updating..."
+    void $ Git.runGitRaw ["commit", "-m", msg]
+    putStrLn "Done."
+```
+
+**Extract repeated lambdas into named helpers** when the same inline function appears multiple times:
+
+```haskell
+-- ❌ Same truncation lambda repeated 4 times across the module
+mapM_ (printVerifyIssue (\s -> take 16 s ++ if length s > 16 then "..." else "")) issues
+
+-- ✅ Named helper, used everywhere
+truncateHash :: String -> String
+truncateHash s = take 16 s ++ if length s > 16 then "..." else ""
+
+mapM_ (printVerifyIssue truncateHash) issues
+```
+
+**Reuse utility functions instead of inlining the same logic** across files:
+
+```haskell
+-- ❌ Same lambda duplicated in 3 files
+let safePath = map (\c -> if c == '\\' then '/' else c) absIndex
+
+-- ✅ Import from the utility module
+import Bit.Utils (toPosix)
+let safePath = toPosix absIndex
+```
+
+**`dropWhileEnd` replaces `reverse . dropWhile p . reverse`** for trimming trailing elements:
+
+```haskell
+-- ❌ Reverse-strip-reverse idiom
+trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
+
+-- ✅ dropWhileEnd (Data.List) — clearer, single pass on the end
+trim = dropWhileEnd isSpace . dropWhile isSpace
+```
+
+---
+
 ## The anti-pattern catalogue: verbose patterns to replace
 
 These are the most common mistakes that beginners and AI models produce. Each should be recognized and rewritten:
@@ -493,6 +612,22 @@ These are the most common mistakes that beginners and AI models produce. Each sh
 
 **Using `head`/`tail`/`fromJust`/`read`** — partial functions that crash. Use `listToMaybe`, pattern matching, `readMaybe`, and `fromMaybe`.
 
+**`maybe (pure ()) action value` instead of `traverse_ action value`** — the `Foldable` method is exactly this pattern:
+```haskell
+-- ❌ maybe (pure ()) killThread mThread
+-- ✅ traverse_ killThread mThread
+```
+
+**`_ <- action` instead of `void action`** — `void` from `Control.Monad` is the standard combinator for discarding results.
+
+**`\_ -> expr` instead of `const expr`** — `const` is point-free and self-documenting.
+
+**`if code == ExitSuccess then ... else ...` instead of `case code of`** — treats a sum type as a boolean; pattern matching is more expressive and enables exhaustiveness checking.
+
+**`either (const False) (const True)` instead of `isRight`** — the `Data.Either` module exports exactly this predicate.
+
+**`maybe [] (:[]) (listToMaybe xs)` instead of `take 1 xs`** — recognizing round-trip compositions that cancel out.
+
 **Orphan instances** — break global instance uniqueness. Use newtype wrappers.
 
 **Lazy IO (`readFile`)** — unpredictable resource management. Use strict `Data.Text.IO.readFile` or streaming libraries.
@@ -505,4 +640,4 @@ These are the most common mistakes that beginners and AI models produce. Each sh
 
 Idiomatic Haskell achieves concision not through clever tricks but through **choosing the right abstraction level**: `fmap` over pattern matching, Applicative over Monad, `foldl'` over explicit recursion, eliminators (`maybe`, `either`, `bool`) over `case`, and composition over intermediate variable naming. The critical meta-principle is to **use the weakest sufficient tool** — this produces code that is both shorter and more general.
 
-Three practices have the single highest impact on code quality: enabling `OverloadedStrings` and using `Text` by default, compiling with `-Wall -Werror`, and using `DerivingStrategies` to make instance derivation explicit. An AI assistant that consistently applies the patterns in this reference — from `\case` and `<$>`/`<*>` chains to lens pipelines and `mapMaybe` — will produce Haskell that experienced developers recognize as fluent rather than translated from another language.
+Three practices have the single highest impact on code quality: enabling `OverloadedStrings` and using `Text` by default, compiling with `-Wall -Werror`, and using `DerivingStrategies` to make instance derivation explicit. An AI assistant that consistently applies the patterns in this reference — from `\case` and `MultiWayIf` to `traverse_`/`void`/`const`, from `<$>`/`<*>` chains to `dropWhileEnd` and `isRight` — will produce Haskell that experienced developers recognize as fluent rather than translated from another language.
