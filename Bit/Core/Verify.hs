@@ -115,6 +115,6 @@ verifyProgressLoop counter total = go
 truncateHash :: String -> String
 truncateHash s = take 16 s ++ if length s > 16 then "..." else ""
 
-fsck :: FilePath -> Concurrency -> IO ()
+fsck :: FilePath -> IO ()
 fsck = Fsck.doFsck
 

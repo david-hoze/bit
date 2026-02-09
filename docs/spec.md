@@ -343,7 +343,7 @@ past the merge).
 | `bit merge` | `git merge` | Merge branches |
 | `bit remote add <name> <url>` | `git remote add` | Add named remote (does NOT set upstream) |
 | `bit remote show [name]` | `git remote show` | Show remote status |
-| `bit remote check [name]` | — | Check remote connectivity and state |
+| `bit remote repair [name]` | — | Verify and repair files against remote |
 | `bit push [<remote>]` | `git push [<remote>]` | Push to specified or default remote |
 | `bit push -u <remote>` | `git push -u <remote>` | Push and set upstream tracking |
 | `bit push --set-upstream <remote>` | `git push --set-upstream <remote>` | Push and set upstream tracking (alt) |
@@ -352,9 +352,9 @@ past the merge).
 | `bit pull --accept-remote` | — | Accept remote file state as truth |
 | `bit pull --manual-merge` | — | Interactive per-file conflict resolution |
 | `bit fetch [<remote>]` | `git fetch [<remote>]` | Fetch metadata from specified or default remote |
-| `bit verify` | — | Verify local files match metadata |
-| `bit verify --remote` | — | Verify remote files match remote metadata |
-| `bit fsck` | `git fsck` | Full integrity check (local + remote + git) |
+| `bit verify` | — | Verify local files match committed metadata |
+| `bit verify --remote` | — | Verify remote files match committed remote metadata |
+| `bit fsck` | `git fsck` | Check integrity of internal metadata repository |
 | `bit merge --continue` | `git merge --continue` | Continue after conflict resolution |
 | `bit merge --abort` | `git merge --abort` | Abort current merge |
 | `bit branch --unset-upstream` | `git branch --unset-upstream` | Remove tracking config |
@@ -953,7 +953,7 @@ case cmd of
 
 2. **Lightweight env (no scan)**: Read-only commands that read git history, index, or config without needing working directory state
    - `log`, `ls-files` — read git objects only
-   - `remote show`, `remote check` — read config/connectivity
+   - `remote show`, `remote repair` — read config/remote state
    - `verify`, `verify --remote` — compare against existing metadata
 
 3. **Full scanned env**: Commands that need current working directory state
@@ -970,38 +970,47 @@ case cmd of
 
 ### `bit verify`
 
-Verifies local working tree matches local metadata. For each file in metadata, checks that the hash matches the actual file on disk.
+Verifies local working tree files match their committed metadata. Scans the working directory to update `.bit/index/` metadata, then runs `git diff` on the index repo to find files whose metadata changed from the committed state. Any difference means the file has been corrupted or modified since the last commit.
+
+**Why scan + git diff (not direct file-vs-metadata comparison):** An earlier approach loaded metadata from `.bit/index/` on disk and compared file hashes against it. The problem: any command that scans the working directory (`bit status`, `bit add`, etc.) updates `.bit/index/` metadata to reflect current file state. If a file was corrupted and the user happened to run `bit status` first, the metadata would be updated to match the corrupted content — and verification would pass, silently missing the corruption. By comparing against the *committed* state in git (what was explicitly committed with `bit commit`), verification is immune to stale metadata. The committed state doesn't change just because a scan ran.
+
+**Implementation:**
+1. `Scan.scanWorkingDir` + `Scan.writeMetadataFiles` — update `.bit/index/` to match current working tree
+2. `git diff --name-only` in `.bit/index` repo — find files whose metadata changed from HEAD
+3. For each changed binary file: read committed metadata (`git show HEAD:<path>`) for expected hash/size, read filesystem metadata for actual hash/size → `HashMismatch`
+4. For each changed text file: report `HashMismatch` (git diff already proves the content changed)
+5. For missing files: `git ls-tree -r HEAD` lists committed paths, check existence in working tree → `Missing`
 
 **Progress reporting**: On TTY with >5 files, displays live progress: `Checking files: N/Total (X%)...`
 
 ### `bit verify --remote`
 
 Verifies that remote files match what the remote Git bundle says they should be:
-1. Fetch remote bundle (metadata)
+1. Fetch remote bundle (committed metadata)
 2. Scan remote files via `rclone lsjson --hash`
-3. Compare: Do actual remote files match what remote metadata claims?
+3. Compare: Do actual remote files match what the committed metadata claims?
+
+For filesystem remotes, uses the same scan + git diff approach as local verification (`verifyLocalAt`).
 
 **Progress reporting**: On TTY with >5 files, displays live progress during comparison phase.
 
 ### `bit fsck`
 
-Full integrity check combining local verify, remote verify, and `git fsck` on the internal repository.
+Runs `git fsck` on the internal metadata repository (`.bit/index`). Checks the integrity of the object store — that all commits, trees, and blobs are valid and consistent. This is a passthrough to git's own integrity check. Use `bit verify` to check file integrity instead.
 
-**Progress reporting**: On TTY with >5 files, displays step-by-step progress:
-- `[1/2] Checking working tree: N/Total (X%)...`
-- `[2/2] Checking metadata history...`
+### `bit remote repair`
 
-### `bit remote check`
+Verifies both local and remote files against their respective metadata, then repairs any broken/missing files by copying verified files from the other side using content-addressable lookup.
 
-Checks local working tree against remote using `rclone check --combined`. Reports files that match, differ, or are missing from either side. This is a lower-level check than verify — it compares actual file content between local and remote without involving metadata.
+**Algorithm**:
+1. Resolve remote, load binary metadata from both sides
+2. Verify both sides: `verifyLocal` and `verifyRemote` (or `verifyLocalAt` for filesystem remotes)
+3. Build content indexes from verified files (metadata entries not in the issue set)
+4. For each local issue: look up expected (hash, size) in remote verified index, copy from remote
+5. For each remote issue: look up expected (hash, size) in local verified index, copy to remote
+6. Report summary: repaired, failed, unrepairable
 
-**Implementation**: Uses `rclone check --combined -` which outputs one line per file as it processes. For repos with >5 files, streams this output line-by-line to enable progress tracking.
-
-**Progress reporting**: On TTY with >5 files, displays live progress: `Checking files: N/Total (X%)...`
-- Counts files using `git ls-files` to get total expected file count upfront
-- Streams rclone output using `createProcess` with pipes instead of blocking `readProcessWithExitCode`
-- Updates progress counter via `IORef` as each line is received from rclone
-- Progress reporter thread runs at 100ms intervals, cleared on completion
+**Content-addressable repair**: Files are matched by (hash, size), not by path. If `photos/song.mp3` is corrupted locally but `backup/song_copy.mp3` on the remote has the same hash and size, it will be used as the repair source.
 
 **Output**: Full comparison report saved to `.bit/last-check.txt` for detailed analysis.
 
@@ -1211,9 +1220,9 @@ Interactive per-file conflict resolution:
 - `bit pull --manual-merge` — interactive per-file conflict resolution
 - `bit merge --continue / --abort` — merge lifecycle management
 - `bit fetch` — fetch metadata bundle only
-- `bit verify` — local file verification against metadata
-- `bit verify --remote` — remote file verification against remote metadata
-- `bit fsck` — full integrity check
+- `bit verify` — local file verification against committed metadata (scan + git diff)
+- `bit verify --remote` — remote file verification against committed remote metadata
+- `bit fsck` — passthrough to `git fsck` on internal metadata repository
 - `bit --remote <name>` / `bit @<remote>` — ephemeral remote workspace commands (`init`, `add`, `commit`, `status`, `log`, `ls-files`); each command fetches bundle, inflates into temp dir, operates, re-bundles if changed, pushes, and cleans up
 - Pipeline: pure diff → plan → action generation with property tests
 - Device-identity system for filesystem remotes (UUID + hardware serial)
@@ -1247,8 +1256,8 @@ Interactive per-file conflict resolution:
 | `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
 | `bit/Plan.hs` | Pure plan: GitDiff → RcloneAction |
 | `bit/Pipeline.hs` | Composed pipeline: diffAndPlan, pushSyncFiles, pullSyncFiles |
-| `bit/Verify.hs` | Local and remote verification (parallelized); unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
-| `bit/Fsck.hs` | Full integrity check (parallelized) |
+| `bit/Verify.hs` | Local and remote verification; scan + git diff approach for local (compares against committed metadata); unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
+| `bit/Fsck.hs` | Passthrough to `git fsck` on `.bit/index` metadata repository |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
 | `bit/Remote/Scan.hs` | Remote file scanning via rclone |
 | `bit/RemoteWorkspace.hs` | Ephemeral remote workspace: `initRemote`, `addRemote`, `commitRemote`, `statusRemote`, `logRemote`; `withRemoteWorkspace` / `withRemoteWorkspaceReadOnly` orchestration; bundle inflation via `init+fetch+reset --hard` |

@@ -9,6 +9,7 @@ module Bit.Verify
   , verifyRemote
   , VerifyIssue(..)
   , loadBinaryMetadata
+  , loadCommittedBinaryMetadata
   , loadMetadataFromBundle
   , MetadataEntry(..)
   , MetadataSource(..)
@@ -28,7 +29,7 @@ import Data.Maybe (maybeToList)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Internal.Git as Git
-import Bit.Internal.Metadata (MetaContent(..), parseMetadata, readMetadataOrComputeHash, hashFile, parseMetadataFile)
+import Bit.Internal.Metadata (MetaContent(..), parseMetadata, readMetadataOrComputeHash, parseMetadataFile, hashFile)
 import qualified Bit.Remote.Scan as Remote.Scan
 import qualified Bit.Remote
 import qualified Internal.Transport as Transport
@@ -42,6 +43,7 @@ import Data.Foldable (traverse_)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.IORef (IORef, atomicModifyIORef')
+import qualified Bit.Scan as Scan
 
 -- | Result of comparing one file to metadata.
 data VerifyIssue
@@ -163,55 +165,89 @@ loadBinaryMetadata :: FilePath -> Concurrency -> IO [(Path, Hash 'MD5, Integer)]
 loadBinaryMetadata indexDir concurrency =
   binaryEntries <$> loadMetadata (FromFilesystem indexDir) concurrency
 
--- | Verify working tree at an arbitrary root path against metadata at that path.
--- This is the core verification function used for both local and filesystem remote verification.
+-- | Load binary metadata from the committed (HEAD) state of a .bit/index repo.
+-- This returns what the metadata *should* be, immune to scan updates.
+loadCommittedBinaryMetadata :: FilePath -> IO [(Path, Hash 'MD5, Integer)]
+loadCommittedBinaryMetadata indexDir = do
+  (code, out, _) <- Git.runGitAt indexDir ["rev-parse", "HEAD"]
+  case code of
+    ExitSuccess -> do
+      let headHash = filter (not . isSpace) out
+      binaryEntries <$> loadMetadata (FromCommit headHash) Sequential
+    _ -> pure []
+
+-- | Verify working tree at an arbitrary root path against its committed metadata.
+-- Scans the working directory to update .bit/index/ metadata, then uses
+-- git diff to find files whose metadata changed from the committed state.
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
 verifyLocalAt :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
-verifyLocalAt root mCounter concurrency = do
-  let indexDir = root </> ".bit/index"
-  entries <- loadMetadata (FromFilesystem indexDir) concurrency
-  -- Filter out .git directory entries
-  let filteredEntries = filter (\entry -> not (isGitPath (unPath (entryPath entry)))) entries
-  
-  -- Determine concurrency level
-  bound <- resolveConcurrency concurrency
-  
-  -- Parallelize verification (IO-bound: file reads and hashing)
-  issues <- runConcurrently (Parallel bound) (checkOne root indexDir) filteredEntries
-  pure (length filteredEntries, concat issues)
-  where
-    checkOne rootPath indexPath entry = do
-      let relPath = entryPath entry
-          actualPath = rootPath </> unPath relPath
-      exists <- doesFileExist actualPath
-      result <- if not exists
-        then pure [Missing relPath]
-        else case entry of
-          BinaryEntry _ expectedHash expectedSize -> do
-            actualHash <- hashFile actualPath
-            actualSize <- fromIntegral . BS.length <$> BS.readFile actualPath
-            if actualHash == expectedHash && actualSize == expectedSize
-              then pure []
-              else pure [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
-          TextEntry _ -> do
-            -- Text files: just verify they exist (already checked above)
-            -- Could optionally verify content matches index, but that's redundant
-            -- since the index content IS the file content for text files
-            actualHash <- hashFile actualPath
-            actualSize <- fromIntegral . BS.length <$> BS.readFile actualPath
-            -- For text files, we need to check against what's in the index
-            let indexFilePath = indexPath </> unPath relPath
-            indexHash <- hashFile indexFilePath
-            indexSize <- fromIntegral . BS.length <$> BS.readFile indexFilePath
-            if actualHash == indexHash && actualSize == indexSize
-              then pure []
-              else pure [HashMismatch relPath (T.unpack (hashToText indexHash)) (T.unpack (hashToText actualHash)) indexSize actualSize]
-      -- Increment counter after checking file (atomicModifyIORef' is thread-safe)
-      traverse_ (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
-      pure result
+verifyLocalAt root mCounter _concurrency = do
+  let indexDir = root </> bitIndexPath
 
--- | Verify local working tree against metadata in .rgit/index.
+  -- 1. Scan working directory and update .bit/index/ metadata
+  entries <- Scan.scanWorkingDir root
+  Scan.writeMetadataFiles root entries
+
+  -- 2. git diff in the index repo to find files changed from committed state
+  (diffCode, diffOut, _) <- Git.runGitAt indexDir ["diff", "--name-only"]
+  let changedPaths
+        | diffCode == ExitSuccess = filter (not . null) (lines diffOut)
+        | otherwise               = []
+
+  -- 3. Also check for missing files: committed paths not in working tree
+  (lsCode, lsOut, _) <- Git.runGitAt indexDir ["ls-tree", "-r", "--name-only", "HEAD"]
+  let committedPaths
+        | lsCode == ExitSuccess = filter isUserFile $ filter (not . null) (lines lsOut)
+        | otherwise             = []
+
+  -- 4. Build issues from changed files (hash mismatches)
+  mismatchIssues <- concat <$> mapM (checkChanged indexDir) changedPaths
+
+  -- 5. Build issues from missing files (committed but not in working tree)
+  missingFiltered <- fmap concat $ mapM (\p -> do
+    exists <- doesFileExist (root </> p)
+    pure [Missing (Path p) | not exists]
+    ) committedPaths
+
+  let allIssues = mismatchIssues ++ missingFiltered
+      totalChecked = length committedPaths
+
+  -- Update counter
+  traverse_ (\ref -> atomicModifyIORef' ref (\_ -> (totalChecked, ()))) mCounter
+
+  pure (totalChecked, allIssues)
+  where
+    checkChanged indexDir relPath = do
+      -- Read expected metadata from committed state
+      (showCode, committedContent, _) <- Git.runGitAt indexDir ["show", "HEAD:" ++ relPath]
+      -- Read actual metadata from filesystem (updated by scan)
+      let fsPath = indexDir </> relPath
+      fsExists <- doesFileExist fsPath
+      case (showCode, fsExists) of
+        (ExitSuccess, True) -> do
+          let mExpected = parseMetadata committedContent
+          mActual <- parseMetadataFile fsPath
+          case (mExpected, mActual) of
+            (Just expected, Just actual) ->
+              -- Binary file: compare hash+size metadata
+              pure [HashMismatch (Path relPath)
+                      (T.unpack (hashToText (metaHash expected)))
+                      (T.unpack (hashToText (metaHash actual)))
+                      (metaSize expected)
+                      (metaSize actual)]
+            _ -> do
+              -- Text file: git diff says it changed, report mismatch
+              actualHash <- hashFile fsPath
+              actualSize <- fromIntegral . BS.length <$> BS.readFile fsPath
+              pure [HashMismatch (Path relPath)
+                      "(committed)"
+                      (T.unpack (hashToText actualHash))
+                      0
+                      actualSize]
+        _ -> pure []
+
+-- | Verify local working tree against committed metadata in .bit/index.
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
 verifyLocal :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])

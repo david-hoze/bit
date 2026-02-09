@@ -17,7 +17,14 @@
       "Bash(git -C .bit/index -c core.quotePath=false show \"refs/remotes/origin/main:Copy of 251027_2121 - ליל שלישי פרשת לך לך התשפו - מירון.mp3\")",
       "Bash(cabal clean:*)",
       "Bash(bit verify:*)",
-      "Bash(bit remote:*)"
+      "Bash(bit remote:*)",
+      "Bash(cabal build:*)",
+      "Bash(shelltest test/cli --debug:*)",
+      "Bash(shelltest test/cli/remote-repair.test:*)",
+      "Bash(shelltest test/cli:*)",
+      "Bash(shelltest test/cli/fsck.test --debug:*)",
+      "Bash(tee:*)",
+      "Bash(shelltest:*)"
     ]
   }
 }

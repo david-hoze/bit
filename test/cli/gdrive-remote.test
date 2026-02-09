@@ -29,10 +29,10 @@ cd test\cli\output\work_gdrive_a & bit push
 >>> /Metadata push complete\.|Remote is empty|Remote check passed/
 >>>= 0
 
-# --- A: remote check after push: all files on remote, should match ---
-cd test\cli\output\work_gdrive_a & bit remote check
+# --- A: remote repair after push: all files verified, nothing to repair ---
+cd test\cli\output\work_gdrive_a & bit remote repair
 <<<
->>> /files match between local and remote/
+>>> /Nothing to repair/
 >>>= 0
 
 # --- Repo B: init, add remote, fetch, pull ---

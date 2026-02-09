@@ -95,11 +95,10 @@ cd test\cli\output\work_verify_progress & echo file2> f2.txt
 >>>
 >>>= 0
 
-# Fsck with progress code - exits 1 if issues found, 0 if OK
+# Fsck is a passthrough to git fsck — exits 0 on a healthy repo
 cd test\cli\output\work_verify_progress & bit fsck
 <<<
->>>2 /\[1\/2\]|OK|Issues found/
->>>=
+>>>= 0
 
 # ======================================================================
 # CLEANUP

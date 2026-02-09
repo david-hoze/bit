@@ -1,0 +1,123 @@
+# bit remote repair tests
+# Verifies both local and remote files against metadata, then repairs broken
+# files by copying verified files from the other side (content-addressable by hash+size).
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_repair 2>nul & rmdir /s /q test\cli\output\remote_repair 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# TEST: No remote configured — must print error
+# ======================================================================
+
+rmdir /s /q test\cli\output\work_repair 2>nul & mkdir test\cli\output\work_repair & cd test\cli\output\work_repair & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_repair & bit remote repair
+<<<
+>>>2 /fatal: No remote configured/
+>>>= 1
+
+# ======================================================================
+# TEST: Nothing to repair — push then repair, all verified
+# ======================================================================
+
+rmdir /s /q test\cli\output\work_repair 2>nul & rmdir /s /q test\cli\output\remote_repair 2>nul & mkdir test\cli\output\work_repair & mkdir test\cli\output\remote_repair & cd test\cli\output\work_repair & bit init & echo hello> greet.txt & echo binarydata> data.bin & bit add greet.txt data.bin & bit commit -m "Add files"
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_repair & bit remote add origin ..\remote_repair
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\output\work_repair & bit push
+<<<
+>>> /Push complete|Pushing to filesystem remote|Metadata push complete/
+>>>= 0
+
+cd test\cli\output\work_repair & bit remote repair
+<<<
+>>> /Nothing to repair/
+>>>= 0
+
+# ======================================================================
+# TEST: Local corruption — corrupt a local binary file, repair from remote
+# ======================================================================
+
+cd test\cli\output\work_repair & echo corrupted> data.bin
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_repair & bit remote repair
+<<<
+>>> /REPAIRED.*data\.bin/
+>>>= 0
+
+# Verify after repair — should be clean
+cd test\cli\output\work_repair & bit remote repair
+<<<
+>>> /Nothing to repair/
+>>>= 0
+
+# ======================================================================
+# TEST: Stale metadata — corrupt file then scan, repair must still work
+# (Regression: scan updates .bit/index/ metadata to match corrupted
+#  content; repair must use remote metadata for the lookup, not local.)
+# ======================================================================
+
+cd test\cli\output\work_repair & echo stale_corrupt> data.bin
+<<<
+>>>
+>>>= 0
+
+# Run status to trigger a scan — this updates local metadata to the corrupted hash
+cd test\cli\output\work_repair & bit status
+<<<
+>>>= 0
+
+# Repair must still succeed using remote metadata, not the stale local metadata
+cd test\cli\output\work_repair & bit remote repair
+<<<
+>>> /REPAIRED.*data\.bin/
+>>>= 0
+
+# Verify after repair — should be clean
+cd test\cli\output\work_repair & bit remote repair
+<<<
+>>> /Nothing to repair/
+>>>= 0
+
+# ======================================================================
+# TEST: Unrepairable — corrupt on both sides
+# ======================================================================
+
+# Corrupt local
+cd test\cli\output\work_repair & echo local_corrupt> data.bin
+<<<
+>>>
+>>>= 0
+
+# Corrupt remote (same file)
+cd test\cli\output\remote_repair & echo remote_corrupt> data.bin
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_repair & bit remote repair
+<<<
+>>> /UNREPAIRABLE.*data\.bin|unrepairable/
+>>>= 1
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_repair 2>nul & rmdir /s /q test\cli\output\remote_repair 2>nul
+<<<
+>>>
+>>>= 0

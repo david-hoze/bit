@@ -50,10 +50,10 @@ run = do
             , ""
             , "  remote add <name> <url>        Add a remote"
             , "  remote show [<name>]           Show remote information"
-            , "  remote check [<name>]          Check remote connectivity"
+            , "  remote repair [<name>]         Verify and repair files against remote"
             , ""
-            , "  verify [--remote]              Verify file integrity"
-            , "  fsck                           Full integrity check"
+            , "  verify [--remote]              Verify files match committed metadata"
+            , "  fsck                           Check metadata repository integrity"
             , "  merge --continue|--abort       Continue or abort merge"
             , "  branch --unset-upstream        Unset upstream tracking"
             , ""
@@ -214,7 +214,7 @@ runCommand args = do
         -- ── No env needed ────────────────────────────────────
         ["init"]                        -> Bit.init
         ["remote", "add", name, url]    -> Bit.remoteAdd name url
-        ["fsck"]                        -> Bit.fsck cwd (if isSequential then Sequential else Parallel 0)
+        ["fsck"]                        -> Bit.fsck cwd
         ["merge", "--abort"]            -> Bit.mergeAbort
         ["branch", "--unset-upstream"]  -> Bit.unsetUpstream
 
@@ -223,8 +223,8 @@ runCommand args = do
         ("ls-files":rest)               -> Bit.lsFiles rest >>= exitWith
         ["remote", "show"]              -> runBase $ Bit.remoteShow Nothing
         ["remote", "show", name]        -> runBaseWithRemote name $ Bit.remoteShow (Just name)
-        ["remote", "check"]             -> runBase $ Bit.remoteCheck Nothing
-        ["remote", "check", name]       -> runBaseWithRemote name $ Bit.remoteCheck (Just name)
+        ["remote", "repair"]             -> runBase $ Bit.remoteRepair Nothing (if isSequential then Sequential else Parallel 0)
+        ["remote", "repair", name]      -> runBaseWithRemote name $ Bit.remoteRepair (Just name) (if isSequential then Sequential else Parallel 0)
         ["verify"]                      -> runBase $ Bit.verify False (if isSequential then Sequential else Parallel 0)
         ["verify", "--remote"]          -> runBase $ Bit.verify True (if isSequential then Sequential else Parallel 0)
 

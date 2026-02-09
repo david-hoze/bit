@@ -168,11 +168,13 @@ Tests `bit fsck` (local-only, git-style: terse output, one line per issue, exit 
 
 Fsck does not check remote; use `bit verify --remote` for that.
 
-## remote-check.test
+## remote-repair.test
 
-Tests `bit remote check`: runs **rclone check** between local working tree and the configured remote (excludes `.bit`). Requires rclone on PATH. Covers:
-- No remote configured: prints "Error: No remote URL configured." and exits 0.
-- Local directory as "remote" (remote_mirror): add remote, change local file, run `bit remote check` → exits 1 and reports differences (e.g. "differences found", "size differ", "hash differ").
+Tests `bit remote repair`: verifies both local and remote files against their metadata, then repairs broken files by copying verified files from the other side using content-addressable (hash+size) lookup. Covers:
+- No remote configured: prints error and exits 1.
+- Nothing to repair: push then repair — all files verified.
+- Local corruption: corrupt a local binary file — repair copies from remote.
+- Unrepairable: corrupt same file on both sides — reports unrepairable.
 
 ## unicode.test
 
