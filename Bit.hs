@@ -1,7 +1,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 import Bit.Commands
-import System.IO (hSetEncoding, stdout, stderr, utf8, hIsTerminalDevice)
+import GHC.IO.Encoding (setLocaleEncoding, utf8)
+import System.IO (hSetEncoding, stdout, stderr, hIsTerminalDevice)
 import System.Info (os)
 import System.Process (callCommand)
 import Control.Exception (catch, SomeException)
@@ -15,7 +16,9 @@ main = do
     when (os == "mingw32" && isTerminal) $
         callCommand "chcp 65001 > nul 2>&1" `catch` \(_ :: SomeException) -> pure ()
     
-    -- Set UTF-8 for stdout/stderr to properly display Unicode characters
+    -- Set UTF-8 for all IO (stdout, stderr, and subprocess pipes)
+    -- This ensures readProcessWithExitCode decodes git output as UTF-8
+    setLocaleEncoding utf8
     hSetEncoding stdout utf8
     hSetEncoding stderr utf8
     Bit.Commands.run

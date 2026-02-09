@@ -12,7 +12,12 @@
       "Bash(bit @gdrive status:*)",
       "Bash(bit @gdrive ls-files:*)",
       "Bash(shelltest test/cli/remote-targeted.test:*)",
-      "Bash(Remove-Item test-output.txt -ErrorAction SilentlyContinue)"
+      "Bash(Remove-Item test-output.txt -ErrorAction SilentlyContinue)",
+      "Bash(git -C .bit/index -c core.quotePath=false ls-tree:*)",
+      "Bash(git -C .bit/index -c core.quotePath=false show \"refs/remotes/origin/main:Copy of 251027_2121 - ליל שלישי פרשת לך לך התשפו - מירון.mp3\")",
+      "Bash(cabal clean:*)",
+      "Bash(bit verify:*)",
+      "Bash(bit remote:*)"
     ]
   }
 }

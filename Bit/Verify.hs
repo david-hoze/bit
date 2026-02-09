@@ -122,7 +122,7 @@ loadMetadata (FromFilesystem indexDir) concurrency = do
 loadMetadata (FromCommit commitHash) _concurrency = do
   -- ls-tree at ROOT level (no prefix!) to enumerate all files
   (code, out, _) <- readProcessWithExitCode "git"
-    [ "-C", bitIndexPath, "ls-tree", "-r", "--name-only", commitHash ] ""
+    [ "-C", bitIndexPath, "-c", "core.quotePath=false", "ls-tree", "-r", "--name-only", commitHash ] ""
   case code of
     ExitSuccess -> do
       let paths = filter isUserFile $ filter (not . null) $ lines out
@@ -270,7 +270,7 @@ verifyRemote _cwd remote mCounter _concurrency = do
     else do
       -- 2. Load metadata from the bundle (binary metadata + all known paths)
       (remoteMeta, allKnownPaths) <- loadMetadataFromBundle fetchedBundle
-      
+
       -- 3. Fetch actual remote files
       Remote.Scan.fetchRemoteFiles remote >>= either
         (const $ hPutStrLn stderr "Error: Could not fetch remote file list." >> pure (0, []))
