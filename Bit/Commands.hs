@@ -61,7 +61,7 @@ run = do
             , "  --remote <name> <cmd>          Target a remote workspace (portable)"
             , "  @<remote> <cmd>                Shorthand (needs quoting in PowerShell)"
             , ""
-            , "  Supported: init, add <path>, commit -m <msg>, status, log"
+            , "  Supported: init, add <path>, commit -m <msg>, status, log, ls-files"
             ]
         _  -> case extractRemoteTarget args of
             RemoteError msg -> do
@@ -118,9 +118,11 @@ runRemoteCommand remoteName args = do
                 RemoteWorkspace.statusRemote remote rest >>= exitWith
             ("log":rest) ->
                 RemoteWorkspace.logRemote remote rest >>= exitWith
+            ("ls-files":rest) ->
+                RemoteWorkspace.lsFilesRemote remote rest >>= exitWith
             _ -> do
                 hPutStrLn stderr $ "error: command not supported in remote context: " ++ unwords args
-                hPutStrLn stderr "Supported: init, add, commit, status, log"
+                hPutStrLn stderr "Supported: init, add, commit, status, log, ls-files"
                 exitWith (ExitFailure 1)
 
 -- | Helper function to push with upstream tracking

@@ -8,6 +8,7 @@ module Bit.RemoteWorkspace
   , commitRemote
   , statusRemote
   , logRemote
+  , lsFilesRemote
   ) where
 
 import Bit.Types (FileEntry(..), EntryKind(..), ContentType(..), Path(..))
@@ -388,3 +389,17 @@ logRemote :: Remote -> [String] -> IO ExitCode
 logRemote remote rest =
     withRemoteWorkspaceReadOnly remote $ \wsPath ->
         rawSystem "git" (["-C", wsPath, "log"] ++ rest)
+
+-- | List tracked files in remote workspace (read-only).
+-- Scans the remote to reconstruct metadata, then runs git ls-files.
+lsFilesRemote :: Remote -> [String] -> IO ExitCode
+lsFilesRemote remote rest =
+    withRemoteWorkspaceReadOnly remote $ \wsPath -> do
+        ok <- scanAndWriteMetadata remote wsPath
+        hFlush stdout
+        if ok
+            then do
+                void $ Git.runGitAt wsPath ["add", "-u"]
+                void $ Git.runGitAt wsPath ["reset", "HEAD"]
+                Git.runGitRawAt wsPath ("ls-files" : rest)
+            else pure (ExitFailure 1)

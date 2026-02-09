@@ -41,6 +41,7 @@ module Internal.Git
     , checkoutOurs
     , checkoutTheirs
     , runGitRaw
+    , runGitRawAt
     , runGitWithOutput
     , runGitAt
     , ConflictType(..)
@@ -186,6 +187,31 @@ runGitRaw args = do
         _ -> "auto"
   let fullArgs =
         baseFlags
+        ++ ["-c", "color.ui=" ++ colorFlag]
+        ++ args
+
+  (code, out, err) <- readProcessWithExitCode "git" fullArgs ""
+
+  putStr (rewriteGitHints out)
+  hPutStr stderr (rewriteGitHints err)
+
+  case code of
+    ExitSuccess   -> pure ()
+    ExitFailure n ->
+      hPutStrLn stderr ("bit: git exited with code " ++ show n)
+
+  pure code
+
+-- | Like runGitRaw but targets an arbitrary directory instead of .bit/index.
+runGitRawAt :: FilePath -> [String] -> IO ExitCode
+runGitRawAt dir args = do
+  noColor <- lookupEnv "BIT_NO_COLOR"
+  let colorFlag = case noColor of
+        Just "1" -> "never"
+        Just "true" -> "never"
+        _ -> "auto"
+  let fullArgs =
+        ["-C", dir]
         ++ ["-c", "color.ui=" ++ colorFlag]
         ++ args
 
