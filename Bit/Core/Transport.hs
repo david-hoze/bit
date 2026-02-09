@@ -49,7 +49,8 @@ import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import qualified Bit.CopyProgress as CopyProgress
 import Bit.CopyProgress (SyncProgress)
-import Data.IORef (writeIORef)
+import Data.IORef (writeIORef, atomicModifyIORef')
+import qualified Bit.Internal.Metadata as Metadata
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -79,7 +80,7 @@ data FileTransport = FileTransport
 -- | Build a cloud transport that uses rclone to copy files.
 mkCloudTransport :: Remote -> FileTransport
 mkCloudTransport remote = FileTransport
-  { transportDownloadFile = \cwd filePath _progress -> downloadOrCopyFromIndex cwd remote filePath
+  { transportDownloadFile = \cwd filePath progress -> downloadOrCopyFromIndex cwd remote filePath progress
   , transportSyncAllFiles = \cwd -> do
       -- Cloud path uses the existing syncRemoteFilesToLocal logic
       -- which scans remote via rclone and syncs to local.
@@ -91,16 +92,22 @@ mkCloudTransport remote = FileTransport
           if null actions
             then putStrLn "Working tree already up to date with remote."
             else do
-              -- Create progress tracker for cloud operations (file-count only)
+              -- Gather file sizes from index metadata for byte-level progress
+              sizes <- forM actions $ \a -> case a of
+                  Copy _ dest -> getFileSizeFromIndex cwd (unPath dest)
+                  Move src _  -> getFileSizeFromIndex cwd (unPath src)
+                  _           -> pure 0
+              let totalBytes = sum sizes
+
+              -- Create progress tracker with byte totals
               progress <- CopyProgress.newSyncProgress (length actions)
+              writeIORef (CopyProgress.spBytesTotal progress) totalBytes
               CopyProgress.withSyncProgressReporter progress $ do
                 -- Use lower concurrency for network/subprocess operations
                 caps <- getNumCapabilities
                 let concurrency = min 8 (max 2 (caps * 2))
-                void $ runConcurrentlyBounded concurrency (\a -> do
-                  executePullCommand cwd remote a
-                  CopyProgress.incrementFilesComplete progress
-                  ) actions
+                void $ runConcurrentlyBounded concurrency
+                  (executePullCommand cwd remote progress) actions
           ) remoteResult
   }
 
@@ -151,16 +158,16 @@ applyMergeToWorkingDir transport cwd oldHead = do
                     if fromIndex
                         then pure (filePath, True, (0 :: Integer))
                         else do
-                            -- Binary file: try to get size for progress
-                            -- (size might not be available yet, that's ok)
-                            let _destPath = cwd </> filePath
-                            pure (filePath, False, 0)  -- Size will be tracked during copy
+                            size <- getFileSizeFromIndex cwd filePath
+                            pure (filePath, False, size)
                 
                 let binaryFiles = [(p, s) | (p, False, s) <- fileInfo]
                     totalFiles = length binaryFiles
-                
+                    totalBytes = sum [s | (_, s) <- binaryFiles]
+
                 -- Create progress tracker
                 progress <- CopyProgress.newSyncProgress totalFiles
+                writeIORef (CopyProgress.spBytesTotal progress) totalBytes
                 
                 -- Second pass: apply changes with progress (parallelized)
                 CopyProgress.withSyncProgressReporter progress $ do
@@ -180,9 +187,9 @@ applyMergeToWorkingDir transport cwd oldHead = do
         ) newHead
 
 -- | Download a file from remote, or copy from index if it's a text file.
--- Used by cloud transport.
-downloadOrCopyFromIndex :: FilePath -> Remote -> FilePath -> IO ()
-downloadOrCopyFromIndex cwd remote filePath = do
+-- Used by cloud transport. Updates progress counters after download.
+downloadOrCopyFromIndex :: FilePath -> Remote -> FilePath -> SyncProgress -> IO ()
+downloadOrCopyFromIndex cwd remote filePath progress = do
     fromIndex <- isTextFileInIndex cwd filePath
     if fromIndex
         then copyFromIndexToWorkTree cwd filePath
@@ -190,6 +197,11 @@ downloadOrCopyFromIndex cwd remote filePath = do
             let localPath = cwd </> filePath
             createDirectoryIfMissing True (takeDirectory localPath)
             void $ Transport.copyFromRemote remote (toPosix filePath) (toPosix localPath)
+            exists <- Dir.doesFileExist localPath
+            when exists $ do
+                size <- Dir.getFileSize localPath
+                atomicModifyIORef' (CopyProgress.spBytesCopied progress) (\n -> (n + fromIntegral size, ()))
+            CopyProgress.incrementFilesComplete progress
 
 -- | Download a file from remote or copy from index for filesystem pull.
 -- Parameter order: localRoot, remotePath, filePath (relative), progress.
@@ -454,6 +466,14 @@ isTextMetadataFile metaPath = do
         let content = either (const "") T.unpack (decodeUtf8' bs)
         pure $ not (any ("hash: " `isPrefixOf`) (lines content))
 
+-- | Read a binary file's size from its index metadata.
+-- Returns 0 for text files or if metadata is missing/unparseable.
+getFileSizeFromIndex :: FilePath -> FilePath -> IO Integer
+getFileSizeFromIndex localRoot filePath = do
+    let metaPath = localRoot </> bitIndexPath </> filePath
+    result <- Metadata.parseMetadataFile metaPath
+    pure $ maybe 0 Metadata.metaSize result
+
 -- | Sync binaries after a successful merge commit
 syncBinariesAfterMerge :: FileTransport -> Remote -> Maybe String -> BitM ()
 syncBinariesAfterMerge transport _remote oldHead = do
@@ -481,8 +501,9 @@ executeCommand localRoot remote action = case action of
 
 -- | Execute a single pull action: copy from remote to local or delete local file.
 -- Text files are already in the git bundle (index); copy from index to work dir instead of rclone.
-executePullCommand :: FilePath -> Remote -> RcloneAction -> IO ()
-executePullCommand localRoot remote action = case action of
+-- Updates progress counters (bytes + files) after each copy.
+executePullCommand :: FilePath -> Remote -> SyncProgress -> RcloneAction -> IO ()
+executePullCommand localRoot remote progress action = case action of
         Copy _src dest -> do
             fromIndex <- isTextFileInIndex localRoot (unPath dest)
             if fromIndex
@@ -491,6 +512,11 @@ executePullCommand localRoot remote action = case action of
                 let localPath = toPosix (localRoot </> unPath dest)
                 createDirectoryIfMissing True (takeDirectory (localRoot </> unPath dest))
                 void $ Transport.copyFromRemote remote (toPosix (unPath dest)) localPath
+                exists <- Dir.doesFileExist (localRoot </> unPath dest)
+                when exists $ do
+                    size <- Dir.getFileSize (localRoot </> unPath dest)
+                    atomicModifyIORef' (CopyProgress.spBytesCopied progress) (\n -> (n + fromIntegral size, ()))
+            CopyProgress.incrementFilesComplete progress
         Move src dest -> do
             fromIndex <- isTextFileInIndex localRoot (unPath src)
             if fromIndex
@@ -499,9 +525,14 @@ executePullCommand localRoot remote action = case action of
                 let localSrcPath = localRoot </> unPath src
                 createDirectoryIfMissing True (takeDirectory localSrcPath)
                 void $ Transport.copyFromRemote remote (toPosix (unPath src)) (toPosix localSrcPath)
+                exists <- Dir.doesFileExist localSrcPath
+                when exists $ do
+                    size <- Dir.getFileSize localSrcPath
+                    atomicModifyIORef' (CopyProgress.spBytesCopied progress) (\n -> (n + fromIntegral size, ()))
             let localDestPath = localRoot </> unPath dest
-            exists <- Dir.doesFileExist localDestPath
-            when exists $ Dir.removeFile localDestPath
+            destExists <- Dir.doesFileExist localDestPath
+            when destExists $ Dir.removeFile localDestPath
+            CopyProgress.incrementFilesComplete progress
         Delete filePath -> do
             let localPath = localRoot </> unPath filePath
             exists <- Dir.doesFileExist localPath

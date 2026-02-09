@@ -98,7 +98,7 @@ copyFileChunked src dest _expectedSize bytesRef = do
 withSyncProgressReporter :: SyncProgress -> IO a -> IO a
 withSyncProgressReporter progress action = do
     isTTY <- hIsTerminalDevice stderr
-    let shouldShowProgress = isTTY && spFilesTotal progress > 5
+    let shouldShowProgress = isTTY && spFilesTotal progress > 0
     if shouldShowProgress
         then do
             reporterThread <- forkIO (syncProgressLoop progress)
@@ -125,15 +125,18 @@ syncProgressLoop progress = go
         totalBytes <- readIORef (spBytesTotal progress)
         _currentFile <- readIORef (spCurrentFile progress)
         
-        let filesPct = if spFilesTotal progress > 0
+        -- Use bytes for percentage when available, fall back to file count
+        let pct = if totalBytes > 0
+                  then fromIntegral ((bytesCopied * 100) `div` totalBytes) :: Int
+                  else if spFilesTotal progress > 0
                        then (filesCompleted * 100) `div` spFilesTotal progress
                        else 0
-        
+
         -- Show aggregate progress
-        let progressLine = "Syncing files: " ++ show filesCompleted ++ "/" ++ show (spFilesTotal progress) 
+        let progressLine = "Syncing files: " ++ show filesCompleted ++ "/" ++ show (spFilesTotal progress)
                          ++ " files, " ++ formatBytes bytesCopied
                          ++ if totalBytes > 0
-                            then " / " ++ formatBytes totalBytes ++ " (" ++ show filesPct ++ "%)"
+                            then " / " ++ formatBytes totalBytes ++ " (" ++ show pct ++ "%)"
                             else ""
         
         reportProgress progressLine
