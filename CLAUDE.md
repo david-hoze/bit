@@ -33,6 +33,7 @@ Consult these docs when modifying `.hs` files:
 - Never call `git` via `rawSystem` or `readProcessWithExitCode` outside `Internal/Git.hs`
 - Never call `rclone` outside `Internal/Rclone.hs`
 - Use `Git.runGitRaw`, `Git.runGitRawAt`, or `Git.runGitAt` instead
+- `.bit/index/` files are mutable working state — every scan overwrites them. To read what the user **committed**, use git (`git diff`, `git show HEAD:<path>`), not the filesystem files.
 
 ### Key Project Types
 - `BitM` = `ReaderT BitEnv IO` — main monad
