@@ -61,25 +61,38 @@ run = do
             , "  branch --unset-upstream        Unset upstream tracking"
             , ""
             , "Remote-targeted commands:"
-            , "  @<remote> init                 Scan remote and build metadata workspace"
-            , "  @<remote> add <path>           Stage files in remote workspace"
-            , "  @<remote> commit -m <msg>      Commit and push metadata bundle to remote"
-            , "  @<remote> status               Show remote workspace status"
-            , "  @<remote> log                  Show remote workspace history"
+            , "  --remote <name> <cmd>          Target a remote workspace (portable)"
+            , "  @<remote> <cmd>                Shorthand (needs quoting in PowerShell)"
+            , ""
+            , "  Supported: init, add <path>, commit -m <msg>, status, log"
             ]
-        _  -> do
-            -- Check for @<remote> prefix
-            let (mRemoteTarget, remainingArgs) = extractRemoteTarget args
-            case mRemoteTarget of
-                Nothing -> runCommand remainingArgs       -- normal local execution
-                Just remoteName -> runRemoteCommand remoteName remainingArgs
+        _  -> case extractRemoteTarget args of
+            RemoteError msg -> do
+                hPutStrLn stderr $ "fatal: " ++ msg
+                exitWith (ExitFailure 1)
+            NoRemote remaining -> runCommand remaining
+            RemoteFound remoteName remaining ->
+                runRemoteCommand remoteName remaining
 
--- | Extract @<remote> from args. Returns (Just remoteName, rest) or (Nothing, args).
-extractRemoteTarget :: [String] -> (Maybe String, [String])
-extractRemoteTarget [] = (Nothing, [])
-extractRemoteTarget (arg:rest)
-    | ('@':remoteName@(_:_)) <- arg = (Just remoteName, rest)
-    | otherwise = (Nothing, arg:rest)
+-- | Result of extracting a remote target from CLI args.
+data RemoteExtract
+    = NoRemote [String]            -- ^ No remote specified; remaining args
+    | RemoteFound String [String]  -- ^ Remote name + remaining args
+    | RemoteError String           -- ^ Error message
+
+-- | Extract @<remote> or --remote <name> from the leading args.
+-- Both forms must appear at the start of the arg list, consistent with
+-- each other and avoiding conflicts with subcommand flags (e.g. verify --remote).
+extractRemoteTarget :: [String] -> RemoteExtract
+extractRemoteTarget [] = NoRemote []
+extractRemoteTarget (('@':name@(_:_)):rest)
+    | "--remote" `elem` rest = RemoteError
+        "Cannot use both @<remote> and --remote <name>."
+    | otherwise = RemoteFound name rest
+extractRemoteTarget ("--remote":name:rest) = RemoteFound name rest
+extractRemoteTarget ["--remote"] = RemoteError
+    "'--remote' requires a remote name argument."
+extractRemoteTarget args = NoRemote args
 
 -- | Execute a command in the context of a remote workspace
 runRemoteCommand :: String -> [String] -> IO ()
@@ -107,7 +120,7 @@ runRemoteCommand remoteName args = do
                     -- Stage files in the remote workspace git repo
                     wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
                     unless wsExists $ do
-                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit @" ++ remoteName ++ " init' first."
+                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit --remote " ++ remoteName ++ " init' first."
                         exitWith (ExitFailure 1)
                     -- git add in the workspace
                     code <- rawSystem "git" (["-C", wsPath, "add"] ++ paths)
@@ -116,7 +129,7 @@ runRemoteCommand remoteName args = do
                 ("commit":commitArgs) -> do
                     wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
                     unless wsExists $ do
-                        hPutStrLn stderr $ "fatal: remote workspace not initialized."
+                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit --remote " ++ remoteName ++ " init' first."
                         exitWith (ExitFailure 1)
                     -- git commit in the workspace
                     code <- rawSystem "git" (["-C", wsPath, "commit"] ++ commitArgs)
@@ -137,14 +150,14 @@ runRemoteCommand remoteName args = do
                 ("status":rest) -> do
                     wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
                     unless wsExists $ do
-                        hPutStrLn stderr $ "fatal: remote workspace not initialized."
+                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit --remote " ++ remoteName ++ " init' first."
                         exitWith (ExitFailure 1)
                     void $ rawSystem "git" (["-C", wsPath, "status"] ++ rest)
 
                 ("log":rest) -> do
                     wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
                     unless wsExists $ do
-                        hPutStrLn stderr $ "fatal: remote workspace not initialized."
+                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit --remote " ++ remoteName ++ " init' first."
                         exitWith (ExitFailure 1)
                     void $ rawSystem "git" (["-C", wsPath, "log"] ++ rest)
 

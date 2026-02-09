@@ -358,11 +358,12 @@ past the merge).
 | `bit merge --continue` | `git merge --continue` | Continue after conflict resolution |
 | `bit merge --abort` | `git merge --abort` | Abort current merge |
 | `bit branch --unset-upstream` | `git branch --unset-upstream` | Remove tracking config |
-| `bit @<remote> init` | — | Scan remote and build metadata workspace |
-| `bit @<remote> add <path>` | — | Stage files in remote workspace |
-| `bit @<remote> commit -m <msg>` | — | Commit and push metadata bundle to remote |
-| `bit @<remote> status` | — | Show remote workspace status |
-| `bit @<remote> log` | — | Show remote workspace history |
+| `bit --remote <name> init` | — | Scan remote and build metadata workspace |
+| `bit --remote <name> add <path>` | — | Stage files in remote workspace |
+| `bit --remote <name> commit -m <msg>` | — | Commit and push metadata bundle to remote |
+| `bit --remote <name> status` | — | Show remote workspace status |
+| `bit --remote <name> log` | — | Show remote workspace history |
+| `bit @<remote> <cmd>` | — | Shorthand for `--remote` (needs quoting in PowerShell) |
 
 ---
 
@@ -536,7 +537,7 @@ The correct approach: Have the remote **fetch** from local, then **merge --ff-on
 
 ---
 
-## Remote-Targeted Commands (`@<remote>` Syntax)
+## Remote-Targeted Commands (`@<remote>` / `--remote <name>`)
 
 ### Problem Statement
 
@@ -549,7 +550,22 @@ This is wasteful when the files are already at the destination. The user wants t
 
 ### Solution: Remote Workspaces
 
-The `@<remote>` syntax allows commands to operate against a remote as if it were a working directory, while only downloading small files (for text classification). Large binary files stay on the remote — bit just reads their hashes from `rclone lsjson --hash`.
+The `--remote <name>` flag (or its `@<remote>` shorthand) allows commands to operate against a remote as if it were a working directory, while only downloading small files (for text classification). Large binary files stay on the remote — bit just reads their hashes from `rclone lsjson --hash`.
+
+### The `--remote` Flag
+
+Two equivalent syntaxes exist for specifying a remote target:
+
+```bash
+bit --remote origin init      # portable — works in all shells
+bit @origin init              # shorthand — needs quoting in PowerShell
+```
+
+**Why `--remote` exists**: The `@<remote>` prefix doesn't work in PowerShell because `@` is the splatting operator. PowerShell interprets `@gdrive` as splatting the variable `$gdrive`, which is undefined, so the argument is silently dropped. `--remote <name>` is the portable alternative that works everywhere.
+
+**Placement**: Both `--remote <name>` and `@<remote>` must appear as the first argument(s) to `bit`. This is consistent between the two forms and avoids ambiguity with subcommand flags (e.g., `bit verify --remote` uses `--remote` as a boolean flag for the `verify` command, not as a remote target).
+
+**`--remote` is recommended** for scripts and cross-shell compatibility. `@<remote>` remains available as a convenient shorthand for interactive use in bash/zsh/cmd.
 
 ### User Workflow
 
@@ -558,9 +574,9 @@ The `@<remote>` syntax allows commands to operate against a remote as if it were
 bit init                                    # local repo (empty working dir)
 bit remote add origin gdrive:Projects/footage
 
-bit @origin init                            # scan remote, build metadata workspace
-bit @origin add .                           # stage all files
-bit @origin commit -m "Initial commit"      # commit metadata, push bundle to remote
+bit --remote origin init                    # scan remote, build metadata workspace
+bit --remote origin add .                   # stage all files
+bit --remote origin commit -m "Initial commit"  # commit metadata, push bundle to remote
 
 bit pull                                    # pull metadata locally (instant — just the bundle)
 # Working dir is still empty, but bit knows about all 847 files
@@ -569,11 +585,11 @@ bit pull                                    # pull metadata locally (instant —
 
 ### Architecture
 
-#### The `@<remote>` Prefix
+#### The `@<remote>` / `--remote <name>` Prefix
 
-`@<remote>` is parsed in `Commands.hs` before command dispatch. When present, it switches the execution context from "local working directory" to "remote-targeted workspace."
+Both forms are parsed in `Commands.hs` by `extractRemoteTarget` before command dispatch. When present, it switches the execution context from "local working directory" to "remote-targeted workspace."
 
-The remote name after `@` is resolved via the existing `resolveRemote` function, same as named remotes for push/pull.
+The remote name is resolved via the existing `resolveRemote` function, same as named remotes for push/pull.
 
 #### Remote Workspace Structure
 
@@ -606,17 +622,19 @@ For a typical 10GB media repo, this downloads maybe 50KB of text files while ski
 
 | Command | Behavior |
 |---------|----------|
-| `bit @<remote> init` | Scan remote, classify files, build metadata workspace |
-| `bit @<remote> add <path>` | Stage files in remote workspace (git add in workspace) |
-| `bit @<remote> commit -m <msg>` | Commit workspace metadata, create bundle, push to remote |
-| `bit @<remote> status` | Show remote workspace status (git status in workspace) |
-| `bit @<remote> log` | Show remote workspace history (git log in workspace) |
+| `bit --remote <name> init` | Scan remote, classify files, build metadata workspace |
+| `bit --remote <name> add <path>` | Stage files in remote workspace (git add in workspace) |
+| `bit --remote <name> commit -m <msg>` | Commit workspace metadata, create bundle, push to remote |
+| `bit --remote <name> status` | Show remote workspace status (git status in workspace) |
+| `bit --remote <name> log` | Show remote workspace history (git log in workspace) |
 
-All other commands are not supported in remote context (e.g., `bit @origin push` will error).
+The `@<remote>` shorthand is equivalent (e.g., `bit @origin init`).
+
+All other commands are not supported in remote context (e.g., `bit --remote origin push` will error).
 
 ### Implementation Details
 
-#### 1. `bit @origin init`
+#### 1. `bit --remote origin init` (or `bit @origin init`)
 
 Located in `Bit.RemoteWorkspace.initRemoteWorkspace`:
 
@@ -629,14 +647,14 @@ Located in `Bit.RemoteWorkspace.initRemoteWorkspace`:
 7. For binary files: writes hash+size metadata
 8. Initializes a git repo in the workspace (`git init --initial-branch=main`)
 
-#### 2. `bit @origin add/commit/status/log`
+#### 2. `bit --remote origin add/commit/status/log`
 
 These commands operate on the remote workspace git repository:
 
-- `bit @origin add .` → `git -C .bit/remote-workspaces/origin add .`
-- `bit @origin commit -m "msg"` → `git -C .bit/remote-workspaces/origin commit -m "msg"` + create bundle + push to remote
-- `bit @origin status` → `git -C .bit/remote-workspaces/origin status`
-- `bit @origin log` → `git -C .bit/remote-workspaces/origin log`
+- `bit --remote origin add .` → `git -C .bit/remote-workspaces/origin add .`
+- `bit --remote origin commit -m "msg"` → `git -C .bit/remote-workspaces/origin commit -m "msg"` + create bundle + push to remote
+- `bit --remote origin status` → `git -C .bit/remote-workspaces/origin status`
+- `bit --remote origin log` → `git -C .bit/remote-workspaces/origin log`
 
 On commit, the workspace commits its metadata, then:
 1. Creates a git bundle at `.bit/remote-workspaces/origin/.git/bit.bundle`
@@ -647,7 +665,7 @@ The remote now has a `.bit/bit.bundle` that can be fetched via normal `bit pull`
 
 ### Integration with Normal Pull
 
-After `bit @origin commit`, the remote has a bundle at `.bit/bit.bundle`. A local `bit pull` will:
+After `bit --remote origin commit`, the remote has a bundle at `.bit/bit.bundle`. A local `bit pull` will:
 1. Fetch the bundle (existing `fetchBundle` logic)
 2. Import it to local `.bit/index/.git/`
 3. Merge the metadata
@@ -660,16 +678,19 @@ The existing pull flow handles this transparently.
 - **Workspace already exists**: Error with instructions (delete workspace or use `status`)
 - **Remote is empty**: `fetchRemoteFiles` returns `[]`, workspace created but empty
 - **Network failure during classification**: Failed downloads treated as binary, warning printed
-- **Filesystem remotes**: `@<remote>` works for filesystem remotes too, though less useful (user could just `cd` there)
-- **Multiple `@origin init` calls**: Error on second call, user must delete workspace first
+- **Filesystem remotes**: `--remote <name>` works for filesystem remotes too, though less useful (user could just `cd` there)
+- **Multiple `--remote origin init` calls**: Error on second call, user must delete workspace first
+- **Both `@<remote>` and `--remote` specified**: Error with clear message
+- **`--remote` without argument**: Error explaining that a name is required
 
 ### Limitations
 
 This feature does NOT provide:
 - **Selective file download** — that's a separate feature (sparse working tree). After `bit pull`, all files are expected locally.
-- **Incremental remote re-scan** — `bit @origin init` always scans from scratch.
-- **`bit @origin push`** — pushing *to* a remote workspace doesn't make sense. Push targets the actual remote.
+- **Incremental remote re-scan** — `bit --remote origin init` always scans from scratch.
+- **`bit --remote origin push`** — pushing *to* a remote workspace doesn't make sense. Push targets the actual remote.
 - **Conflict resolution in remote context** — not needed. The workspace is single-writer (the local user).
+- **`--remote` after the subcommand** — `--remote <name>` must appear before the subcommand (first args). This avoids ambiguity with subcommand flags like `bit verify --remote`.
 
 ---
 

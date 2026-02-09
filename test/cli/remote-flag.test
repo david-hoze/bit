@@ -1,0 +1,163 @@
+# =============================================================================
+# --remote Flag Test
+#
+# Tests the --remote <name> flag as a portable alternative to @<remote> syntax.
+# Verifies equivalence with @<remote> for all remote workspace commands, and
+# tests error handling for misuse.
+# Prerequisites: filesystem remote support
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\work_rflag_a 2>nul & rmdir /s /q test\cli\fs_remote_rflag 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP - Create a filesystem remote with test files
+# ======================================================================
+
+# ---- Create remote directory with test files ----
+mkdir test\cli\fs_remote_rflag
+<<<
+>>>
+>>>= 0
+
+echo Text file 1 > test\cli\fs_remote_rflag\file1.txt
+<<<
+>>>
+>>>= 0
+
+echo Binary content > test\cli\fs_remote_rflag\data.bin
+<<<
+>>>
+>>>= 0
+
+mkdir test\cli\fs_remote_rflag\subdir
+<<<
+>>>
+>>>= 0
+
+echo Subdir text > test\cli\fs_remote_rflag\subdir\file2.txt
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 2: INIT LOCAL REPO AND ADD REMOTE
+# ======================================================================
+
+mkdir test\cli\work_rflag_a
+<<<
+>>>
+>>>= 0
+
+cd test\cli\work_rflag_a & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\work_rflag_a & bit remote add origin ..\fs_remote_rflag
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: TEST --remote <name> init
+# ======================================================================
+
+# ---- --remote origin init should scan the remote ----
+cd test\cli\work_rflag_a & bit --remote origin init
+<<<
+>>> /Scanning remote/
+>>>= 0
+
+# ---- Verify workspace was created ----
+cd test\cli\work_rflag_a & if exist .bit\remote-workspaces\origin\.git echo workspace exists
+<<<
+>>>
+workspace exists
+>>>= 0
+
+# ======================================================================
+# SECTION 4: TEST --remote <name> add
+# ======================================================================
+
+# ---- Stage all files in remote workspace ----
+cd test\cli\work_rflag_a & bit --remote origin add .
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 5: TEST --remote <name> status
+# ======================================================================
+
+cd test\cli\work_rflag_a & bit --remote origin status
+<<<
+>>> /Changes to be committed|new file/
+>>>= 0
+
+# ======================================================================
+# SECTION 6: TEST --remote <name> commit
+# ======================================================================
+
+cd test\cli\work_rflag_a & bit --remote origin commit -m "Commit via --remote flag"
+<<<
+>>> /Pushing.*bundle|Remote is now a bit repository/
+>>>= 0
+
+# ---- Verify bundle was created on remote ----
+cd test\cli\work_rflag_a & if exist ..\fs_remote_rflag\.bit\bit.bundle echo bundle exists
+<<<
+>>>
+bundle exists
+>>>= 0
+
+# ======================================================================
+# SECTION 7: TEST --remote <name> log
+# ======================================================================
+
+cd test\cli\work_rflag_a & bit --remote origin log --oneline
+<<<
+>>> /Commit via --remote flag/
+>>>= 0
+
+# ======================================================================
+# SECTION 8: ERROR CASES
+# ======================================================================
+
+# ---- --remote without argument ----
+cd test\cli\work_rflag_a & bit --remote
+<<<
+>>>2 /requires a remote name argument/
+>>>= 1
+
+# ---- --remote with non-existent remote ----
+cd test\cli\work_rflag_a & bit --remote fake init
+<<<
+>>>2 /remote.*not found/
+>>>= 1
+
+# ---- Unsupported command in remote context ----
+cd test\cli\work_rflag_a & bit --remote origin push
+<<<
+>>>2 /not supported in remote context/
+>>>= 1
+
+# ---- verify --remote should still work (not confused with --remote flag) ----
+cd test\cli\work_rflag_a & bit verify --remote
+<<<
+>>> /Fetching remote metadata|Scanning remote|Checked/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\work_rflag_a 2>nul & rmdir /s /q test\cli\fs_remote_rflag 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
