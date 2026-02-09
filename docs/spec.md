@@ -361,7 +361,7 @@ past the merge).
 | `bit --remote <name> init` | — | Create empty bundle on remote (ephemeral) |
 | `bit --remote <name> add <path>` | — | Scan remote, write metadata, auto-commit, push bundle (ephemeral) |
 | `bit --remote <name> commit -m <msg>` | — | Commit in ephemeral workspace and push bundle |
-| `bit --remote <name> status` | — | Show remote workspace status (read-only, ephemeral) |
+| `bit --remote <name> status` | — | Scan remote and show status including untracked files (read-only, ephemeral) |
 | `bit --remote <name> log` | — | Show remote workspace history (read-only, ephemeral) |
 | `bit @<remote> <cmd>` | — | Shorthand for `--remote` (needs quoting in PowerShell) |
 
@@ -654,7 +654,7 @@ For a typical 10GB media repo, this downloads maybe 50KB of text files while ski
 | `bit --remote <name> init` | Create empty bundle on remote (no scan — just initializes history) |
 | `bit --remote <name> add <path>` | Fetch bundle → scan remote → classify files → write metadata → auto-commit → push bundle |
 | `bit --remote <name> commit <args>` | Fetch bundle → commit with provided args → push bundle (useful for amending) |
-| `bit --remote <name> status` | Fetch bundle → show git status (read-only, no push) |
+| `bit --remote <name> status` | Fetch bundle → scan remote → write metadata → show git status (read-only, no push). Shows untracked files that exist on remote but aren't committed. |
 | `bit --remote <name> log` | Fetch bundle → show git log (read-only, no push) |
 
 The `@<remote>` shorthand is equivalent (e.g., `bit @origin init`).
@@ -703,9 +703,13 @@ The scan+classify+write step happens on **every** `add` call — the workspace s
 
 Uses `withRemoteWorkspace` (read-write). Passes args through to `git commit` in the ephemeral workspace. Useful for amending the last commit message (`--amend -m "Better message"`).
 
-#### 4. `bit --remote origin status` / `log`
+#### 4. `bit --remote origin status`
 
-Uses `withRemoteWorkspaceReadOnly`. Passes args through to `git status` / `git log` in the ephemeral workspace. No changes are pushed back.
+Uses `withRemoteWorkspaceReadOnly`. Scans the remote via `scanAndWriteMetadata` (same as `add`) to detect untracked files, then runs `git status`. After writing metadata, runs `git add -u && git reset HEAD` to update index stat info without staging changes (prevents false "modified" reports due to stat-dirty optimization). No changes are pushed back.
+
+#### 5. `bit --remote origin log`
+
+Uses `withRemoteWorkspaceReadOnly`. Passes args through to `git log` in the ephemeral workspace. No changes are pushed back.
 
 ### Integration with Normal Pull
 

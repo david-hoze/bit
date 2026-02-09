@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cabal install)",
+      "Bash(cabal install:*)",
+      "Bash(bit --remote:*)",
+      "Bash(shelltest test:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(rclone lsjson:*)"
+    ]
+  }
+}

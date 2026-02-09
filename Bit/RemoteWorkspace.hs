@@ -29,7 +29,7 @@ import System.Directory
     , removeFile
     )
 import System.Exit (ExitCode(..), exitWith)
-import System.IO (hPutStrLn, stderr)
+import System.IO (hPutStrLn, stderr, stdout, hFlush)
 import System.Process (rawSystem)
 import qualified Internal.Git as Git
 import Control.Monad (when, unless, forM, forM_, void)
@@ -367,10 +367,21 @@ commitRemote remote commitArgs =
         rawSystem "git" (["-C", wsPath, "commit"] ++ commitArgs)
 
 -- | Show status of remote workspace (read-only).
+-- Scans the remote to detect untracked files, then runs git status.
 statusRemote :: Remote -> [String] -> IO ExitCode
 statusRemote remote rest =
-    withRemoteWorkspaceReadOnly remote $ \wsPath ->
-        rawSystem "git" (["-C", wsPath, "status"] ++ rest)
+    withRemoteWorkspaceReadOnly remote $ \wsPath -> do
+        -- Scan remote and write metadata so git can detect untracked files
+        ok <- scanAndWriteMetadata remote wsPath
+        hFlush stdout  -- Ensure scan output appears before git status
+        if ok
+            then do
+                -- Update index to match working tree after writing files
+                -- This ensures stat info matches and content-identical files show as clean
+                void $ Git.runGitAt wsPath ["add", "-u"]
+                void $ Git.runGitAt wsPath ["reset", "HEAD"]
+                rawSystem "git" (["-C", wsPath, "status"] ++ rest)
+            else pure (ExitFailure 1)
 
 -- | Show log of remote workspace (read-only).
 logRemote :: Remote -> [String] -> IO ExitCode

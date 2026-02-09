@@ -99,12 +99,12 @@ cd test\cli\output\work_rflag_a & bit --remote origin add .
 >>>= 0
 
 # ======================================================================
-# SECTION 5: TEST --remote <name> status (should be clean after add)
+# SECTION 5: TEST --remote <name> status (scans remote and shows status)
 # ======================================================================
 
 cd test\cli\output\work_rflag_a & bit --remote origin status
 <<<
->>> /nothing to commit|working tree clean/
+>>> /Scanning remote|On branch main/
 >>>= 0
 
 # ======================================================================
