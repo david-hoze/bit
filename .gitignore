@@ -17,16 +17,7 @@ dist-newstyle/
 *.tmp
 
 # CLI test work directories
-test/cli/work/
-test/cli/work_a/
-test/cli/work_b/
-test/cli/shared_remote/
-test/cli/work_direct/
-test/cli/fs_remote/
-test/cli/fs_remote_direct/
-test/cli/work_norepo/
-test/cli/remote_mirror/
-test/cli/device_prompt_remote/
+test/cli/output/
 
 # Test report
 test.txt

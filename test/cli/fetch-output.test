@@ -9,7 +9,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\work_fetch_a 2>nul & rmdir /s /q test\cli\work_fetch_b 2>nul & rclone purge gdrive-test:bit-test-fetch 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_fetch_a 2>nul & rmdir /s /q test\cli\output\work_fetch_b 2>nul & rclone purge gdrive-test:bit-test-fetch 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -19,12 +19,12 @@ cleanup done
 # SETUP
 # ======================================================================
 
-mkdir test\cli\work_fetch_a
+mkdir test\cli\output\work_fetch_a
 <<<
 >>>
 >>>= 0
 
-mkdir test\cli\work_fetch_b
+mkdir test\cli\output\work_fetch_b
 <<<
 >>>
 >>>= 0
@@ -35,22 +35,22 @@ rclone mkdir gdrive-test:bit-test-fetch
 >>>= 0
 
 # ---- Repo A: init, add remote, create initial file ----
-cd test\cli\work_fetch_a & bit init
+cd test\cli\output\work_fetch_a & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work_fetch_a & bit remote add origin gdrive-test:bit-test-fetch
+cd test\cli\output\work_fetch_a & bit remote add origin gdrive-test:bit-test-fetch
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\work_fetch_a & echo initial> file1.txt & bit add file1.txt & bit commit -m "Initial commit"
+cd test\cli\output\work_fetch_a & echo initial> file1.txt & bit add file1.txt & bit commit -m "Initial commit"
 <<<
 >>> /\[master|main|file changed/
 >>>= 0
 
-cd test\cli\work_fetch_a & bit push
+cd test\cli\output\work_fetch_a & bit push
 <<<
 >>> /Metadata push complete\.|Remote check passed/
 >>>= 0
@@ -59,18 +59,18 @@ cd test\cli\work_fetch_a & bit push
 # TEST CASE 1: FetchedFirst - First fetch should show output
 # ======================================================================
 
-cd test\cli\work_fetch_b & bit init
+cd test\cli\output\work_fetch_b & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work_fetch_b & bit remote add origin gdrive-test:bit-test-fetch
+cd test\cli\output\work_fetch_b & bit remote add origin gdrive-test:bit-test-fetch
 <<<
 >>> /Remote.*added/
 >>>= 0
 
 # ---- First fetch: should show "Fetched: <hash>" and "From <remote>" ----
-cd test\cli\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b & bit fetch
 <<<
 >>> /Scanning remote|Fetched:|Fetch complete/
 >>>2 /From gdrive-test:bit-test-fetch|new branch.*origin\/main/
@@ -81,13 +81,13 @@ cd test\cli\work_fetch_b & bit fetch
 # ======================================================================
 
 # ---- Second fetch with no changes: should be silent (UpToDate) ----
-cd test\cli\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b & bit fetch
 <<<
 >>>
 >>>= 0
 
 # ---- Third fetch still silent ----
-cd test\cli\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b & bit fetch
 <<<
 >>>
 >>>= 0
@@ -97,24 +97,24 @@ cd test\cli\work_fetch_b & bit fetch
 # ======================================================================
 
 # ---- A: make a change and push ----
-cd test\cli\work_fetch_a & echo updated> file2.txt & bit add file2.txt & bit commit -m "Second commit"
+cd test\cli\output\work_fetch_a & echo updated> file2.txt & bit add file2.txt & bit commit -m "Second commit"
 <<<
 >>> /\[master|main|file changed/
 >>>= 0
 
-cd test\cli\work_fetch_a & bit push
+cd test\cli\output\work_fetch_a & bit push
 <<<
 >>> /Metadata push complete\.|Remote check passed/
 >>>= 0
 
 # ---- B: fetch should show "Updated: <old> -> <new>" ----
-cd test\cli\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b & bit fetch
 <<<
 >>> /Scanning remote|Updated:|Fetch complete/
 >>>= 0
 
 # ---- B: fetch again should be silent (UpToDate) ----
-cd test\cli\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b & bit fetch
 <<<
 >>>
 >>>= 0
@@ -123,7 +123,7 @@ cd test\cli\work_fetch_b & bit fetch
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_fetch_a 2>nul & rmdir /s /q test\cli\work_fetch_b 2>nul & rclone purge gdrive-test:bit-test-fetch 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_fetch_a 2>nul & rmdir /s /q test\cli\output\work_fetch_b 2>nul & rclone purge gdrive-test:bit-test-fetch 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done

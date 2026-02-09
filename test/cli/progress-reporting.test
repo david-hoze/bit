@@ -7,7 +7,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\work_progress_a 2>nul & rmdir /s /q test\cli\work_progress_b 2>nul & rmdir /s /q test\cli\fs_remote_progress 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_progress_a 2>nul & rmdir /s /q test\cli\output\work_progress_b 2>nul & rmdir /s /q test\cli\output\fs_remote_progress 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -17,19 +17,19 @@ cleanup done
 # SETUP
 # ======================================================================
 
-mkdir test\cli\work_progress_a & mkdir test\cli\work_progress_b & mkdir test\cli\fs_remote_progress
+mkdir test\cli\output\work_progress_a & mkdir test\cli\output\work_progress_b & mkdir test\cli\output\fs_remote_progress
 <<<
 >>>
 >>>= 0
 
 # Initialize local repo A
-cd test\cli\work_progress_a & bit init
+cd test\cli\output\work_progress_a & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Add filesystem remote
-cd test\cli\work_progress_a & bit remote add origin ..\fs_remote_progress
+cd test\cli\output\work_progress_a & bit remote add origin ..\fs_remote_progress
 <<<
 >>> /Remote 'origin' added/
 >>>= 0
@@ -39,19 +39,19 @@ cd test\cli\work_progress_a & bit remote add origin ..\fs_remote_progress
 # ======================================================================
 
 # Create several binary-like files (>1MB to trigger chunked copy)
-cd test\cli\work_progress_a & echo binary content> data1.bin & echo binary content> data2.bin & echo binary content> data3.bin & bit add . & bit commit -m "Add binary files"
+cd test\cli\output\work_progress_a & echo binary content> data1.bin & echo binary content> data2.bin & echo binary content> data3.bin & bit add . & bit commit -m "Add binary files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
 # ---- First push: sync all files ----
-cd test\cli\work_progress_a & bit push
+cd test\cli\output\work_progress_a & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
 # Verify files copied to remote
-if exist "test\cli\fs_remote_progress\data1.bin" (echo files exist) else (echo missing)
+if exist "test\cli\output\fs_remote_progress\data1.bin" (echo files exist) else (echo missing)
 <<<
 >>>
 files exist
@@ -62,24 +62,24 @@ files exist
 # ======================================================================
 
 # Initialize local repo B and add same remote
-cd test\cli\work_progress_b & bit init
+cd test\cli\output\work_progress_b & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work_progress_b & bit remote add origin ..\fs_remote_progress
+cd test\cli\output\work_progress_b & bit remote add origin ..\fs_remote_progress
 <<<
 >>> /Remote 'origin' added/
 >>>= 0
 
 # ---- Pull files from remote ----
-cd test\cli\work_progress_b & bit pull
+cd test\cli\output\work_progress_b & bit pull
 <<<
 >>> /Pull|Checking out/
 >>>= 0
 
 # Verify files copied from remote
-if exist "test\cli\work_progress_b\data1.bin" (echo files exist) else (echo missing)
+if exist "test\cli\output\work_progress_b\data1.bin" (echo files exist) else (echo missing)
 <<<
 >>>
 files exist
@@ -90,13 +90,13 @@ files exist
 # ======================================================================
 
 # Modify files in repo A
-cd test\cli\work_progress_a & echo modified> data1.bin & bit add data1.bin & bit commit -m "Modify data1"
+cd test\cli\output\work_progress_a & echo modified> data1.bin & bit add data1.bin & bit commit -m "Modify data1"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
 # ---- Subsequent push: sync changed files only ----
-cd test\cli\work_progress_a & bit push
+cd test\cli\output\work_progress_a & bit push
 <<<
 >>> /Push complete|Syncing changed files/
 >>>= 0
@@ -106,13 +106,13 @@ cd test\cli\work_progress_a & bit push
 # ======================================================================
 
 # Modify different file in repo B
-cd test\cli\work_progress_b & echo modified> data2.bin & bit add data2.bin & bit commit -m "Modify data2"
+cd test\cli\output\work_progress_b & echo modified> data2.bin & bit add data2.bin & bit commit -m "Modify data2"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
 # Pull changes from remote (should merge)
-cd test\cli\work_progress_b & bit pull
+cd test\cli\output\work_progress_b & bit pull
 <<<
 >>> /Pull|Merging|Updating/
 >>>= 0
@@ -128,7 +128,7 @@ cd test\cli\work_progress_b & bit pull
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_progress_a 2>nul & rmdir /s /q test\cli\work_progress_b 2>nul & rmdir /s /q test\cli\fs_remote_progress 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_progress_a 2>nul & rmdir /s /q test\cli\output\work_progress_b 2>nul & rmdir /s /q test\cli\output\fs_remote_progress 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done

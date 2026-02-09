@@ -7,7 +7,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\work_rmt_a 2>nul & rmdir /s /q test\cli\fs_remote_rmt 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_rmt_a 2>nul & rmdir /s /q test\cli\output\fs_remote_rmt 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -18,35 +18,35 @@ cleanup done
 # ======================================================================
 
 # ---- Create remote directory with test files ----
-mkdir test\cli\fs_remote_rmt
+mkdir test\cli\output\fs_remote_rmt
 <<<
 >>>
 >>>= 0
 
 # ---- Create some text files in the remote ----
-echo Text file 1 > test\cli\fs_remote_rmt\file1.txt
+echo Text file 1 > test\cli\output\fs_remote_rmt\file1.txt
 <<<
 >>>
 >>>= 0
 
-echo Text file 2 > test\cli\fs_remote_rmt\file2.md
+echo Text file 2 > test\cli\output\fs_remote_rmt\file2.md
 <<<
 >>>
 >>>= 0
 
 # ---- Create a subdirectory with files ----
-mkdir test\cli\fs_remote_rmt\subdir
+mkdir test\cli\output\fs_remote_rmt\subdir
 <<<
 >>>
 >>>= 0
 
-echo Subdir text > test\cli\fs_remote_rmt\subdir\file3.txt
+echo Subdir text > test\cli\output\fs_remote_rmt\subdir\file3.txt
 <<<
 >>>
 >>>= 0
 
 # ---- Create a binary file (simulated) ----
-echo Binary content > test\cli\fs_remote_rmt\data.bin
+echo Binary content > test\cli\output\fs_remote_rmt\data.bin
 <<<
 >>>
 >>>= 0
@@ -56,18 +56,18 @@ echo Binary content > test\cli\fs_remote_rmt\data.bin
 # ======================================================================
 
 # ---- Create local repo ----
-mkdir test\cli\work_rmt_a
+mkdir test\cli\output\work_rmt_a
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_rmt_a & bit init
+cd test\cli\output\work_rmt_a & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Add filesystem remote ----
-cd test\cli\work_rmt_a & bit remote add origin ..\fs_remote_rmt
+cd test\cli\output\work_rmt_a & bit remote add origin ..\fs_remote_rmt
 <<<
 >>> /Remote.*added/
 >>>= 0
@@ -77,33 +77,33 @@ cd test\cli\work_rmt_a & bit remote add origin ..\fs_remote_rmt
 # ======================================================================
 
 # ---- Test @origin init - scan the remote and build metadata workspace ----
-cd test\cli\work_rmt_a & bit @origin init
+cd test\cli\output\work_rmt_a & bit @origin init
 <<<
 >>> /Scanning remote/
 >>>= 0
 
 # ---- Verify workspace was created ----
-cd test\cli\work_rmt_a & if exist .bit\remote-workspaces\origin\.git echo workspace exists
+cd test\cli\output\work_rmt_a & if exist .bit\remote-workspaces\origin\.git echo workspace exists
 <<<
 >>>
 workspace exists
 >>>= 0
 
 # ---- Verify bundle was created on remote immediately after init ----
-cd test\cli\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
+cd test\cli\output\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
 <<<
 >>>
 bundle exists
 >>>= 0
 
 # ---- Test status after init (should be clean since auto-committed) ----
-cd test\cli\work_rmt_a & bit @origin status
+cd test\cli\output\work_rmt_a & bit @origin status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
 
 # ---- Test error: workspace already exists ----
-cd test\cli\work_rmt_a & bit @origin init
+cd test\cli\output\work_rmt_a & bit @origin init
 <<<
 >>>2 /already exists/
 >>>= 1
@@ -113,18 +113,18 @@ cd test\cli\work_rmt_a & bit @origin init
 # ======================================================================
 
 # ---- Test add after modifying workspace ----
-cd test\cli\work_rmt_a & echo New file > .bit\remote-workspaces\origin\newfile.txt
+cd test\cli\output\work_rmt_a & echo New file > .bit\remote-workspaces\origin\newfile.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_rmt_a & bit @origin add newfile.txt
+cd test\cli\output\work_rmt_a & bit @origin add newfile.txt
 <<<
 >>>
 >>>= 0
 
 # ---- Test error: add without init ----
-cd test\cli\work_rmt_a & bit @nonexistent add .
+cd test\cli\output\work_rmt_a & bit @nonexistent add .
 <<<
 >>>2 /not found/
 >>>= 1
@@ -134,7 +134,7 @@ cd test\cli\work_rmt_a & bit @nonexistent add .
 # ======================================================================
 
 # ---- Check status of remote workspace (should show staged changes) ----
-cd test\cli\work_rmt_a & bit @origin status
+cd test\cli\output\work_rmt_a & bit @origin status
 <<<
 >>> /Changes to be committed|new file/
 >>>= 0
@@ -144,20 +144,20 @@ cd test\cli\work_rmt_a & bit @origin status
 # ======================================================================
 
 # ---- Commit in remote workspace (creates bundle and pushes it) ----
-cd test\cli\work_rmt_a & bit @origin commit -m "Add newfile"
+cd test\cli\output\work_rmt_a & bit @origin commit -m "Add newfile"
 <<<
 >>> /Remote is now a bit repository/
 >>>= 0
 
 # ---- Verify bundle still exists on remote ----
-cd test\cli\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
+cd test\cli\output\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
 <<<
 >>>
 bundle exists
 >>>= 0
 
 # ---- Test status after commit (should be clean) ----
-cd test\cli\work_rmt_a & bit @origin status
+cd test\cli\output\work_rmt_a & bit @origin status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
@@ -167,7 +167,7 @@ cd test\cli\work_rmt_a & bit @origin status
 # ======================================================================
 
 # ---- View commit history in remote workspace (should show initial commit) ----
-cd test\cli\work_rmt_a & bit @origin log --oneline
+cd test\cli\output\work_rmt_a & bit @origin log --oneline
 <<<
 >>> /Initial commit|Add newfile/
 >>>= 0
@@ -177,24 +177,24 @@ cd test\cli\work_rmt_a & bit @origin log --oneline
 # ======================================================================
 
 # ---- Test unsupported command in remote context ----
-cd test\cli\work_rmt_a & bit @origin push
+cd test\cli\output\work_rmt_a & bit @origin push
 <<<
 >>>2 /not supported in remote context/
 >>>= 1
 
 # ---- Test with non-existent remote ----
-cd test\cli\work_rmt_a & bit @fake init
+cd test\cli\output\work_rmt_a & bit @fake init
 <<<
 >>>2 /remote.*not found/
 >>>= 1
 
 # ---- Test @remote commands without a bit repository ----
-mkdir test\cli\work_rmt_a\notrepo
+mkdir test\cli\output\work_rmt_a\notrepo
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_rmt_a\notrepo & bit @origin init
+cd test\cli\output\work_rmt_a\notrepo & bit @origin init
 <<<
 >>>2 /not a bit repository/
 >>>= 1
@@ -210,7 +210,7 @@ cd test\cli\work_rmt_a\notrepo & bit @origin init
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_rmt_a 2>nul & rmdir /s /q test\cli\fs_remote_rmt 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_rmt_a 2>nul & rmdir /s /q test\cli\output\fs_remote_rmt 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done

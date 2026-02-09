@@ -3,51 +3,51 @@
 # Requires: rclone on PATH.
 
 # --- No remote configured: must print error ---
-rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
+rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work & bit remote check
+cd test\cli\output\work & bit remote check
 <<<
 >>>2 /fatal: No remote configured/
 >>>= 1
 
 # --- Setup: repo with text + binary, local dir OUTSIDE work as "remote", push, then check ---
-rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\remote_mirror 2>nul & mkdir test\cli\work & mkdir test\cli\remote_mirror & cd test\cli\work & bit init & echo hello> greet.txt & echo x> data.bin & bit add greet.txt data.bin & bit commit -m "Add files"
+rmdir /s /q test\cli\output\work 2>nul & rmdir /s /q test\cli\output\remote_mirror 2>nul & mkdir test\cli\output\work & mkdir test\cli\output\remote_mirror & cd test\cli\output\work & bit init & echo hello> greet.txt & echo x> data.bin & bit add greet.txt data.bin & bit commit -m "Add files"
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work & bit remote add origin ..\remote_mirror
+cd test\cli\output\work & bit remote add origin ..\remote_mirror
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\work & bit push
+cd test\cli\output\work & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote|Metadata push complete/
 >>>= 0
 
 # --- Happy path: local matches remote after push ---
-cd test\cli\work & bit remote check
+cd test\cli\output\work & bit remote check
 <<<
 >>> /files match|0 differences found/
 >>>= 0
 
 # --- Modify local file: rclone check detects difference, exit 1 ---
-cd test\cli\work & echo changed> greet.txt
+cd test\cli\output\work & echo changed> greet.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work & bit remote check
+cd test\cli\output\work & bit remote check
 <<<
 >>> /content differs|differences,/
 >>>= 1
 
 # --- Restore local file for next test ---
-cd test\cli\work & echo hello> greet.txt
+cd test\cli\output\work & echo hello> greet.txt
 <<<
 >>>
 >>>= 0
@@ -57,40 +57,40 @@ cd test\cli\work & echo hello> greet.txt
 # ======================================================================
 
 # --- Setup: Create repo with many files to trigger progress code path ---
-rmdir /s /q test\cli\work_check_progress 2>nul & rmdir /s /q test\cli\remote_check_progress 2>nul & mkdir test\cli\work_check_progress & mkdir test\cli\remote_check_progress & cd test\cli\work_check_progress & bit init
+rmdir /s /q test\cli\output\work_check_progress 2>nul & rmdir /s /q test\cli\output\remote_check_progress 2>nul & mkdir test\cli\output\work_check_progress & mkdir test\cli\output\remote_check_progress & cd test\cli\output\work_check_progress & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # --- Create 10 files to ensure progress code is triggered (>5 files) ---
-cd test\cli\work_check_progress & echo f1> f1.txt & echo f2> f2.txt & echo f3> f3.txt & echo f4> f4.txt & echo f5> f5.txt & echo f6> f6.txt & echo f7> f7.txt & echo f8> f8.txt & echo f9> f9.txt & echo f10> f10.txt & bit add . & bit commit -m "Add many files"
+cd test\cli\output\work_check_progress & echo f1> f1.txt & echo f2> f2.txt & echo f3> f3.txt & echo f4> f4.txt & echo f5> f5.txt & echo f6> f6.txt & echo f7> f7.txt & echo f8> f8.txt & echo f9> f9.txt & echo f10> f10.txt & bit add . & bit commit -m "Add many files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\work_check_progress & bit remote add origin ..\remote_check_progress
+cd test\cli\output\work_check_progress & bit remote add origin ..\remote_check_progress
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\work_check_progress & bit push
+cd test\cli\output\work_check_progress & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote|Metadata push complete/
 >>>= 0
 
 # --- Remote check should succeed with all files matching ---
-cd test\cli\work_check_progress & bit remote check
+cd test\cli\output\work_check_progress & bit remote check
 <<<
 >>> /files match|0 differences found/
 >>>= 0
 
 # --- Modify one file and check again ---
-cd test\cli\work_check_progress & echo modified> f5.txt
+cd test\cli\output\work_check_progress & echo modified> f5.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_check_progress & bit remote check
+cd test\cli\output\work_check_progress & bit remote check
 <<<
 >>> /content differs|differences,/
 >>>= 1
@@ -100,34 +100,34 @@ cd test\cli\work_check_progress & bit remote check
 # ======================================================================
 
 # --- Setup: Create repo with exactly 5 files (at threshold) ---
-rmdir /s /q test\cli\work_check_small 2>nul & rmdir /s /q test\cli\remote_check_small 2>nul & mkdir test\cli\work_check_small & mkdir test\cli\remote_check_small & cd test\cli\work_check_small & bit init
+rmdir /s /q test\cli\output\work_check_small 2>nul & rmdir /s /q test\cli\output\remote_check_small 2>nul & mkdir test\cli\output\work_check_small & mkdir test\cli\output\remote_check_small & cd test\cli\output\work_check_small & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work_check_small & echo a> a.txt & echo b> b.txt & echo c> c.txt & echo d> d.txt & echo e> e.txt & bit add . & bit commit -m "Add 5 files"
+cd test\cli\output\work_check_small & echo a> a.txt & echo b> b.txt & echo c> c.txt & echo d> d.txt & echo e> e.txt & bit add . & bit commit -m "Add 5 files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\work_check_small & bit remote add origin ..\remote_check_small
+cd test\cli\output\work_check_small & bit remote add origin ..\remote_check_small
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\work_check_small & bit push
+cd test\cli\output\work_check_small & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote|Metadata push complete/
 >>>= 0
 
 # --- Remote check should succeed (using simple code path) ---
-cd test\cli\work_check_small & bit remote check
+cd test\cli\output\work_check_small & bit remote check
 <<<
 >>> /files match|0 differences found/
 >>>= 0
 
 # --- Cleanup ---
-timeout /t 1 >nul & rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\remote_mirror 2>nul & rmdir /s /q test\cli\work_check_progress 2>nul & rmdir /s /q test\cli\remote_check_progress 2>nul & rmdir /s /q test\cli\work_check_small 2>nul & rmdir /s /q test\cli\remote_check_small 2>nul
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work 2>nul & rmdir /s /q test\cli\output\remote_mirror 2>nul & rmdir /s /q test\cli\output\work_check_progress 2>nul & rmdir /s /q test\cli\output\remote_check_progress 2>nul & rmdir /s /q test\cli\output\work_check_small 2>nul & rmdir /s /q test\cli\output\remote_check_small 2>nul
 <<<
 >>>
 >>>= 0

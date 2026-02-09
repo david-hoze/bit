@@ -1,74 +1,74 @@
 # Test .bitignore support
 
 # Setup: fresh repo with .bitignore
-rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
+rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Create .bitignore with *.log pattern
-cd test\cli\work & echo *.log> .bitignore
+cd test\cli\output\work & echo *.log> .bitignore
 <<<
 >>>= 0
 
 # Create test files: file.txt and debug.log
-cd test\cli\work & echo hello> file.txt & echo debug content> debug.log
+cd test\cli\output\work & echo hello> file.txt & echo debug content> debug.log
 <<<
 >>>= 0
 
 # Add all files - should only stage file.txt
-cd test\cli\work & bit add .
+cd test\cli\output\work & bit add .
 <<<
 >>>= 0
 
 # Status should show file.txt as staged
-cd test\cli\work & bit status
+cd test\cli\output\work & bit status
 <<<
 >>> /file\.txt/
 >>>= 0
 
 # Verify debug.log is NOT shown in status (use findstr exit code - fail if found)
-cd test\cli\work & bit status | findstr "debug.log" && exit 1 || exit 0
+cd test\cli\output\work & bit status | findstr "debug.log" && exit 1 || exit 0
 <<<
 >>>= 0
 
 # Commit
-cd test\cli\work & bit commit -m "test commit"
+cd test\cli\output\work & bit commit -m "test commit"
 <<<
 >>> /file.*changed/
 >>>= 0
 
 # Check that debug.log metadata file does not exist (exit 0 if missing, exit 1 if exists)
-if exist "test\cli\work\.bit\index\debug.log" (exit 1) else (exit 0)
+if exist "test\cli\output\work\.bit\index\debug.log" (exit 1) else (exit 0)
 <<<
 >>>= 0
 
 # Check that file.txt metadata DOES exist
-if exist "test\cli\work\.bit\index\file.txt" (exit 0) else (exit 1)
+if exist "test\cli\output\work\.bit\index\file.txt" (exit 0) else (exit 1)
 <<<
 >>>= 0
 
 # Modify .bitignore to also ignore *.tmp
-cd test\cli\work & echo *.tmp>> .bitignore
+cd test\cli\output\work & echo *.tmp>> .bitignore
 <<<
 >>>= 0
 
 # Create test.tmp file
-cd test\cli\work & echo temp content> test.tmp
+cd test\cli\output\work & echo temp content> test.tmp
 <<<
 >>>= 0
 
 # Add all - test.tmp should be ignored
-cd test\cli\work & bit add .
+cd test\cli\output\work & bit add .
 <<<
 >>>= 0
 
 # Verify test.tmp is NOT shown in status
-cd test\cli\work & bit status | findstr "test.tmp" && exit 1 || exit 0
+cd test\cli\output\work & bit status | findstr "test.tmp" && exit 1 || exit 0
 <<<
 >>>= 0
 
 # Cleanup
-rmdir /s /q test\cli\work 2>nul
+rmdir /s /q test\cli\output\work 2>nul
 <<<
 >>>= 0

@@ -8,7 +8,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\work_rflag_a 2>nul & rmdir /s /q test\cli\fs_remote_rflag 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_rflag_a 2>nul & rmdir /s /q test\cli\output\fs_remote_rflag 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -19,27 +19,27 @@ cleanup done
 # ======================================================================
 
 # ---- Create remote directory with test files ----
-mkdir test\cli\fs_remote_rflag
+mkdir test\cli\output\fs_remote_rflag
 <<<
 >>>
 >>>= 0
 
-echo Text file 1 > test\cli\fs_remote_rflag\file1.txt
+echo Text file 1 > test\cli\output\fs_remote_rflag\file1.txt
 <<<
 >>>
 >>>= 0
 
-echo Binary content > test\cli\fs_remote_rflag\data.bin
+echo Binary content > test\cli\output\fs_remote_rflag\data.bin
 <<<
 >>>
 >>>= 0
 
-mkdir test\cli\fs_remote_rflag\subdir
+mkdir test\cli\output\fs_remote_rflag\subdir
 <<<
 >>>
 >>>= 0
 
-echo Subdir text > test\cli\fs_remote_rflag\subdir\file2.txt
+echo Subdir text > test\cli\output\fs_remote_rflag\subdir\file2.txt
 <<<
 >>>
 >>>= 0
@@ -48,17 +48,17 @@ echo Subdir text > test\cli\fs_remote_rflag\subdir\file2.txt
 # SECTION 2: INIT LOCAL REPO AND ADD REMOTE
 # ======================================================================
 
-mkdir test\cli\work_rflag_a
+mkdir test\cli\output\work_rflag_a
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_rflag_a & bit init
+cd test\cli\output\work_rflag_a & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work_rflag_a & bit remote add origin ..\fs_remote_rflag
+cd test\cli\output\work_rflag_a & bit remote add origin ..\fs_remote_rflag
 <<<
 >>> /Remote.*added/
 >>>= 0
@@ -68,13 +68,13 @@ cd test\cli\work_rflag_a & bit remote add origin ..\fs_remote_rflag
 # ======================================================================
 
 # ---- --remote origin init should scan the remote ----
-cd test\cli\work_rflag_a & bit --remote origin init
+cd test\cli\output\work_rflag_a & bit --remote origin init
 <<<
 >>> /Scanning remote/
 >>>= 0
 
 # ---- Verify workspace was created ----
-cd test\cli\work_rflag_a & if exist .bit\remote-workspaces\origin\.git echo workspace exists
+cd test\cli\output\work_rflag_a & if exist .bit\remote-workspaces\origin\.git echo workspace exists
 <<<
 >>>
 workspace exists
@@ -85,7 +85,7 @@ workspace exists
 # ======================================================================
 
 # ---- Stage all files in remote workspace ----
-cd test\cli\work_rflag_a & bit --remote origin add .
+cd test\cli\output\work_rflag_a & bit --remote origin add .
 <<<
 >>>
 >>>= 0
@@ -94,7 +94,7 @@ cd test\cli\work_rflag_a & bit --remote origin add .
 # SECTION 5: TEST --remote <name> status
 # ======================================================================
 
-cd test\cli\work_rflag_a & bit --remote origin status
+cd test\cli\output\work_rflag_a & bit --remote origin status
 <<<
 >>> /Changes to be committed|new file/
 >>>= 0
@@ -103,13 +103,13 @@ cd test\cli\work_rflag_a & bit --remote origin status
 # SECTION 6: TEST --remote <name> commit
 # ======================================================================
 
-cd test\cli\work_rflag_a & bit --remote origin commit -m "Commit via --remote flag"
+cd test\cli\output\work_rflag_a & bit --remote origin commit -m "Commit via --remote flag"
 <<<
 >>> /Pushing.*bundle|Remote is now a bit repository/
 >>>= 0
 
 # ---- Verify bundle was created on remote ----
-cd test\cli\work_rflag_a & if exist ..\fs_remote_rflag\.bit\bit.bundle echo bundle exists
+cd test\cli\output\work_rflag_a & if exist ..\fs_remote_rflag\.bit\bit.bundle echo bundle exists
 <<<
 >>>
 bundle exists
@@ -119,7 +119,7 @@ bundle exists
 # SECTION 7: TEST --remote <name> log
 # ======================================================================
 
-cd test\cli\work_rflag_a & bit --remote origin log --oneline
+cd test\cli\output\work_rflag_a & bit --remote origin log --oneline
 <<<
 >>> /Commit via --remote flag/
 >>>= 0
@@ -129,25 +129,25 @@ cd test\cli\work_rflag_a & bit --remote origin log --oneline
 # ======================================================================
 
 # ---- --remote without argument ----
-cd test\cli\work_rflag_a & bit --remote
+cd test\cli\output\work_rflag_a & bit --remote
 <<<
 >>>2 /requires a remote name argument/
 >>>= 1
 
 # ---- --remote with non-existent remote ----
-cd test\cli\work_rflag_a & bit --remote fake init
+cd test\cli\output\work_rflag_a & bit --remote fake init
 <<<
 >>>2 /remote.*not found/
 >>>= 1
 
 # ---- Unsupported command in remote context ----
-cd test\cli\work_rflag_a & bit --remote origin push
+cd test\cli\output\work_rflag_a & bit --remote origin push
 <<<
 >>>2 /not supported in remote context/
 >>>= 1
 
 # ---- verify --remote should still work (not confused with --remote flag) ----
-cd test\cli\work_rflag_a & bit verify --remote
+cd test\cli\output\work_rflag_a & bit verify --remote
 <<<
 >>> /Fetching remote metadata|Scanning remote|Checked/
 >>>= 0
@@ -156,7 +156,7 @@ cd test\cli\work_rflag_a & bit verify --remote
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_rflag_a 2>nul & rmdir /s /q test\cli\fs_remote_rflag 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_rflag_a 2>nul & rmdir /s /q test\cli\output\fs_remote_rflag 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done

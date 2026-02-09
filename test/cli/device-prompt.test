@@ -9,25 +9,25 @@ cd test\cli & subst Z: . & cd ..\..
 >>>= 0
 
 # --- Setup: create work dir, remote dir, init bit ---
-rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\device_prompt_remote 2>nul & mkdir test\cli\work & mkdir test\cli\device_prompt_remote & cd test\cli\work & bit init
+rmdir /s /q test\cli\output\work 2>nul & rmdir /s /q test\cli\output\device_prompt_remote 2>nul & mkdir test\cli\output\work & mkdir test\cli\output\device_prompt_remote & cd test\cli\output\work & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # --- Add remote with piped device name (BIT_USE_STDIN=1) ---
-cd test\cli\work & set BIT_USE_STDIN=1 & echo test_device| bit remote add origin Z:\device_prompt_remote
+cd test\cli\output\work & set BIT_USE_STDIN=1 & echo test_device| bit remote add origin Z:\output\device_prompt_remote
 <<<
 >>> /Remote.*origin|Device.*registered/
 >>>= 0
 
 # --- Verify remote was stored: either device name or fallback (local:) ---
-findstr /C:"device:" test\cli\work\.bit\remotes\origin >nul || findstr /C:"local:" test\cli\work\.bit\remotes\origin >nul
+findstr /C:"device:" test\cli\output\work\.bit\remotes\origin >nul || findstr /C:"local:" test\cli\output\work\.bit\remotes\origin >nul
 <<<
 >>>
 >>>= 0
 
 # --- Cleanup ---
-subst Z: /D 2>nul & rmdir /s /q test\cli\work 2>nul & rmdir /s /q test\cli\device_prompt_remote 2>nul
+subst Z: /D 2>nul & rmdir /s /q test\cli\output\work 2>nul & rmdir /s /q test\cli\output\device_prompt_remote 2>nul
 <<<
 >>>
 >>>= 0

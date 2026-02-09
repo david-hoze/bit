@@ -49,14 +49,16 @@ line 2
 
 **CRITICAL: Use unique directory names per test file** to prevent test interference.
 
+**ALL test working directories MUST be under `test\cli\output\`**
+
 | Test File | Directory Pattern |
 |-----------|-------------------|
-| `gdrive-remote.test` | `work_gdrive_a`, `work_gdrive_b` |
-| `merge-local.test` | `work_merge_a`, `work_merge_b`, `shared_merge_remote` |
-| `filesystem-remote-direct.test` | `work_direct`, `fs_remote_direct` |
-| Generic single-repo tests | `work` (shared, but cleaned up properly) |
+| `gdrive-remote.test` | `test\cli\output\work_gdrive_a`, `test\cli\output\work_gdrive_b` |
+| `merge-local.test` | `test\cli\output\work_merge_a`, `test\cli\output\work_merge_b`, `test\cli\output\shared_merge_remote` |
+| `filesystem-remote-direct.test` | `test\cli\output\work_direct`, `test\cli\output\fs_remote_direct` |
+| Generic single-repo tests | `test\cli\output\work` (shared, but cleaned up properly) |
 
-**Pattern:** `work_<testname>_a`, `work_<testname>_b`, `<testname>_remote`
+**Pattern:** `test\cli\output\work_<testname>_a`, `test\cli\output\work_<testname>_b`, `test\cli\output\<testname>_remote`
 
 ## Required Cleanup Structure
 
@@ -66,7 +68,7 @@ Every test file that creates directories MUST have:
 
 ```batch
 # ---- CLEANUP: remove any leftover state from previous runs (timeout helps Windows release file handles) ----
-timeout /t 1 >nul & rmdir /s /q test\cli\work_mytest_a 2>nul & rmdir /s /q test\cli\work_mytest_b 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_mytest_a 2>nul & rmdir /s /q test\cli\output\work_mytest_b 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -80,7 +82,7 @@ cleanup done
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_mytest_a 2>nul & rmdir /s /q test\cli\work_mytest_b 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_mytest_a 2>nul & rmdir /s /q test\cli\output\work_mytest_b 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -89,7 +91,7 @@ cleanup done
 
 ### 3. Update Global Cleanup
 
-Add your new directories to `test/cli/000-cleanup.test` so they get cleaned up even if your test is interrupted.
+The global cleanup in `test/cli/000-cleanup.test` removes the entire `test\cli\output\` directory, so all working directories created under `test\cli\output\` are automatically cleaned up. No need to add individual directories.
 
 ## Windows Considerations
 
@@ -165,7 +167,7 @@ cd test\cli\work & bit merge --abort
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\work_mytest 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_mytest 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -175,12 +177,12 @@ cleanup done
 # SECTION 1: SETUP
 # ======================================================================
 
-mkdir test\cli\work_mytest
+mkdir test\cli\output\work_mytest
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_mytest & bit init
+cd test\cli\output\work_mytest & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -190,7 +192,7 @@ cd test\cli\work_mytest & bit init
 # ======================================================================
 
 # ---- Test case description ----
-cd test\cli\work_mytest & bit <command>
+cd test\cli\output\work_mytest & bit <command>
 <<<
 >>> /expected output/
 >>>= 0
@@ -199,7 +201,7 @@ cd test\cli\work_mytest & bit <command>
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_mytest 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_mytest 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -211,7 +213,7 @@ cleanup done
 For commands that prompt for input, provide stdin:
 
 ```batch
-cd test\cli\work & bit pull
+cd test\cli\output\work & bit pull
 <<<
 l
 >>> /CONFLICT|Resolving conflicts/
@@ -221,7 +223,7 @@ l
 Or use non-interactive flags when available:
 
 ```batch
-cd test\cli\work & bit pull --accept-remote
+cd test\cli\output\work & bit pull --accept-remote
 <<<
 >>> /Accepting remote file state/
 >>>= 0
@@ -235,10 +237,10 @@ Tests run alphabetically by filename. Consider this when:
 
 ## Checklist for New Tests
 
+- [ ] All directories under `test\cli\output\` (e.g., `test\cli\output\work_mytest_a`)
 - [ ] Unique directory names (not `work_a`, `work_b` unless no conflicts)
 - [ ] Initial cleanup with `timeout /t 1 >nul &`
 - [ ] Final cleanup with `timeout /t 1 >nul &`
-- [ ] Added directories to `000-cleanup.test`
 - [ ] Flexible regex patterns for output matching
 - [ ] Errors expected on stderr use `>>>2`
 - [ ] Section comments for readability

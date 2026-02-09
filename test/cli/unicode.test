@@ -9,14 +9,14 @@
 # is not in UTF-8 mode, but core functionality (tracking Unicode files) works.
 
 # Setup: clean environment and initialize repo
-rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
+rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # TEST 1: Verify core.quotePath was set to "false" (enables Unicode filenames)
 # This is the primary test - ensures git won't quote non-ASCII filenames
-cd test\cli\work & git -C .bit\index config --get core.quotePath
+cd test\cli\output\work & git -C .bit\index config --get core.quotePath
 <<<
 >>>
 false
@@ -24,46 +24,46 @@ false
 
 # TEST 2: Create a file with Hebrew characters in the name
 # Hebrew: שלום (shalom, means "hello/peace")
-cd test\cli\work & echo test content> test-hebrew.txt
+cd test\cli\output\work & echo test content> test-hebrew.txt
 <<<
 >>>= 0
 
 # TEST 3: Add the Hebrew filename - should work without quoting issues
-cd test\cli\work & bit add test-hebrew.txt
+cd test\cli\output\work & bit add test-hebrew.txt
 <<<
 >>>= 0
 
 # TEST 4: Verify git ls-files works (file is tracked)
-cd test\cli\work & git -C .bit\index ls-files
+cd test\cli\output\work & git -C .bit\index ls-files
 <<<
 >>> /test-hebrew.txt/
 >>>= 0
 
 # TEST 5: Commit the file
-cd test\cli\work & bit commit -m "Add test file"
+cd test\cli\output\work & bit commit -m "Add test file"
 <<<
 >>> /\[main|file/
 >>>= 0
 
 # TEST 6: Verify status shows clean (no encoding issues)
-cd test\cli\work & bit status
+cd test\cli\output\work & bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
 
 # TEST 7: Create another test file
-cd test\cli\work & echo mixed> test-mixed.txt
+cd test\cli\output\work & echo mixed> test-mixed.txt
 <<<
 >>>= 0
 
 # TEST 8: Add and commit the file
-cd test\cli\work & bit add test-mixed.txt & bit commit -m "Mixed Unicode"
+cd test\cli\output\work & bit add test-mixed.txt & bit commit -m "Mixed Unicode"
 <<<
 >>> /\[main|file/
 >>>= 0
 
 # TEST 9: Verify git log works
-cd test\cli\work & git -C .bit\index log --oneline
+cd test\cli\output\work & git -C .bit\index log --oneline
 <<<
 >>> /Mixed Unicode/
 >>>= 0

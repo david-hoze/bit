@@ -13,7 +13,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\work_pop_local 2>nul & rmdir /s /q test\cli\work_pop_remote 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_pop_local 2>nul & rmdir /s /q test\cli\output\work_pop_remote 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -23,40 +23,40 @@ cleanup done
 # SECTION 1: SETUP
 # ======================================================================
 
-mkdir test\cli\work_pop_local
+mkdir test\cli\output\work_pop_local
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_pop_local & bit init
+cd test\cli\output\work_pop_local & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Create a test file and commit it ----
-cd test\cli\work_pop_local & echo original content > file.txt & bit add file.txt
+cd test\cli\output\work_pop_local & echo original content > file.txt & bit add file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_pop_local & bit commit -m "Initial commit"
+cd test\cli\output\work_pop_local & bit commit -m "Initial commit"
 <<<
 >>> /.*1 file changed.*/
 >>>= 0
 
 # ---- Set up filesystem remote ----
-mkdir test\cli\work_pop_remote
+mkdir test\cli\output\work_pop_remote
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_pop_local & bit remote add origin ..\work_pop_remote
+cd test\cli\output\work_pop_local & bit remote add origin ..\work_pop_remote
 <<<
 >>> /Remote.*added/
 >>>= 0
 
 # ---- First push should succeed (everything matches) ----
-cd test\cli\work_pop_local & bit push -u origin
+cd test\cli\output\work_pop_local & bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -66,14 +66,14 @@ cd test\cli\work_pop_local & bit push -u origin
 # ======================================================================
 
 # ---- Delete tracked file (metadata remains in .bit/index) - push should fail ----
-cd test\cli\work_pop_local & del file.txt & bit push
+cd test\cli\output\work_pop_local & del file.txt & bit push
 <<<
 >>> /Verifying local files/
 >>>2 /Working tree does not match metadata/
 >>>= 1
 
 # ---- Verify --force bypasses verification on push ----
-cd test\cli\work_pop_local & echo original content > file.txt & bit push --force
+cd test\cli\output\work_pop_local & echo original content > file.txt & bit push --force
 <<<
 >>> /Push|Pushing to filesystem remote/
 >>>= 0
@@ -83,20 +83,20 @@ cd test\cli\work_pop_local & echo original content > file.txt & bit push --force
 # ======================================================================
 
 # ---- Corrupt file at remote - pull should fail ----
-cd test\cli\work_pop_remote & echo corrupted content > file.txt & cd ..\work_pop_local & bit pull
+cd test\cli\output\work_pop_remote & echo corrupted content > file.txt & cd ..\work_pop_local & bit pull
 <<<
 >>> /Verifying remote/
 >>>2 /Remote working tree does not match remote metadata/
 >>>= 1
 
 # ---- Verify --skip-verify bypasses verification on pull ----
-cd test\cli\work_pop_local & bit pull --skip-verify
+cd test\cli\output\work_pop_local & bit pull --skip-verify
 <<<
 >>> /Pull|Fetching remote commits/
 >>>= 0
 
 # ---- Verify --accept-remote bypasses verification (after re-corrupting remote) ----
-cd test\cli\work_pop_remote & echo corrupted again > file.txt & cd ..\work_pop_local & bit pull origin --accept-remote
+cd test\cli\output\work_pop_remote & echo corrupted again > file.txt & cd ..\work_pop_local & bit pull origin --accept-remote
 <<<
 >>> /Accepting remote file state/
 >>>= 0
@@ -105,7 +105,7 @@ cd test\cli\work_pop_remote & echo corrupted again > file.txt & cd ..\work_pop_l
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_pop_local 2>nul & rmdir /s /q test\cli\work_pop_remote 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_pop_local 2>nul & rmdir /s /q test\cli\output\work_pop_remote 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done

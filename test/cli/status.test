@@ -1,11 +1,11 @@
 # Setup: fresh repo with one file
-rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init & echo data> file.bin
+rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init & echo data> file.bin
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Status should show untracked file
-cd test\cli\work & bit status
+cd test\cli\output\work & bit status
 <<<
 >>> /file\.bin/
 >>>= 0

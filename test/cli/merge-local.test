@@ -23,7 +23,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs (timeout helps Windows release file handles) ----
-timeout /t 1 >nul & rmdir /s /q test\cli\work_merge_a 2>nul & rmdir /s /q test\cli\work_merge_b 2>nul & rmdir /s /q test\cli\shared_merge_remote 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_merge_a 2>nul & rmdir /s /q test\cli\output\work_merge_b 2>nul & rmdir /s /q test\cli\output\shared_merge_remote 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -34,47 +34,47 @@ cleanup done
 # ======================================================================
 
 # ---- Create shared remote directory ----
-mkdir test\cli\shared_merge_remote
+mkdir test\cli\output\shared_merge_remote
 <<<
 >>>
 >>>= 0
 
 # ---- Repo A: init ----
-mkdir test\cli\work_merge_a & cd test\cli\work_merge_a & bit init
+mkdir test\cli\output\work_merge_a & cd test\cli\output\work_merge_a & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Repo A: add remote ----
-cd test\cli\work_merge_a & bit remote add origin ..\shared_merge_remote
+cd test\cli\output\work_merge_a & bit remote add origin ..\shared_merge_remote
 <<<
 >>> /Remote.*added/
 >>>= 0
 
 # ---- Repo A: create base text file, add, commit ----
-cd test\cli\work_merge_a & echo base content> text.txt & bit add text.txt
+cd test\cli\output\work_merge_a & echo base content> text.txt & bit add text.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_merge_a & bit commit -m "Base: add text.txt"
+cd test\cli\output\work_merge_a & bit commit -m "Base: add text.txt"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
 # ---- Repo A: create base binary file, add, commit ----
-cd test\cli\work_merge_a & echo binarydata> data.bin & bit add data.bin
+cd test\cli\output\work_merge_a & echo binarydata> data.bin & bit add data.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_merge_a & bit commit -m "Base: add data.bin"
+cd test\cli\output\work_merge_a & bit commit -m "Base: add data.bin"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
 # ---- Repo A: push base state to shared remote ----
-cd test\cli\work_merge_a & bit push
+cd test\cli\output\work_merge_a & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
@@ -85,13 +85,13 @@ cd test\cli\work_merge_a & bit push
 # ======================================================================
 
 # ---- Repo B: init ----
-mkdir test\cli\work_merge_b & cd test\cli\work_merge_b & bit init
+mkdir test\cli\output\work_merge_b & cd test\cli\output\work_merge_b & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Repo B: add same remote ----
-cd test\cli\work_merge_b & bit remote add origin ..\shared_merge_remote
+cd test\cli\output\work_merge_b & bit remote add origin ..\shared_merge_remote
 <<<
 >>> /Remote.*added/
 >>>= 0
@@ -102,25 +102,25 @@ cd test\cli\work_merge_b & bit remote add origin ..\shared_merge_remote
 # cd test\cli\work_merge_b & bit fetch
 
 # ---- Repo B: pull (first pull — checkout remote as main) ----
-cd test\cli\work_merge_b & bit pull
+cd test\cli\output\work_merge_b & bit pull
 <<<
 >>> /first pull|Checking out|Syncing binaries/
 >>>= 0
 
 # ---- Verify B has the text file from A (content stored in .bit/index) ----
-findstr /C:"base content" test\cli\work_merge_b\.bit\index\text.txt >nul
+findstr /C:"base content" test\cli\output\work_merge_b\.bit\index\text.txt >nul
 <<<
 >>>
 >>>= 0
 
 # ---- Verify B has the binary file metadata ----
-findstr /C:"hash:" test\cli\work_merge_b\.bit\index\data.bin >nul
+findstr /C:"hash:" test\cli\output\work_merge_b\.bit\index\data.bin >nul
 <<<
 >>>
 >>>= 0
 
 # ---- Verify B's working tree has the text file ----
-if exist "test\cli\work_merge_b\text.txt" (echo file exists) else (echo missing)
+if exist "test\cli\output\work_merge_b\text.txt" (echo file exists) else (echo missing)
 <<<
 >>>
 file exists
@@ -128,7 +128,7 @@ file exists
 
 # ---- Verify B status after first pull ----
 # Note: binary files may show as modified due to sync timing, but merge succeeded
-cd test\cli\work_merge_b & bit status
+cd test\cli\output\work_merge_b & bit status
 <<<
 >>> /nothing to commit|working tree clean|up to date/
 >>>= 0
@@ -139,35 +139,35 @@ cd test\cli\work_merge_b & bit status
 # ======================================================================
 
 # ---- A: add a new file and push ----
-cd test\cli\work_merge_a & echo new from A> extra.txt & bit add extra.txt & bit commit -m "Add extra.txt"
+cd test\cli\output\work_merge_a & echo new from A> extra.txt & bit add extra.txt & bit commit -m "Add extra.txt"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
-cd test\cli\work_merge_a & bit push
+cd test\cli\output\work_merge_a & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
 # ---- B: pull — should merge cleanly (B has no local divergence) ----
-cd test\cli\work_merge_b & bit fetch
+cd test\cli\output\work_merge_b & bit fetch
 <<<
 >>> /Fetch complete|Fetching from/
 >>>= 0
 
-cd test\cli\work_merge_b & bit pull
+cd test\cli\output\work_merge_b & bit pull
 <<<
 >>> /Updating|Merge made|Syncing binaries/
 >>>= 0
 
 # ---- Verify B has the new file ----
-findstr /C:"new from A" test\cli\work_merge_b\.bit\index\extra.txt >nul
+findstr /C:"new from A" test\cli\output\work_merge_b\.bit\index\extra.txt >nul
 <<<
 >>>
 >>>= 0
 
 # ---- Verify B status is clean ----
-cd test\cli\work_merge_b & bit status
+cd test\cli\output\work_merge_b & bit status
 <<<
 >>> /nothing to commit|working tree clean|up to date/
 >>>= 0
@@ -178,42 +178,42 @@ cd test\cli\work_merge_b & bit status
 # ======================================================================
 
 # ---- A: modify text.txt and push ----
-cd test\cli\work_merge_a & echo updated by A> text.txt & bit add text.txt & bit commit -m "A: update text.txt"
+cd test\cli\output\work_merge_a & echo updated by A> text.txt & bit add text.txt & bit commit -m "A: update text.txt"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
-cd test\cli\work_merge_a & bit push
+cd test\cli\output\work_merge_a & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
 # ---- B: add a NEW file (doesn't overlap with A's changes) and commit ----
-cd test\cli\work_merge_b & echo B only file> bonly.txt & bit add bonly.txt & bit commit -m "B: add bonly.txt"
+cd test\cli\output\work_merge_b & echo B only file> bonly.txt & bit add bonly.txt & bit commit -m "B: add bonly.txt"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
 # ---- B: pull — should merge cleanly since changes don't overlap ----
-cd test\cli\work_merge_b & bit pull
+cd test\cli\output\work_merge_b & bit pull
 <<<
 >>> /Merge made|Syncing binaries|Updating/
 >>>= 0
 
 # ---- Verify B has A's updated text.txt ----
-findstr /C:"updated by A" test\cli\work_merge_b\.bit\index\text.txt >nul
+findstr /C:"updated by A" test\cli\output\work_merge_b\.bit\index\text.txt >nul
 <<<
 >>>
 >>>= 0
 
 # ---- Verify B still has its own bonly.txt ----
-findstr /C:"B only file" test\cli\work_merge_b\.bit\index\bonly.txt >nul
+findstr /C:"B only file" test\cli\output\work_merge_b\.bit\index\bonly.txt >nul
 <<<
 >>>
 >>>= 0
 
 # ---- Verify B status is clean ----
-cd test\cli\work_merge_b & bit status
+cd test\cli\output\work_merge_b & bit status
 <<<
 >>> /nothing to commit|working tree clean|up to date/
 >>>= 0
@@ -227,42 +227,42 @@ cd test\cli\work_merge_b & bit status
 # ======================================================================
 
 # ---- Synchronize: B pushes its current state so both are aligned ----
-cd test\cli\work_merge_b & bit push
+cd test\cli\output\work_merge_b & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
-cd test\cli\work_merge_a & bit fetch & bit pull
+cd test\cli\output\work_merge_a & bit fetch & bit pull
 <<<
 >>> //
 >>>= 0
 
 # ---- A: modify text.txt to A's version and push ----
-cd test\cli\work_merge_a & echo conflict version A> text.txt & bit add text.txt & bit commit -m "A: conflict version"
+cd test\cli\output\work_merge_a & echo conflict version A> text.txt & bit add text.txt & bit commit -m "A: conflict version"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
-cd test\cli\work_merge_a & bit push
+cd test\cli\output\work_merge_a & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
 # ---- B: modify SAME text.txt to B's version and commit locally ----
-cd test\cli\work_merge_b & echo conflict version B> text.txt & bit add text.txt & bit commit -m "B: conflict version"
+cd test\cli\output\work_merge_b & echo conflict version B> text.txt & bit add text.txt & bit commit -m "B: conflict version"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
 # ---- B: pull — conflict expected; pipe "l" to keep local ----
-cd test\cli\work_merge_b & bit pull
+cd test\cli\output\work_merge_b & bit pull
 <<<
 l
 >>> /Automatic merge failed|CONFLICT|Resolving conflicts|Merge complete|conflict/
 >>>= 0
 
 # ---- Verify B kept local version in metadata (B's content wins) ----
-findstr /C:"conflict version B" test\cli\work_merge_b\.bit\index\text.txt >nul
+findstr /C:"conflict version B" test\cli\output\work_merge_b\.bit\index\text.txt >nul
 <<<
 >>>
 >>>= 0
@@ -274,42 +274,42 @@ findstr /C:"conflict version B" test\cli\work_merge_b\.bit\index\text.txt >nul
 # ======================================================================
 
 # ---- Re-sync: push B's state, pull to A ----
-cd test\cli\work_merge_b & bit push
+cd test\cli\output\work_merge_b & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
-cd test\cli\work_merge_a & bit fetch & bit pull
+cd test\cli\output\work_merge_a & bit fetch & bit pull
 <<<
 >>> //
 >>>= 0
 
 # ---- A: modify text.txt to "remote wins" and push ----
-cd test\cli\work_merge_a & echo remote wins version> text.txt & bit add text.txt & bit commit -m "A: remote wins"
+cd test\cli\output\work_merge_a & echo remote wins version> text.txt & bit add text.txt & bit commit -m "A: remote wins"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
-cd test\cli\work_merge_a & bit push
+cd test\cli\output\work_merge_a & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
 # ---- B: modify SAME text.txt differently and commit locally ----
-cd test\cli\work_merge_b & echo local loses version> text.txt & bit add text.txt & bit commit -m "B: local loses"
+cd test\cli\output\work_merge_b & echo local loses version> text.txt & bit add text.txt & bit commit -m "B: local loses"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
 # ---- B: pull — conflict expected; pipe "r" to take remote ----
-cd test\cli\work_merge_b & bit pull
+cd test\cli\output\work_merge_b & bit pull
 <<<
 r
 >>> /Automatic merge failed|CONFLICT|Resolving conflicts|Merge complete|conflict/
 >>>= 0
 
 # ---- Verify B took remote version in metadata (A's content wins) ----
-findstr /C:"remote wins version" test\cli\work_merge_b\.bit\index\text.txt >nul
+findstr /C:"remote wins version" test\cli\output\work_merge_b\.bit\index\text.txt >nul
 <<<
 >>>
 >>>= 0
@@ -321,35 +321,35 @@ findstr /C:"remote wins version" test\cli\work_merge_b\.bit\index\text.txt >nul
 # ======================================================================
 
 # ---- Re-sync ----
-cd test\cli\work_merge_b & bit push
+cd test\cli\output\work_merge_b & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
-cd test\cli\work_merge_a & bit fetch & bit pull
+cd test\cli\output\work_merge_a & bit fetch & bit pull
 <<<
 >>> //
 >>>= 0
 
 # ---- A: modify both files and push ----
-cd test\cli\work_merge_a & (echo A multi 1)> file1.txt & (echo A multi 2)> file2.txt & bit add file1.txt file2.txt & bit commit -m "A: modify two files"
+cd test\cli\output\work_merge_a & (echo A multi 1)> file1.txt & (echo A multi 2)> file2.txt & bit add file1.txt file2.txt & bit commit -m "A: modify two files"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
-cd test\cli\work_merge_a & bit push
+cd test\cli\output\work_merge_a & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
 # ---- B: modify SAME two files differently and commit ----
-cd test\cli\work_merge_b & (echo B multi 1)> file1.txt & (echo B multi 2)> file2.txt & bit add file1.txt file2.txt & bit commit -m "B: modify two files"
+cd test\cli\output\work_merge_b & (echo B multi 1)> file1.txt & (echo B multi 2)> file2.txt & bit add file1.txt file2.txt & bit commit -m "B: modify two files"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
 # ---- B: pull — two conflicts; pipe "l" then "r" ----
-cd test\cli\work_merge_b & bit pull
+cd test\cli\output\work_merge_b & bit pull
 <<<
 l
 r
@@ -357,12 +357,12 @@ r
 >>>= 0
 
 # ---- Verify: file1.txt kept local (B's version), file2.txt took remote (A's version) ----
-findstr /C:"B multi 1" test\cli\work_merge_b\.bit\index\file1.txt >nul
+findstr /C:"B multi 1" test\cli\output\work_merge_b\.bit\index\file1.txt >nul
 <<<
 >>>
 >>>= 0
 
-findstr /C:"A multi 2" test\cli\work_merge_b\.bit\index\file2.txt >nul
+findstr /C:"A multi 2" test\cli\output\work_merge_b\.bit\index\file2.txt >nul
 <<<
 >>>
 >>>= 0
@@ -373,42 +373,42 @@ findstr /C:"A multi 2" test\cli\work_merge_b\.bit\index\file2.txt >nul
 # ======================================================================
 
 # ---- Re-sync ----
-cd test\cli\work_merge_b & bit push
+cd test\cli\output\work_merge_b & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
-cd test\cli\work_merge_a & bit fetch & bit pull
+cd test\cli\output\work_merge_a & bit fetch & bit pull
 <<<
 >>> //
 >>>= 0
 
 # ---- A: create brand-new file "shared_new.txt" and push ----
-cd test\cli\work_merge_a & echo A created this> shared_new.txt & bit add shared_new.txt & bit commit -m "A: add shared_new.txt"
+cd test\cli\output\work_merge_a & echo A created this> shared_new.txt & bit add shared_new.txt & bit commit -m "A: add shared_new.txt"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
-cd test\cli\work_merge_a & bit push
+cd test\cli\output\work_merge_a & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
 # ---- B: create SAME filename "shared_new.txt" with different content, commit ----
-cd test\cli\work_merge_b & echo B created this> shared_new.txt & bit add shared_new.txt & bit commit -m "B: add shared_new.txt"
+cd test\cli\output\work_merge_b & echo B created this> shared_new.txt & bit add shared_new.txt & bit commit -m "B: add shared_new.txt"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
 # ---- B: pull — add/add conflict; choose "r" (take remote) ----
-cd test\cli\work_merge_b & bit pull
+cd test\cli\output\work_merge_b & bit pull
 <<<
 r
 >>> /Automatic merge failed|CONFLICT|Resolving conflicts|Merge complete|conflict/
 >>>= 0
 
 # ---- Verify B took A's version ----
-findstr /C:"A created this" test\cli\work_merge_b\.bit\index\shared_new.txt >nul
+findstr /C:"A created this" test\cli\output\work_merge_b\.bit\index\shared_new.txt >nul
 <<<
 >>>
 >>>= 0
@@ -419,13 +419,13 @@ findstr /C:"A created this" test\cli\work_merge_b\.bit\index\shared_new.txt >nul
 # ======================================================================
 
 # ---- Verify clean state first ----
-cd test\cli\work_merge_b & bit status
+cd test\cli\output\work_merge_b & bit status
 <<<
 >>> /nothing to commit|working tree clean|up to date/
 >>>= 0
 
 # ---- merge --abort when nothing in progress: should print error ----
-cd test\cli\work_merge_b & bit merge --abort
+cd test\cli\output\work_merge_b & bit merge --abort
 <<<
 >>>2 /no merge in progress/
 >>>= 1
@@ -435,7 +435,7 @@ cd test\cli\work_merge_b & bit merge --abort
 # (Mirrors Git's "git merge --continue fails without in-progress merge")
 # ======================================================================
 
-cd test\cli\work_merge_b & bit merge --continue
+cd test\cli\output\work_merge_b & bit merge --continue
 <<<
 >>>2 /no merge in progress|error/
 >>>= 1
@@ -448,35 +448,35 @@ cd test\cli\work_merge_b & bit merge --continue
 # ======================================================================
 
 # ---- Re-sync ----
-cd test\cli\work_merge_b & bit push
+cd test\cli\output\work_merge_b & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
-cd test\cli\work_merge_a & bit fetch & bit pull
+cd test\cli\output\work_merge_a & bit fetch & bit pull
 <<<
 >>> //
 >>>= 0
 
 # ---- A: modify text.txt and push ----
-cd test\cli\work_merge_a & echo accept remote test> text.txt & bit add text.txt & bit commit -m "A: accept-remote test"
+cd test\cli\output\work_merge_a & echo accept remote test> text.txt & bit add text.txt & bit commit -m "A: accept-remote test"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
-cd test\cli\work_merge_a & bit push
+cd test\cli\output\work_merge_a & bit push
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
 # ---- B: pull with --accept-remote (skip conflict resolution, accept remote) ----
-cd test\cli\work_merge_b & bit pull origin --accept-remote
+cd test\cli\output\work_merge_b & bit pull origin --accept-remote
 <<<
 >>> /Accepting remote file state|accept-remote completed|Scanning remote/
 >>>= 0
 
 # ---- Verify B accepted A's content ----
-findstr /C:"accept remote test" test\cli\work_merge_b\.bit\index\text.txt >nul
+findstr /C:"accept remote test" test\cli\output\work_merge_b\.bit\index\text.txt >nul
 <<<
 >>>
 >>>= 0
@@ -488,7 +488,7 @@ findstr /C:"accept remote test" test\cli\work_merge_b\.bit\index\text.txt >nul
 
 # ---- B: status should be clean ----
 # Note: binary files may show as modified, but merge succeeded
-cd test\cli\work_merge_b & bit status
+cd test\cli\output\work_merge_b & bit status
 <<<
 >>> /nothing to commit|working tree clean|up to date/
 >>>= 0
@@ -499,13 +499,13 @@ cd test\cli\work_merge_b & bit status
 # cd test\cli\work_merge_b & bit fsck
 
 # ---- A: status should be clean ----
-cd test\cli\work_merge_a & bit status
+cd test\cli\output\work_merge_a & bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
 
 # ---- A: fsck should find no issues ----
-cd test\cli\work_merge_a & bit fsck
+cd test\cli\output\work_merge_a & bit fsck
 <<<
 >>>
 >>>= 0
@@ -514,7 +514,7 @@ cd test\cli\work_merge_a & bit fsck
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_merge_a 2>nul & rmdir /s /q test\cli\work_merge_b 2>nul & rmdir /s /q test\cli\shared_merge_remote 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_merge_a 2>nul & rmdir /s /q test\cli\output\work_merge_b 2>nul & rmdir /s /q test\cli\output\shared_merge_remote 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done

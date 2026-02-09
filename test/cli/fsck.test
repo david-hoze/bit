@@ -1,56 +1,56 @@
 # bit fsck tests (git-style output: terse, one line per issue, exit 1 on any failure)
 
 # --- fsck on fresh repo (no remote): prints nothing when OK ---
-rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init
+rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # fsck OK = status messages to stderr, exit 0
-cd test\cli\work & bit fsck
+cd test\cli\output\work & bit fsck
 <<<
 >>>2 /OK/
 >>>= 0
 
 # --- fsck on repo with committed files: status messages on OK ---
-rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init & echo hello> a.txt & bit add a.txt & bit commit -m "Add a"
+rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init & echo hello> a.txt & bit add a.txt & bit commit -m "Add a"
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work & bit fsck
+cd test\cli\output\work & bit fsck
 <<<
 >>>2 /OK/
 >>>= 0
 
 # --- fsck detects local hash mismatch: git-style "hash mismatch <path>", exit 1 ---
-rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init & echo original> file.bin & bit add file.bin & bit commit -m "Add file"
+rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init & echo original> file.bin & bit add file.bin & bit commit -m "Add file"
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\work & echo corrupted> file.bin
+cd test\cli\output\work & echo corrupted> file.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work & bit fsck
+cd test\cli\output\work & bit fsck
 <<<
 >>>2 /hash mismatch.*file\.bin/
 >>>= 1
 
 # --- fsck detects missing file: git-style "missing <path>", exit 1 ---
-rmdir /s /q test\cli\work 2>nul & mkdir test\cli\work & cd test\cli\work & bit init & echo x> missing.txt & bit add missing.txt & bit commit -m "Add missing"
+rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init & echo x> missing.txt & bit add missing.txt & bit commit -m "Add missing"
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-del test\cli\work\missing.txt
+del test\cli\output\work\missing.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work & bit fsck
+cd test\cli\output\work & bit fsck
 <<<
 >>>2 /missing.*missing\.txt/
 >>>= 1

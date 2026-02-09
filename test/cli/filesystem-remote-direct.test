@@ -2,83 +2,83 @@
 # Tests running bit commands directly at the filesystem remote location
 
 # Setup: Clean workspace (timeout helps Windows release file handles)
-timeout /t 1 >nul & rmdir /s /q test\cli\work_direct 2>nul & rmdir /s /q test\cli\fs_remote_direct 2>nul & mkdir test\cli\work_direct & mkdir test\cli\fs_remote_direct
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_direct 2>nul & rmdir /s /q test\cli\output\fs_remote_direct 2>nul & mkdir test\cli\output\work_direct & mkdir test\cli\output\fs_remote_direct
 <<<
 >>>
 >>>= 0
 
 # Initialize local repo
-cd test\cli\work_direct & bit init
+cd test\cli\output\work_direct & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Add filesystem remote
-cd test\cli\work_direct & bit remote add origin ..\fs_remote_direct
+cd test\cli\output\work_direct & bit remote add origin ..\fs_remote_direct
 <<<
 >>> /Remote 'origin' added/
 >>>= 0
 
 # Create and push a file
-cd test\cli\work_direct & echo test content> file.txt & bit add file.txt & bit commit -m "Initial"
+cd test\cli\output\work_direct & echo test content> file.txt & bit add file.txt & bit commit -m "Initial"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\work_direct & bit push
+cd test\cli\output\work_direct & bit push
 <<<
 >>> /Push complete/
 >>>= 0
 
 # Run bit status at the remote (should work since it's a full repo)
-cd test\cli\fs_remote_direct & bit status
+cd test\cli\output\fs_remote_direct & bit status
 <<<
 >>> /nothing to commit|working tree clean|On branch/
 >>>= 0
 
 # Run bit log at the remote
-cd test\cli\fs_remote_direct & bit log --oneline
+cd test\cli\output\fs_remote_direct & bit log --oneline
 <<<
 >>> /Initial/
 >>>= 0
 
 # Modify file directly at remote
-cd test\cli\fs_remote_direct & echo remote change> file.txt & bit add file.txt & bit commit -m "Remote edit"
+cd test\cli\output\fs_remote_direct & echo remote change> file.txt & bit add file.txt & bit commit -m "Remote edit"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
 # Local push should now fail (remote has diverged)
-cd test\cli\work_direct & echo local change> other.txt & bit add other.txt & bit commit -m "Local edit"
+cd test\cli\output\work_direct & echo local change> other.txt & bit add other.txt & bit commit -m "Local edit"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\work_direct & bit push
+cd test\cli\output\work_direct & bit push
 <<<
 >>>2 /error.*Remote has local commits/
 >>>= 1
 
 # Local pull should work (merges remote changes)
-cd test\cli\work_direct & bit pull
+cd test\cli\output\work_direct & bit pull
 <<<
 >>> /Pull|Merging|Updating/
 >>>= 0
 
 # Now push should succeed
-cd test\cli\work_direct & bit push
+cd test\cli\output\work_direct & bit push
 <<<
 >>> /Push complete/
 >>>= 0
 
 # Verify remote has both files
-if exist "test\cli\fs_remote_direct\file.txt" (echo file exists) else (echo missing)
+if exist "test\cli\output\fs_remote_direct\file.txt" (echo file exists) else (echo missing)
 <<<
 >>>
 file exists
 >>>= 0
 
-if exist "test\cli\fs_remote_direct\other.txt" (echo other exists) else (echo missing)
+if exist "test\cli\output\fs_remote_direct\other.txt" (echo other exists) else (echo missing)
 <<<
 >>>
 other exists
@@ -88,7 +88,7 @@ other exists
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_direct 2>nul & rmdir /s /q test\cli\fs_remote_direct 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_direct 2>nul & rmdir /s /q test\cli\output\fs_remote_direct 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done

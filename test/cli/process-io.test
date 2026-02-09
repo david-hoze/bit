@@ -13,7 +13,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\work_process 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_process 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -23,12 +23,12 @@ cleanup done
 # SECTION 1: SETUP
 # ======================================================================
 
-mkdir test\cli\work_process
+mkdir test\cli\output\work_process
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_process & bit init
+cd test\cli\output\work_process & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -39,33 +39,33 @@ cd test\cli\work_process & bit init
 
 # ---- Run multiple git commands in sequence ----
 # If handles leak or aren't closed properly, subsequent commands will fail
-cd test\cli\work_process & bit status
+cd test\cli\output\work_process & bit status
 <<<
 >>> /On branch main/
 >>>= 0
 
-cd test\cli\work_process & bit status
+cd test\cli\output\work_process & bit status
 <<<
 >>> /On branch main/
 >>>= 0
 
-cd test\cli\work_process & bit status
+cd test\cli\output\work_process & bit status
 <<<
 >>> /On branch main/
 >>>= 0
 
 # ---- Create a file and check status multiple times ----
-cd test\cli\work_process & echo test > file.txt
+cd test\cli\output\work_process & echo test > file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\work_process & bit status
+cd test\cli\output\work_process & bit status
 <<<
 >>> /Untracked files/
 >>>= 0
 
-cd test\cli\work_process & bit status
+cd test\cli\output\work_process & bit status
 <<<
 >>> /Untracked files/
 >>>= 0
@@ -76,7 +76,7 @@ cd test\cli\work_process & bit status
 
 # ---- Test that error output is properly captured ----
 # Commands that fail should have their stderr captured without hanging
-cd test\cli\work_process & bit add nonexistent_file.txt
+cd test\cli\output\work_process & bit add nonexistent_file.txt
 <<<
 >>>2 /fatal|pathspec|did not match/
 >>>= 128
@@ -85,7 +85,7 @@ cd test\cli\work_process & bit add nonexistent_file.txt
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\work_process 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_process 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
