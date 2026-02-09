@@ -29,6 +29,11 @@ Consult these docs when modifying `.hs` files:
 - `foldl'` never lazy `foldl`
 - Consolidate multiple `liftIO` calls into `liftIO $ do`
 
+### Architecture Boundaries
+- Never call `git` via `rawSystem` or `readProcessWithExitCode` outside `Internal/Git.hs`
+- Never call `rclone` outside `Internal/Rclone.hs`
+- Use `Git.runGitRaw`, `Git.runGitRawAt`, or `Git.runGitAt` instead
+
 ### Key Project Types
 - `BitM` = `ReaderT BitEnv IO` — main monad
 - `Path` — newtype over FilePath, unwrap with `unPath`

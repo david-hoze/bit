@@ -7,7 +7,12 @@
       "Bash(shelltest test:*)",
       "Bash(tasklist:*)",
       "Bash(findstr:*)",
-      "Bash(rclone lsjson:*)"
+      "Bash(rclone lsjson:*)",
+      "Bash(bit @gdrive log:*)",
+      "Bash(bit @gdrive status:*)",
+      "Bash(bit @gdrive ls-files:*)",
+      "Bash(shelltest test/cli/remote-targeted.test:*)",
+      "Bash(Remove-Item test-output.txt -ErrorAction SilentlyContinue)"
     ]
   }
 }

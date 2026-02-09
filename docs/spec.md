@@ -555,7 +555,7 @@ The `--remote <name>` flag (or its `@<remote>` shorthand) allows commands to ope
 **Key architectural property**: Each command is fully ephemeral. The workflow for every command is:
 1. Fetch the bundle from the remote
 2. Inflate it into a temporary directory
-3. Operate on it (scan, add, commit, status, log)
+3. Operate on it (scan, add, commit, status, log, ls-files)
 4. Re-bundle the changes (if any)
 5. Push the new bundle back to the remote
 6. Clean up the temporary workspace
@@ -1150,7 +1150,7 @@ Interactive per-file conflict resolution:
     for simplicity).
 
 18. **Ephemeral remote workspaces (no persistent state)**: Remote-targeted
-    commands (`bit @remote init/add/commit/status/log`) use an ephemeral
+    commands (`bit @remote init/add/commit/status/log/ls-files`) use an ephemeral
     workspace pattern — each command fetches the bundle from the remote,
     inflates into a system temp directory, operates, re-bundles if changed,
     pushes back, and cleans up. No persistent workspace is stored under
@@ -1214,7 +1214,7 @@ Interactive per-file conflict resolution:
 - `bit verify` — local file verification against metadata
 - `bit verify --remote` — remote file verification against remote metadata
 - `bit fsck` — full integrity check
-- `bit --remote <name>` / `bit @<remote>` — ephemeral remote workspace commands (`init`, `add`, `commit`, `status`, `log`); each command fetches bundle, inflates into temp dir, operates, re-bundles if changed, pushes, and cleans up
+- `bit --remote <name>` / `bit @<remote>` — ephemeral remote workspace commands (`init`, `add`, `commit`, `status`, `log`, `ls-files`); each command fetches bundle, inflates into temp dir, operates, re-bundles if changed, pushes, and cleans up
 - Pipeline: pure diff → plan → action generation with property tests
 - Device-identity system for filesystem remotes (UUID + hardware serial)
 - Filesystem remote transport (full bit repo at remote, direct git fetch/merge)
@@ -1236,7 +1236,7 @@ Interactive per-file conflict resolution:
 |--------|------|
 | `bit/Commands.hs` | CLI dispatch, env setup |
 | `Bit.hs` | All business logic |
-| `Internal/Git.hs` | Git command wrapper (`runGitAt` for arbitrary paths) |
+| `Internal/Git.hs` | Git command wrapper (`runGitAt`/`runGitRawAt` for arbitrary paths) |
 | `Internal/Transport.hs` | Rclone command wrapper |
 | `Internal/Config.hs` | Path constants |
 | `Internal/ConfigFile.hs` | Config file parsing (strict ByteString) |

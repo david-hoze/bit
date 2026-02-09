@@ -31,7 +31,6 @@ import System.Directory
     )
 import System.Exit (ExitCode(..), exitWith)
 import System.IO (hPutStrLn, stderr, stdout, hFlush)
-import System.Process (rawSystem)
 import qualified Internal.Git as Git
 import Control.Monad (when, unless, forM, forM_, void)
 import Data.Char (toLower, isSpace)
@@ -365,7 +364,7 @@ addRemote remote paths =
 commitRemote :: Remote -> [String] -> IO ExitCode
 commitRemote remote commitArgs =
     withRemoteWorkspace remote $ \wsPath ->
-        rawSystem "git" (["-C", wsPath, "commit"] ++ commitArgs)
+        Git.runGitRawAt wsPath ("commit" : commitArgs)
 
 -- | Show status of remote workspace (read-only).
 -- Scans the remote to detect untracked files, then runs git status.
@@ -381,14 +380,14 @@ statusRemote remote rest =
                 -- This ensures stat info matches and content-identical files show as clean
                 void $ Git.runGitAt wsPath ["add", "-u"]
                 void $ Git.runGitAt wsPath ["reset", "HEAD"]
-                rawSystem "git" (["-C", wsPath, "status"] ++ rest)
+                Git.runGitRawAt wsPath ("status" : rest)
             else pure (ExitFailure 1)
 
 -- | Show log of remote workspace (read-only).
 logRemote :: Remote -> [String] -> IO ExitCode
 logRemote remote rest =
     withRemoteWorkspaceReadOnly remote $ \wsPath ->
-        rawSystem "git" (["-C", wsPath, "log"] ++ rest)
+        Git.runGitRawAt wsPath ("log" : "--decorate-refs=refs/heads/" : rest)
 
 -- | List tracked files in remote workspace (read-only).
 -- Scans the remote to reconstruct metadata, then runs git ls-files.

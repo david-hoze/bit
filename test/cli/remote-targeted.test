@@ -172,7 +172,23 @@ cd test\cli\output\work_rmt_a & bit @origin log --oneline
 >>>= 0
 
 # ======================================================================
-# SECTION 7: TEST REMOTE-TARGETED COMMIT (amend use case)
+# SECTION 7: TEST REMOTE-TARGETED LS-FILES
+# ======================================================================
+
+# ---- List tracked files — should show all committed files ----
+cd test\cli\output\work_rmt_a & bit @origin ls-files
+<<<
+>>> /file1\.txt/
+>>>= 0
+
+# ---- ls-files with --remote flag ----
+cd test\cli\output\work_rmt_a & bit --remote origin ls-files
+<<<
+>>> /file2\.md/
+>>>= 0
+
+# ======================================================================
+# SECTION 8: TEST REMOTE-TARGETED COMMIT (amend use case)
 # ======================================================================
 
 # ---- Amend the last commit message ----
@@ -188,7 +204,7 @@ cd test\cli\output\work_rmt_a & bit @origin log --oneline
 >>>= 0
 
 # ======================================================================
-# SECTION 8: TEST --remote FLAG (portable alternative to @)
+# SECTION 9: TEST --remote FLAG (portable alternative to @)
 # ======================================================================
 
 # ---- Test --remote flag for status ----
@@ -204,7 +220,7 @@ cd test\cli\output\work_rmt_a & bit --remote origin log --oneline
 >>>= 0
 
 # ======================================================================
-# SECTION 9: TEST ERROR CASES
+# SECTION 10: TEST ERROR CASES
 # ======================================================================
 
 # ---- Test unsupported command in remote context ----
