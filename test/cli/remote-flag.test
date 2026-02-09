@@ -1,10 +1,11 @@
 # =============================================================================
-# --remote Flag Test
+# --remote Flag Test (Ephemeral Workspace)
 #
 # Tests the --remote <name> flag as a portable alternative to @<remote> syntax.
 # Verifies equivalence with @<remote> for all remote workspace commands, and
 # tests error handling for misuse.
-# Prerequisites: filesystem remote support
+# Uses ephemeral workspace pattern: no persistent workspace between commands.
+# Prerequisites: filesystem remote support, rclone
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
@@ -64,51 +65,58 @@ cd test\cli\output\work_rflag_a & bit remote add origin ..\fs_remote_rflag
 >>>= 0
 
 # ======================================================================
-# SECTION 3: TEST --remote <name> init
+# SECTION 3: TEST --remote <name> init (creates empty bundle, no scan)
 # ======================================================================
 
-# ---- --remote origin init should scan the remote ----
+# ---- --remote origin init should create an empty bundle on remote ----
 cd test\cli\output\work_rflag_a & bit --remote origin init
 <<<
->>> /Scanning remote/
+>>> /[Ii]nitialized.*bit.*repository.*on.*remote/
 >>>= 0
 
-# ---- Verify workspace was created ----
-cd test\cli\output\work_rflag_a & if exist .bit\remote-workspaces\origin\.git echo workspace exists
+# ---- Verify NO persistent workspace was created ----
+cd test\cli\output\work_rflag_a & if exist .bit\remote-workspaces\origin\.git (echo workspace exists) else (echo no workspace)
 <<<
 >>>
-workspace exists
+no workspace
+>>>= 0
+
+# ---- Verify bundle was created on remote ----
+cd test\cli\output\work_rflag_a & if exist ..\fs_remote_rflag\.bit\bit.bundle echo bundle exists
+<<<
+>>>
+bundle exists
 >>>= 0
 
 # ======================================================================
-# SECTION 4: TEST --remote <name> add
+# SECTION 4: TEST --remote <name> add (scans, writes metadata, auto-commits)
 # ======================================================================
 
-# ---- Stage all files in remote workspace ----
+# ---- Stage all files in remote workspace (scans and auto-commits) ----
 cd test\cli\output\work_rflag_a & bit --remote origin add .
 <<<
->>>
+>>> /Scanning remote|Remote metadata updated/
 >>>= 0
 
 # ======================================================================
-# SECTION 5: TEST --remote <name> status
+# SECTION 5: TEST --remote <name> status (should be clean after add)
 # ======================================================================
 
 cd test\cli\output\work_rflag_a & bit --remote origin status
 <<<
->>> /Changes to be committed|new file/
+>>> /nothing to commit|working tree clean/
 >>>= 0
 
 # ======================================================================
-# SECTION 6: TEST --remote <name> commit
+# SECTION 6: TEST --remote <name> commit (amend use case)
 # ======================================================================
 
-cd test\cli\output\work_rflag_a & bit --remote origin commit -m "Commit via --remote flag"
+cd test\cli\output\work_rflag_a & bit --remote origin commit --amend -m "Commit via --remote flag"
 <<<
->>> /Pushing.*bundle|Remote is now a bit repository/
+>>> /Commit via --remote flag/
 >>>= 0
 
-# ---- Verify bundle was created on remote ----
+# ---- Verify bundle was updated on remote ----
 cd test\cli\output\work_rflag_a & if exist ..\fs_remote_rflag\.bit\bit.bundle echo bundle exists
 <<<
 >>>

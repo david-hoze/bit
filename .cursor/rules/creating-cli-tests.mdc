@@ -112,8 +112,8 @@ timeout /t 1 >nul & rmdir /s /q dir 2>nul
 Use backslashes for Windows paths in test commands:
 
 ```batch
-cd test\cli\work & bit init    # Correct
-cd test/cli/work & bit init    # May work but inconsistent
+cd test\cli\output\work_mytest & bit init    # Correct
+cd test/cli/output/work_mytest & bit init    # May work but inconsistent
 ```
 
 ### Error Suppression
@@ -122,10 +122,10 @@ Use `2>nul` only for cleanup commands where failure is acceptable. For actual te
 
 ```batch
 # Cleanup - suppress errors (directory may not exist)
-rmdir /s /q test\cli\work 2>nul
+rmdir /s /q test\cli\output\work_mytest 2>nul
 
 # Test command - let errors show
-cd test\cli\work & bit init
+cd test\cli\output\work_mytest & bit init
 ```
 
 ## Output Matching
@@ -150,7 +150,7 @@ cd test\cli\work & bit init
 
 ```batch
 # Expect error on stderr
-cd test\cli\work & bit merge --abort
+cd test\cli\output\work_mytest & bit merge --abort
 <<<
 >>>2 /no merge in progress/
 >>>= 1

@@ -1,9 +1,11 @@
 # =============================================================================
-# Remote-Targeted Commands Test
+# Remote-Targeted Commands Test (Ephemeral Workspace)
 #
-# Tests the @<remote> syntax for operating on remote repositories without
-# downloading large files. Verifies scanning, staging, committing, and status.
-# Prerequisites: filesystem remote support
+# Tests the @<remote> / --remote syntax for operating on remote repositories.
+# Uses an ephemeral workspace pattern: each command fetches the bundle from
+# the remote, inflates into a temp dir, operates, re-bundles, and pushes back.
+# No persistent workspace between commands.
+# Prerequisites: rclone (for remote file operations)
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
@@ -76,104 +78,115 @@ cd test\cli\output\work_rmt_a & bit remote add origin ..\fs_remote_rmt
 # SECTION 3: TEST REMOTE-TARGETED INIT
 # ======================================================================
 
-# ---- Test @origin init - scan the remote and build metadata workspace ----
+# ---- Test @origin init - creates empty bundle on remote ----
 cd test\cli\output\work_rmt_a & bit @origin init
 <<<
->>> /Scanning remote/
+>>> /[Ii]nitialized.*bit.*repository.*on.*remote/
 >>>= 0
 
-# ---- Verify workspace was created ----
-cd test\cli\output\work_rmt_a & if exist .bit\remote-workspaces\origin\.git echo workspace exists
+# ---- Verify NO persistent workspace was created ----
+cd test\cli\output\work_rmt_a & if exist .bit\remote-workspaces\origin\.git (echo workspace exists) else (echo no workspace)
 <<<
 >>>
-workspace exists
+no workspace
 >>>= 0
 
-# ---- Verify bundle was created on remote immediately after init ----
+# ---- Verify bundle was created on remote ----
 cd test\cli\output\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
 <<<
 >>>
 bundle exists
 >>>= 0
 
-# ---- Test status after init (should be clean since auto-committed) ----
-cd test\cli\output\work_rmt_a & bit @origin status
-<<<
->>> /nothing to commit|working tree clean/
->>>= 0
-
-# ---- Test error: workspace already exists ----
+# ---- Test error: init when already initialized ----
 cd test\cli\output\work_rmt_a & bit @origin init
 <<<
->>>2 /already exists/
+>>>2 /already has a bit repository/
 >>>= 1
 
 # ======================================================================
-# SECTION 4: TEST REMOTE-TARGETED ADD (after modifications)
+# SECTION 4: TEST REMOTE-TARGETED ADD (scans remote, writes metadata)
 # ======================================================================
 
-# ---- Test add after modifying workspace ----
-cd test\cli\output\work_rmt_a & echo New file > .bit\remote-workspaces\origin\newfile.txt
+# ---- Test add . — scans remote files, writes metadata, auto-commits ----
+cd test\cli\output\work_rmt_a & bit @origin add .
 <<<
->>>
+>>> /Scanning remote|Remote metadata updated/
 >>>= 0
 
-cd test\cli\output\work_rmt_a & bit @origin add newfile.txt
+# ---- Verify bundle was updated on remote ----
+cd test\cli\output\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
 <<<
 >>>
+bundle exists
 >>>= 0
 
-# ---- Test error: add without init ----
+# ---- Test add again with no changes (should report up to date) ----
+cd test\cli\output\work_rmt_a & bit @origin add .
+<<<
+>>> /Nothing to add|up to date/
+>>>= 0
+
+# ---- Test error: add with non-existent remote ----
 cd test\cli\output\work_rmt_a & bit @nonexistent add .
 <<<
 >>>2 /not found/
 >>>= 1
 
 # ======================================================================
-# SECTION 5: TEST REMOTE-TARGETED STATUS
+# SECTION 5: TEST REMOTE-TARGETED STATUS (read-only, ephemeral)
 # ======================================================================
 
-# ---- Check status of remote workspace (should show staged changes) ----
-cd test\cli\output\work_rmt_a & bit @origin status
-<<<
->>> /Changes to be committed|new file/
->>>= 0
-
-# ======================================================================
-# SECTION 6: TEST REMOTE-TARGETED COMMIT (for subsequent changes)
-# ======================================================================
-
-# ---- Commit in remote workspace (creates bundle and pushes it) ----
-cd test\cli\output\work_rmt_a & bit @origin commit -m "Add newfile"
-<<<
->>> /Remote is now a bit repository/
->>>= 0
-
-# ---- Verify bundle still exists on remote ----
-cd test\cli\output\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
-<<<
->>>
-bundle exists
->>>= 0
-
-# ---- Test status after commit (should be clean) ----
+# ---- Check status — should show clean tree after add auto-committed ----
 cd test\cli\output\work_rmt_a & bit @origin status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
 
 # ======================================================================
-# SECTION 7: TEST REMOTE-TARGETED LOG
+# SECTION 6: TEST REMOTE-TARGETED LOG (read-only, ephemeral)
 # ======================================================================
 
-# ---- View commit history in remote workspace (should show initial commit) ----
+# ---- View commit history — should show initial + add commits ----
 cd test\cli\output\work_rmt_a & bit @origin log --oneline
 <<<
->>> /Initial commit|Add newfile/
+>>> /Initial remote repository|Update remote metadata/
 >>>= 0
 
 # ======================================================================
-# SECTION 8: TEST ERROR CASES
+# SECTION 7: TEST REMOTE-TARGETED COMMIT (amend use case)
+# ======================================================================
+
+# ---- Amend the last commit message ----
+cd test\cli\output\work_rmt_a & bit @origin commit --amend -m "Initial metadata scan"
+<<<
+>>> /Initial metadata scan/
+>>>= 0
+
+# ---- Verify the amended message shows in log ----
+cd test\cli\output\work_rmt_a & bit @origin log --oneline
+<<<
+>>> /Initial metadata scan/
+>>>= 0
+
+# ======================================================================
+# SECTION 8: TEST --remote FLAG (portable alternative to @)
+# ======================================================================
+
+# ---- Test --remote flag for status ----
+cd test\cli\output\work_rmt_a & bit --remote origin status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ---- Test --remote flag for log ----
+cd test\cli\output\work_rmt_a & bit --remote origin log --oneline
+<<<
+>>> /Initial metadata scan/
+>>>= 0
+
+# ======================================================================
+# SECTION 9: TEST ERROR CASES
 # ======================================================================
 
 # ---- Test unsupported command in remote context ----
@@ -198,13 +211,6 @@ cd test\cli\output\work_rmt_a\notrepo & bit @origin init
 <<<
 >>>2 /not a bit repository/
 >>>= 1
-
-# ======================================================================
-# SECTION 9: VERIFY BUNDLE ON REMOTE
-# ======================================================================
-
-# Note: Full pull integration test would go here.
-# The bundle exists on the remote and can be fetched separately.
 
 # ======================================================================
 # CLEANUP

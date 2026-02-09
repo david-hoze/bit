@@ -2,7 +2,7 @@
 
 CLI tests use **[shelltest](https://hackage.haskell.org/package/shelltestrunner)** (shelltestrunner). Test files use the `.test` extension and Format 3: command line, `<<<` (stdin), `>>>` expected stdout (literal or `/regex/`), `>>>=` expected exit code.
 
-**Run from the repository root** so paths like `test\cli\work_merge_a` resolve correctly.
+**Run from the repository root** so paths like `test\cli\output\work_merge_a` resolve correctly.
 
 ## Forbidden Patterns
 
@@ -19,7 +19,7 @@ Test files **must not** use Windows environment variables that expand before com
 Example of the problem:
 
 ```batch
-cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+cd test\cli\output\work_mytest & bit remote add origin "%CD%\test\cli\output\remote_mirror"
 ```
 
 On Windows, `%CD%` expands **before** the command chain runs. If the `cd` command fails (or hasn't executed yet due to timing), `bit remote add origin` runs in the **main repository directory**, changing the development repo's remote URL instead of the test repo's. This corrupts the development environment.
@@ -28,10 +28,10 @@ On Windows, `%CD%` expands **before** the command chain runs. If the `cd` comman
 
 ```batch
 # WRONG (banned):
-cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+cd test\cli\output\work_mytest & bit remote add origin "%CD%\test\cli\output\remote_mirror"
 
 # CORRECT:
-cd test\cli\work & bit remote add origin ..\remote_mirror
+cd test\cli\output\work_mytest & bit remote add origin ..\remote_mirror
 ```
 
 Relative paths resolve at the time the command executes, so they work correctly even if the working directory changes.

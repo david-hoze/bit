@@ -358,11 +358,11 @@ past the merge).
 | `bit merge --continue` | `git merge --continue` | Continue after conflict resolution |
 | `bit merge --abort` | `git merge --abort` | Abort current merge |
 | `bit branch --unset-upstream` | `git branch --unset-upstream` | Remove tracking config |
-| `bit --remote <name> init` | — | Scan remote and build metadata workspace |
-| `bit --remote <name> add <path>` | — | Stage files in remote workspace |
-| `bit --remote <name> commit -m <msg>` | — | Commit and push metadata bundle to remote |
-| `bit --remote <name> status` | — | Show remote workspace status |
-| `bit --remote <name> log` | — | Show remote workspace history |
+| `bit --remote <name> init` | — | Create empty bundle on remote (ephemeral) |
+| `bit --remote <name> add <path>` | — | Scan remote, write metadata, auto-commit, push bundle (ephemeral) |
+| `bit --remote <name> commit -m <msg>` | — | Commit in ephemeral workspace and push bundle |
+| `bit --remote <name> status` | — | Show remote workspace status (read-only, ephemeral) |
+| `bit --remote <name> log` | — | Show remote workspace history (read-only, ephemeral) |
 | `bit @<remote> <cmd>` | — | Shorthand for `--remote` (needs quoting in PowerShell) |
 
 ---
@@ -548,9 +548,19 @@ When a user has large amounts of data already on a remote (e.g., 10GB of files o
 
 This is wasteful when the files are already at the destination. The user wants to **create metadata for files already on the remote** without downloading them.
 
-### Solution: Remote Workspaces
+### Solution: Ephemeral Remote Workspaces
 
 The `--remote <name>` flag (or its `@<remote>` shorthand) allows commands to operate against a remote as if it were a working directory, while only downloading small files (for text classification). Large binary files stay on the remote — bit just reads their hashes from `rclone lsjson --hash`.
+
+**Key architectural property**: Each command is fully ephemeral. The workflow for every command is:
+1. Fetch the bundle from the remote
+2. Inflate it into a temporary directory
+3. Operate on it (scan, add, commit, status, log)
+4. Re-bundle the changes (if any)
+5. Push the new bundle back to the remote
+6. Clean up the temporary workspace
+
+No persistent local workspace state exists between commands. The remote's `.bit/bit.bundle` is the sole source of truth.
 
 ### The `--remote` Flag
 
@@ -574,7 +584,8 @@ bit @origin init              # shorthand — needs quoting in PowerShell
 bit init                                    # local repo (empty working dir)
 bit remote add origin gdrive:Projects/footage
 
-bit --remote origin init                    # scan remote, commit metadata, push bundle — done
+bit --remote origin init                    # create empty bundle on remote
+bit --remote origin add .                   # scan remote, write metadata, auto-commit, push bundle
 
 bit pull                                    # pull metadata locally (instant — just the bundle)
 # Working dir is still empty, but bit knows about all 847 files
@@ -589,18 +600,38 @@ Both forms are parsed in `Commands.hs` by `extractRemoteTarget` before command d
 
 The remote name is resolved via the existing `resolveRemote` function, same as named remotes for push/pull.
 
-#### Remote Workspace Structure
+#### Ephemeral Workspace Pattern
 
-A remote workspace is a temporary `.bit/index` built from the remote's actual file state. It lives at `.bit/remote-workspaces/<remote-name>/` inside the local repo:
+There is no persistent workspace on disk. Each command creates a temporary directory in the system temp folder, operates, and cleans up:
 
 ```
-.bit/
-├── index/              ← local metadata (normal)
-├── remote-workspaces/
-│   └── origin/         ← remote-targeted workspace
-│       ├── .git/       ← git repo for this workspace
-│       └── <metadata>  ← files mirroring remote structure
+%TEMP%/
+├── bit-remote-init/    ← used by 'init' (one-time)
+├── bit-remote-ws/      ← used by 'add', 'commit' (read-write)
+│   ├── bit.bundle      ← fetched bundle
+│   ├── workspace/      ← inflated git repo
+│   │   ├── .git/
+│   │   └── <metadata>
+│   └── new.bundle      ← re-bundled after changes
+└── bit-remote-ro/      ← used by 'status', 'log' (read-only)
 ```
+
+All temporary directories are exception-safe via `bracket` — cleanup runs even if the command fails. Leftover directories from previous runs are removed at setup to prevent collisions.
+
+#### Bundle Inflation
+
+Inflating a bundle into a workspace uses a three-step sequence designed to avoid Git pitfalls:
+
+```
+git init --initial-branch=main
+git fetch <bundle> +refs/heads/*:refs/remotes/bundle/*
+git reset --hard refs/remotes/bundle/main
+```
+
+**Why this specific sequence:**
+- Fetching into `refs/remotes/bundle/*` (not `refs/heads/*`) avoids Git's "refusing to fetch into checked out branch" error
+- `git reset --hard` (not `checkout -B`) ensures the working tree is populated — `checkout -B` can skip the working tree update when already on the same branch name
+- `git clone` was avoided because on Windows, `removeDirectoryRecursive` can fail to fully clean up temp directories due to file locking, causing "directory already exists" errors
 
 #### Text File Classification Without Full Download
 
@@ -620,11 +651,11 @@ For a typical 10GB media repo, this downloads maybe 50KB of text files while ski
 
 | Command | Behavior |
 |---------|----------|
-| `bit --remote <name> init` | Scan remote, classify files, build metadata workspace |
-| `bit --remote <name> add <path>` | Stage files in remote workspace (git add in workspace) |
-| `bit --remote <name> commit -m <msg>` | Commit workspace metadata, create bundle, push to remote |
-| `bit --remote <name> status` | Show remote workspace status (git status in workspace) |
-| `bit --remote <name> log` | Show remote workspace history (git log in workspace) |
+| `bit --remote <name> init` | Create empty bundle on remote (no scan — just initializes history) |
+| `bit --remote <name> add <path>` | Fetch bundle → scan remote → classify files → write metadata → auto-commit → push bundle |
+| `bit --remote <name> commit <args>` | Fetch bundle → commit with provided args → push bundle (useful for amending) |
+| `bit --remote <name> status` | Fetch bundle → show git status (read-only, no push) |
+| `bit --remote <name> log` | Fetch bundle → show git log (read-only, no push) |
 
 The `@<remote>` shorthand is equivalent (e.g., `bit @origin init`).
 
@@ -632,40 +663,53 @@ All other commands are not supported in remote context (e.g., `bit --remote orig
 
 ### Implementation Details
 
+Located in `Bit.RemoteWorkspace`:
+
+#### Core Helpers
+
+- **`withTempDir`**: Creates a named temp directory under `%TEMP%`, exception-safe via `bracket`. Removes leftover from previous runs at setup, cleans up on exit.
+- **`withRemoteWorkspace`**: Fetches bundle → inflates → runs action → if HEAD changed, re-bundles and pushes → cleans up. For read-write commands (`add`, `commit`).
+- **`withRemoteWorkspaceReadOnly`**: Fetches bundle → inflates → runs action → cleans up (no push). For read-only commands (`status`, `log`).
+
 #### 1. `bit --remote origin init` (or `bit @origin init`)
 
-Located in `Bit.RemoteWorkspace.initRemoteWorkspace`:
+Does NOT use `withRemoteWorkspace` — there's no bundle to fetch yet.
 
-1. Creates workspace directory structure at `.bit/remote-workspaces/<remote>/`
-2. Runs `rclone lsjson --hash --recursive` on the remote (via `fetchRemoteFiles`)
-3. Partitions files into "definitely binary" (by size/extension) and "maybe text" (candidates)
-4. Downloads text candidates to a temp directory via rclone
-5. Classifies downloaded files using existing `hashAndClassifyFile`
-6. For text files: downloads actual content to workspace
-7. For binary files: writes hash+size metadata
-8. Initializes a git repo in the workspace (`git init --initial-branch=main`)
-9. Auto-commits all files (`git add . && git commit -m "Initial commit"`)
-10. Creates bundle and pushes to remote (`.bit/bit.bundle`) via `createAndPushBundle`
+1. Creates a temp directory
+2. Checks if bundle already exists on remote (errors if it does)
+3. `git init --initial-branch=main` in the temp workspace
+4. `git commit --allow-empty -m "Initial remote repository"`
+5. `git bundle create` from the workspace
+6. Pushes bundle to remote at `.bit/bit.bundle` via rclone
+7. Cleans up temp directory
 
-#### 2. `bit --remote origin add/commit/status/log`
+#### 2. `bit --remote origin add <path>` (or `bit @origin add .`)
 
-These commands operate on the remote workspace git repository:
+Uses `withRemoteWorkspace` (read-write):
 
-- `bit --remote origin add .` → `git -C .bit/remote-workspaces/origin add .`
-- `bit --remote origin commit -m "msg"` → `git -C .bit/remote-workspaces/origin commit -m "msg"` + shared bundle creation + push
-- `bit --remote origin status` → `git -C .bit/remote-workspaces/origin status`
-- `bit --remote origin log` → `git -C .bit/remote-workspaces/origin log`
+1. Fetches and inflates the bundle
+2. **Scans** the remote via `rclone lsjson --hash --recursive`
+3. **Classifies** files into binary (by size/extension) and text candidates
+4. Downloads text candidates, classifies via `hashAndClassifyFile`
+5. **Clears** the workspace (removes all files except `.git`)
+6. **Writes** metadata: text files get their content downloaded from remote, binary files get `hash:/size:` metadata
+7. `git add` the specified paths (or `.`)
+8. If changes exist, auto-commits with "Update remote metadata"
+9. Re-bundles and pushes if HEAD changed
 
-On commit, the workspace commits its metadata, then calls the shared `createAndPushBundle` function which:
-1. Creates a git bundle at `.bit/remote-workspaces/origin/.git/bit.bundle` using `--all`
-2. Uploads the bundle to the remote at `.bit/bit.bundle` via `rclone copyto`
-3. Cleans up the local bundle file
+The scan+classify+write step happens on **every** `add` call — the workspace starts fresh each time, so the full remote state is reconstructed.
 
-The remote now has a `.bit/bit.bundle` that can be fetched via normal `bit pull`.
+#### 3. `bit --remote origin commit`
+
+Uses `withRemoteWorkspace` (read-write). Passes args through to `git commit` in the ephemeral workspace. Useful for amending the last commit message (`--amend -m "Better message"`).
+
+#### 4. `bit --remote origin status` / `log`
+
+Uses `withRemoteWorkspaceReadOnly`. Passes args through to `git status` / `git log` in the ephemeral workspace. No changes are pushed back.
 
 ### Integration with Normal Pull
 
-After `bit --remote origin commit`, the remote has a bundle at `.bit/bit.bundle`. A local `bit pull` will:
+After `bit --remote origin add .`, the remote has a bundle at `.bit/bit.bundle`. A local `bit pull` will:
 1. Fetch the bundle (existing `fetchBundle` logic)
 2. Import it to local `.bit/index/.git/`
 3. Merge the metadata
@@ -673,13 +717,19 @@ After `bit --remote origin commit`, the remote has a bundle at `.bit/bit.bundle`
 
 The existing pull flow handles this transparently.
 
+### Error Handling
+
+- **Bundle fetch fails (no bundle)**: `withRemoteWorkspace` and `withRemoteWorkspaceReadOnly` print "fatal: no bit repository on remote. Run 'bit @remote init' first." and return `ExitFailure 1`.
+- **Network error**: Propagated with "fatal: network error: ..." message.
+- **Push fails**: `bundleAndPush` prints "fatal: failed to push bundle to remote." and exits.
+- **Init when already initialized**: Checks for existing bundle first, errors with "fatal: remote already has a bit repository."
+- **Temp directory cleanup**: `bracket` ensures cleanup runs on all code paths (success, failure, exception).
+
 ### Edge Cases
 
-- **Workspace already exists**: Error with instructions (delete workspace or use `status`)
-- **Remote is empty**: `fetchRemoteFiles` returns `[]`, workspace created but empty
+- **Remote is empty**: `scanAndWriteMetadata` finds zero files, auto-commit has nothing to stage — reports "Nothing to add."
 - **Network failure during classification**: Failed downloads treated as binary, warning printed
 - **Filesystem remotes**: `--remote <name>` works for filesystem remotes too, though less useful (user could just `cd` there)
-- **Multiple `--remote origin init` calls**: Error on second call, user must delete workspace first
 - **Both `@<remote>` and `--remote` specified**: Error with clear message
 - **`--remote` without argument**: Error explaining that a name is required
 
@@ -687,7 +737,7 @@ The existing pull flow handles this transparently.
 
 This feature does NOT provide:
 - **Selective file download** — that's a separate feature (sparse working tree). After `bit pull`, all files are expected locally.
-- **Incremental remote re-scan** — `bit --remote origin init` always scans from scratch.
+- **Incremental remote re-scan** — `bit --remote origin add` always scans from scratch (the workspace is ephemeral).
 - **`bit --remote origin push`** — pushing *to* a remote workspace doesn't make sense. Push targets the actual remote.
 - **Conflict resolution in remote context** — not needed. The workspace is single-writer (the local user).
 - **`--remote` after the subcommand** — `--remote <name>` must appear before the subcommand (first args). This avoids ambiguity with subcommand flags like `bit verify --remote`.
@@ -1095,6 +1145,22 @@ Interactive per-file conflict resolution:
     adopted; `Bit.ConcurrentFileIO` with plain `MonadIO` is used in most places
     for simplicity).
 
+18. **Ephemeral remote workspaces (no persistent state)**: Remote-targeted
+    commands (`bit @remote init/add/commit/status/log`) use an ephemeral
+    workspace pattern — each command fetches the bundle from the remote,
+    inflates into a system temp directory, operates, re-bundles if changed,
+    pushes back, and cleans up. No persistent workspace is stored under
+    `.bit/`. This design was chosen over persistent workspaces because:
+    - It avoids stale state (the remote is always the source of truth)
+    - It avoids disk space accumulation from workspace copies
+    - It avoids Windows file locking issues with long-lived directories
+    - It makes each command self-contained and idempotent
+    - Cleanup is exception-safe via `bracket`
+    Bundle inflation uses `git init` + `git fetch` into tracking refs +
+    `git reset --hard` (not `checkout -B`, which can skip working tree
+    updates when already on the target branch; not `git clone`, which
+    fails on Windows when temp directories aren't fully cleaned up).
+
 ### What We Deliberately Do NOT Do
 
 - **`RemoteState` does not need a typed state machine.** The pattern match in push logic is clear and total.
@@ -1144,6 +1210,7 @@ Interactive per-file conflict resolution:
 - `bit verify` — local file verification against metadata
 - `bit verify --remote` — remote file verification against remote metadata
 - `bit fsck` — full integrity check
+- `bit --remote <name>` / `bit @<remote>` — ephemeral remote workspace commands (`init`, `add`, `commit`, `status`, `log`); each command fetches bundle, inflates into temp dir, operates, re-bundles if changed, pushes, and cleans up
 - Pipeline: pure diff → plan → action generation with property tests
 - Device-identity system for filesystem remotes (UUID + hardware serial)
 - Filesystem remote transport (full bit repo at remote, direct git fetch/merge)
@@ -1180,6 +1247,7 @@ Interactive per-file conflict resolution:
 | `bit/Fsck.hs` | Full integrity check (parallelized) |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
 | `bit/Remote/Scan.hs` | Remote file scanning via rclone |
+| `bit/RemoteWorkspace.hs` | Ephemeral remote workspace: `initRemote`, `addRemote`, `commitRemote`, `statusRemote`, `logRemote`; `withRemoteWorkspace` / `withRemoteWorkspaceReadOnly` orchestration; bundle inflation via `init+fetch+reset --hard` |
 | `bit/Device.hs` | Device identity, volume detection, .bit-store (strict IO, atomic writes) |
 | `bit/DevicePrompt.hs` | Interactive device setup prompts |
 | `bit/Conflict.hs` | Conflict resolution: Resolution, resolveAll |
@@ -1206,7 +1274,7 @@ Interactive per-file conflict resolution:
 
 **Problem 1 (Pattern Safety)**: Windows expands environment variables like `%CD%` before command chains execute. Example:
 ```batch
-cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+cd test\cli\output\work_mytest & bit remote add origin "%CD%\test\cli\output\remote_mirror"
 ```
 If the `cd` fails, `%CD%` still expands to the current directory (potentially the main repo), causing `bit remote add` to modify the development repo's remote URL instead of the test repo's.
 
@@ -1249,7 +1317,7 @@ This causes a parse error and the test never executes, giving false confidence t
 ```
 DANGEROUS PATTERN in test/cli/remote-check.test:15
   Found: %CD%
-  Line:  cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+  Line:  cd test\cli\output\work_mytest & bit remote add origin "%CD%\test\cli\output\remote_mirror"
 
   Why dangerous: Windows expands %CD% before the command chain executes.
   If the preceding `cd` fails, commands run in the main repo directory.
@@ -1282,10 +1350,10 @@ The patterns are centrally defined in `test/LintTestFiles.hs`:
 **Correct Pattern**: Use relative paths that resolve at command execution time:
 ```batch
 # WRONG (banned):
-cd test\cli\work & bit remote add origin "%CD%\test\cli\remote_mirror"
+cd test\cli\output\work_mytest & bit remote add origin "%CD%\test\cli\output\remote_mirror"
 
 # CORRECT:
-cd test\cli\work & bit remote add origin ..\remote_mirror
+cd test\cli\output\work_mytest & bit remote add origin ..\remote_mirror
 ```
 
 #### Documentation
@@ -1328,6 +1396,14 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
   files that are missing or corrupted — see Proof of Possession rule)
 - Pull metadata from an unverified remote (corruption propagates through
   metadata; verify remote first, suggest `--accept-remote` if verification fails)
+- Store persistent remote workspace state under `.bit/` — remote-targeted
+  commands must use ephemeral temp directories (fetch → inflate → operate →
+  push → cleanup). The remote bundle is the sole source of truth.
+- Use `git checkout -B` in bundle inflation — it can skip the working tree
+  update when already on the target branch; use `git reset --hard` instead
+- Use `git clone` in bundle inflation on Windows — temp directory cleanup may
+  not fully complete due to file locking, causing "directory already exists"
+  errors; use `git init` + `git fetch` + `git reset --hard` instead
 - Create `.bit/` from non-init code paths — only `init` and `initializeRepoAt`
   may create `.bit/` from scratch. All other functions (`scanWorkingDir`,
   `writeMetadataFiles`, `saveCacheEntry`) must check that `.bit/` already

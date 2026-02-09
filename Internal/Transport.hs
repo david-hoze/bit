@@ -152,7 +152,7 @@ copyFromRemoteDetailed remote relPath localPath = do
     case code of
         ExitSuccess -> pure CopySuccess
         ExitFailure _ 
-            | "directory not found" `isInfixOf` err || "object not found" `isInfixOf` err -> pure CopyNotFound
+            | "directory not found" `isInfixOf` err || "object not found" `isInfixOf` err || "doesn't exist" `isInfixOf` err -> pure CopyNotFound
             | "no such host" `isInfixOf` err || "dial tcp" `isInfixOf` err -> pure (CopyNetworkError err)
             | otherwise -> pure (CopyOtherError err)
 

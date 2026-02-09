@@ -14,7 +14,6 @@ import System.Environment (getArgs)
 import System.Exit (ExitCode(..), exitWith)
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
-import System.Process (rawSystem)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
 import qualified Internal.Git as Git
@@ -92,7 +91,9 @@ extractRemoteTarget ["--remote"] = RemoteError
     "'--remote' requires a remote name argument."
 extractRemoteTarget args = NoRemote args
 
--- | Execute a command in the context of a remote workspace
+-- | Execute a command in the context of an ephemeral remote workspace.
+-- Each command fetches the bundle from remote, inflates into a temp workspace,
+-- operates, re-bundles if needed, and pushes back. No persistent workspace.
 runRemoteCommand :: String -> [String] -> IO ()
 runRemoteCommand remoteName args = do
     cwd <- Dir.getCurrentDirectory
@@ -101,59 +102,26 @@ runRemoteCommand remoteName args = do
         hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
         exitWith (ExitFailure 1)
 
-    -- Resolve the remote
     mRemote <- resolveRemote cwd remoteName
     case mRemote of
         Nothing -> do
             hPutStrLn stderr $ "fatal: remote '" ++ remoteName ++ "' not found."
             exitWith (ExitFailure 1)
-        Just remote -> do
-            let wsPath = RemoteWorkspace.remoteWorkspacePath cwd remoteName
-
-            case args of
-                ["init"] ->
-                    RemoteWorkspace.initRemoteWorkspace cwd remote remoteName
-
-                ("add":paths) -> do
-                    -- Stage files in the remote workspace git repo
-                    wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
-                    unless wsExists $ do
-                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit --remote " ++ remoteName ++ " init' first."
-                        exitWith (ExitFailure 1)
-                    -- git add in the workspace
-                    code <- rawSystem "git" (["-C", wsPath, "add"] ++ paths)
-                    exitWith code
-
-                ("commit":commitArgs) -> do
-                    wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
-                    unless wsExists $ do
-                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit --remote " ++ remoteName ++ " init' first."
-                        exitWith (ExitFailure 1)
-                    -- git commit in the workspace
-                    code <- rawSystem "git" (["-C", wsPath, "commit"] ++ commitArgs)
-                    when (code == ExitSuccess) $ do
-                        -- Create bundle and push to remote using shared function
-                        void $ RemoteWorkspace.createAndPushBundle wsPath remote
-                    exitWith code
-
-                ("status":rest) -> do
-                    wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
-                    unless wsExists $ do
-                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit --remote " ++ remoteName ++ " init' first."
-                        exitWith (ExitFailure 1)
-                    void $ rawSystem "git" (["-C", wsPath, "status"] ++ rest)
-
-                ("log":rest) -> do
-                    wsExists <- Dir.doesDirectoryExist (wsPath </> ".git")
-                    unless wsExists $ do
-                        hPutStrLn stderr $ "fatal: remote workspace not initialized. Run 'bit --remote " ++ remoteName ++ " init' first."
-                        exitWith (ExitFailure 1)
-                    void $ rawSystem "git" (["-C", wsPath, "log"] ++ rest)
-
-                _ -> do
-                    hPutStrLn stderr $ "error: command not supported in remote context: " ++ unwords args
-                    hPutStrLn stderr "Supported: init, add, commit, status, log"
-                    exitWith (ExitFailure 1)
+        Just remote -> case args of
+            ["init"] ->
+                RemoteWorkspace.initRemote remote remoteName
+            ("add":paths) ->
+                RemoteWorkspace.addRemote remote paths >>= exitWith
+            ("commit":commitArgs) ->
+                RemoteWorkspace.commitRemote remote commitArgs >>= exitWith
+            ("status":rest) ->
+                RemoteWorkspace.statusRemote remote rest >>= exitWith
+            ("log":rest) ->
+                RemoteWorkspace.logRemote remote rest >>= exitWith
+            _ -> do
+                hPutStrLn stderr $ "error: command not supported in remote context: " ++ unwords args
+                hPutStrLn stderr "Supported: init, add, commit, status, log"
+                exitWith (ExitFailure 1)
 
 -- | Helper function to push with upstream tracking
 pushWithUpstream :: BitEnv -> FilePath -> String -> IO ()
