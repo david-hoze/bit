@@ -24,10 +24,7 @@ When fixing a bug, use this targeted approach:
    ```
    This gives fast feedback on your fix.
 
-3. **Once the related tests pass**, run the full test suite for verification:
-   ```
-   rm .\test.txt 2>nul; shelltest test/cli --debug | tee "test.txt" -a
-   ```
+3. **Once the related tests pass**, run the full test suite (see below).
 
 ## Running Full Test Suite
 
@@ -38,19 +35,26 @@ When running the full test suite (new features, refactors, or final verification
    cabal install --overwrite-policy=always
    ```
 
-2. **Run tests with shelltest:**
+2. **Delete stale output** (separate step — MUST succeed before running tests):
    ```
-   rm .\test.txt 2>nul; shelltest test/cli --debug | tee "test.txt" -a
+   Remove-Item test-output.txt -ErrorAction SilentlyContinue
    ```
-   Use `block_until_ms: 0` to background this immediately.
+   This prevents reading stale results from a previous run.
 
-3. **Monitor test.txt periodically** (every 10-15 seconds) by reading from the end of the file. Look for `[Failed]` lines.
+3. **Run tests with shelltest** (background immediately with `block_until_ms: 0`):
+   ```
+   shelltest test/cli --debug > test-output.txt 2>&1
+   ```
 
-4. **When you see a failure**, immediately start investigating and fixing it while tests continue running. Don't wait for all tests to complete.
+4. **Verify the command started** by reading the terminal file. Check for errors like "not recognized" or immediate exit. If the command failed to start, the output file won't exist or will be empty — do NOT proceed to monitoring without confirming the process is running.
 
-5. **Do NOT rebuild or re-run tests after each fix.** Continue monitoring test.txt for additional failures and fix them all.
+5. **Monitor test-output.txt periodically** (every 30-60 seconds) by reading from the end of the file. Look for `[Failed]` lines.
 
-6. **Only after tests finish AND all fixes are complete**, do ONE final rebuild and full test run to verify everything.
+6. **When you see a failure**, immediately start investigating and fixing it while tests continue running. Don't wait for all tests to complete.
+
+7. **Do NOT rebuild or re-run tests after each fix.** Continue monitoring test-output.txt for additional failures and fix them all.
+
+8. **Only after tests finish AND all fixes are complete**, do ONE final rebuild and full test run to verify everything.
 
 ## After Tests Pass
 
