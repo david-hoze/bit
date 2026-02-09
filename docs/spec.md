@@ -574,9 +574,7 @@ bit @origin init              # shorthand — needs quoting in PowerShell
 bit init                                    # local repo (empty working dir)
 bit remote add origin gdrive:Projects/footage
 
-bit --remote origin init                    # scan remote, build metadata workspace
-bit --remote origin add .                   # stage all files
-bit --remote origin commit -m "Initial commit"  # commit metadata, push bundle to remote
+bit --remote origin init                    # scan remote, commit metadata, push bundle — done
 
 bit pull                                    # pull metadata locally (instant — just the bundle)
 # Working dir is still empty, but bit knows about all 847 files
@@ -646,18 +644,20 @@ Located in `Bit.RemoteWorkspace.initRemoteWorkspace`:
 6. For text files: downloads actual content to workspace
 7. For binary files: writes hash+size metadata
 8. Initializes a git repo in the workspace (`git init --initial-branch=main`)
+9. Auto-commits all files (`git add . && git commit -m "Initial commit"`)
+10. Creates bundle and pushes to remote (`.bit/bit.bundle`) via `createAndPushBundle`
 
 #### 2. `bit --remote origin add/commit/status/log`
 
 These commands operate on the remote workspace git repository:
 
 - `bit --remote origin add .` → `git -C .bit/remote-workspaces/origin add .`
-- `bit --remote origin commit -m "msg"` → `git -C .bit/remote-workspaces/origin commit -m "msg"` + create bundle + push to remote
+- `bit --remote origin commit -m "msg"` → `git -C .bit/remote-workspaces/origin commit -m "msg"` + shared bundle creation + push
 - `bit --remote origin status` → `git -C .bit/remote-workspaces/origin status`
 - `bit --remote origin log` → `git -C .bit/remote-workspaces/origin log`
 
-On commit, the workspace commits its metadata, then:
-1. Creates a git bundle at `.bit/remote-workspaces/origin/.git/bit.bundle`
+On commit, the workspace commits its metadata, then calls the shared `createAndPushBundle` function which:
+1. Creates a git bundle at `.bit/remote-workspaces/origin/.git/bit.bundle` using `--all`
 2. Uploads the bundle to the remote at `.bit/bit.bundle` via `rclone copyto`
 3. Cleans up the local bundle file
 

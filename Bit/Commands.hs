@@ -18,9 +18,7 @@ import System.Process (rawSystem)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
 import qualified Internal.Git as Git
-import qualified Internal.Transport as Transport
 import Data.List (dropWhileEnd)
-import Control.Exception (catch, SomeException)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -134,17 +132,8 @@ runRemoteCommand remoteName args = do
                     -- git commit in the workspace
                     code <- rawSystem "git" (["-C", wsPath, "commit"] ++ commitArgs)
                     when (code == ExitSuccess) $ do
-                        -- Create bundle and push to remote
-                        putStrLn "Pushing metadata bundle to remote..."
-                        let bundlePath = wsPath </> ".git" </> "bit.bundle"
-                        bCode <- rawSystem "git" ["-C", wsPath, "bundle", "create", bundlePath, "main"]
-                        when (bCode == ExitSuccess) $ do
-                            rCode <- Transport.copyToRemote bundlePath remote ".bit/bit.bundle"
-                            case rCode of
-                                ExitSuccess -> putStrLn "Remote is now a bit repository."
-                                _ -> hPutStrLn stderr "Error uploading bundle to remote."
-                            -- Cleanup bundle
-                            Dir.removeFile bundlePath `catch` (\(_ :: SomeException) -> pure ())
+                        -- Create bundle and push to remote using shared function
+                        void $ RemoteWorkspace.createAndPushBundle wsPath remote
                     exitWith code
 
                 ("status":rest) -> do

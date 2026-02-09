@@ -6,6 +6,7 @@ module Bit.RemoteWorkspace
   ( RemoteWorkspace(..)
   , initRemoteWorkspace
   , remoteWorkspacePath
+  , createAndPushBundle
   ) where
 
 import Bit.Types (FileEntry(..), EntryKind(..), ContentType(..), Path(..))
@@ -23,11 +24,12 @@ import System.Directory
     , createDirectoryIfMissing
     , getTemporaryDirectory
     , removeDirectoryRecursive
+    , removeFile
     )
 import System.Exit (ExitCode(..), exitWith)
 import System.IO (hPutStrLn, stderr)
-import System.Process (callProcess)
-import Control.Monad (when, forM, forM_)
+import qualified Internal.Git as Git
+import Control.Monad (when, forM, forM_, void)
 import Data.Char (toLower)
 import Data.List (partition)
 import Control.Exception (catch, SomeException)
@@ -41,6 +43,31 @@ data RemoteWorkspace = RemoteWorkspace
 -- | Path to the remote workspace for a given remote name
 remoteWorkspacePath :: FilePath -> String -> FilePath
 remoteWorkspacePath cwd remName = cwd </> ".bit" </> "remote-workspaces" </> remName
+
+-- | Create a git bundle from the remote workspace and push it to the remote.
+-- This is shared by both initRemoteWorkspace (auto-commit after init) and
+-- the remote commit handler (explicit commits).
+createAndPushBundle :: FilePath -> Remote -> IO ExitCode
+createAndPushBundle wsPath remote = do
+    let bundlePath = wsPath </> ".git" </> "bit.bundle"
+    putStrLn "Creating metadata bundle..."
+    (bCode, _, _) <- Git.runGitAt wsPath ["bundle", "create", bundlePath, "--all"]
+    case bCode of
+        ExitSuccess -> do
+            putStrLn "Pushing bundle to remote..."
+            rCode <- Transport.copyToRemote bundlePath remote ".bit/bit.bundle"
+            case rCode of
+                ExitSuccess -> do
+                    putStrLn "Remote is now a bit repository."
+                    -- Cleanup bundle
+                    removeFile bundlePath `catch` (\(_ :: SomeException) -> pure ())
+                    pure ExitSuccess
+                _ -> do
+                    hPutStrLn stderr "Error uploading bundle to remote."
+                    pure (ExitFailure 1)
+        _ -> do
+            hPutStrLn stderr "Error creating bundle."
+            pure bCode
 
 -- | Partition remote files into definitely-binary and text-candidates.
 -- A file is definitely binary if:
@@ -165,12 +192,30 @@ initRemoteWorkspace cwd remote remName = do
 
             -- Step 6: Initialize git repo in workspace
             putStrLn "Initializing git repository..."
-            callProcess "git" ["-C", wsPath, "init", "--initial-branch=main"]
-            callProcess "git" ["-C", wsPath, "config", "core.quotePath", "false"]
+            (initCode, _, _) <- Git.runGitAt wsPath ["init", "--initial-branch=main"]
+            when (initCode /= ExitSuccess) $ do
+                hPutStrLn stderr "Error initializing git repository."
+                exitWith initCode
+            (configCode, _, _) <- Git.runGitAt wsPath ["config", "core.quotePath", "false"]
+            when (configCode /= ExitSuccess) $ do
+                hPutStrLn stderr "Warning: Failed to set git config."
 
             let textCount = length textFiles
             let binCount = length binaryFiles
             putStrLn $ "Remote workspace initialized: " ++ show textCount ++ " text, " ++ show binCount ++ " binary files."
-            putStrLn $ "Next steps:"
-            putStrLn $ "  bit @" ++ remName ++ " add ."
-            putStrLn $ "  bit @" ++ remName ++ " commit -m \"Initial commit\""
+            
+            -- Step 7: Auto-commit if there are files
+            when (not (null allFiles)) $ do
+                putStrLn "Committing metadata..."
+                (addCode, _, _) <- Git.runGitAt wsPath ["add", "."]
+                case addCode of
+                    ExitSuccess -> do
+                        (commitCode, _, _) <- Git.runGitAt wsPath ["commit", "-m", "Initial commit"]
+                        case commitCode of
+                            ExitSuccess -> do
+                                -- Step 8: Create bundle and push to remote
+                                void $ createAndPushBundle wsPath remote
+                            _ -> do
+                                hPutStrLn stderr "Warning: Failed to commit metadata."
+                    _ -> do
+                        hPutStrLn stderr "Warning: Failed to add files."
