@@ -70,4 +70,4 @@ shelltest test/cli --debug                  # Full suite
 1. Build: `cabal install --overwrite-policy=always`
 2. Add tests following `test/cli/` patterns
 3. Update `docs/spec.md` if behavior changed
-4. Provide commit message
+4. Provide a commit message (do not offer to commit — the user will commit)
