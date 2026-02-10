@@ -463,17 +463,23 @@ showRemoteStatusFromBundle name mUrl = do
 
 -- | Status of local ref relative to remote (for 'bit remote show' push message).
 data PushRefStatus
-  = PushRefUpToDate       -- ^ Same or both sides have each other
+  = PushRefUpToDate        -- ^ Same commit
   | PushRefFastForwardable -- ^ Local ahead of remote
-  | PushRefLocalOutOfDate  -- ^ Remote ahead or divergent
+  | PushRefLocalOutOfDate  -- ^ Remote ahead of local
+  | PushRefDiverged        -- ^ Both have commits the other doesn't; merge/rebase needed
   deriving (Show, Eq)
 
-fromAheadFlags :: Bool -> Bool -> PushRefStatus
-fromAheadFlags localAhead remoteAhead = case (localAhead, remoteAhead) of
-  (True, False) -> PushRefFastForwardable
-  (False, True) -> PushRefLocalOutOfDate
-  (False, False) -> PushRefLocalOutOfDate
-  (True, True)   -> PushRefUpToDate
+-- | Classify push status from local and remote commit hashes. Calls git internally;
+-- callers never see raw boolean ancestry flags.
+classifyPushStatus :: String -> String -> IO PushRefStatus
+classifyPushStatus localHash remoteHash = do
+  localAhead  <- Git.checkIsAhead remoteHash localHash  -- is local ahead of remote?
+  remoteAhead <- Git.checkIsAhead localHash remoteHash  -- is remote ahead of local?
+  pure $ case (localAhead, remoteAhead) of
+    (True, False) -> PushRefFastForwardable
+    (False, True) -> PushRefLocalOutOfDate
+    (False, False) -> PushRefDiverged
+    (True, True)   -> PushRefUpToDate
 
 compareHistory :: Maybe String -> BundleName -> IO ()
 compareHistory maybeLocal bundleName = do
@@ -499,9 +505,7 @@ compareHistory maybeLocal bundleName = do
                     putStrLn "  Local refs configured for 'bit push':"
                     putStrLn "    main pushes to main (up to date)"
                 else do
-                    localAhead  <- Git.checkIsAhead rHash lHash
-                    remoteAhead <- Git.checkIsAhead lHash rHash
-                    let status = fromAheadFlags localAhead remoteAhead
+                    status <- classifyPushStatus lHash rHash
 
                     putStrLn "  Local branch configured for 'bit pull':"
                     putStrLn "    main merges with remote main"
@@ -510,5 +514,6 @@ compareHistory maybeLocal bundleName = do
                     case status of
                         PushRefFastForwardable -> putStrLn "    main pushes to main (fast-forwardable)"
                         PushRefLocalOutOfDate  -> putStrLn "    main pushes to main (local out of date)"
+                        PushRefDiverged       -> putStrLn "    main pushes to main (diverged)"
                         PushRefUpToDate       -> putStrLn "    main pushes to main (up to date)"
         _ -> pure ()

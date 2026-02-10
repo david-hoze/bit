@@ -61,6 +61,17 @@ cd test\cli\output\work_remote_show & bit remote show dok1
 >>> /dok1.*remote_show_a/
 >>>= 0
 
+# ---- Test: push status line (up to date, fast-forwardable, local out of date, or diverged) ----
+cd test\cli\output\work_remote_show & echo x> f.txt & bit add f.txt & bit commit -m "Add f" & bit push dok1 & bit fetch dok1
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_remote_show & bit remote show dok1
+<<<
+>>> /main pushes to main \(up to date\)/
+>>>= 0
+
 # ======================================================================
 # SECTION 3: Multiple remotes
 # ======================================================================
