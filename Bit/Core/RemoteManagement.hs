@@ -461,6 +461,20 @@ showRemoteStatusFromBundle name mUrl = do
     putStrLn ""
     compareHistory maybeLocal fetchedBundle
 
+-- | Status of local ref relative to remote (for 'bit remote show' push message).
+data PushRefStatus
+  = PushRefUpToDate       -- ^ Same or both sides have each other
+  | PushRefFastForwardable -- ^ Local ahead of remote
+  | PushRefLocalOutOfDate  -- ^ Remote ahead or divergent
+  deriving (Show, Eq)
+
+fromAheadFlags :: Bool -> Bool -> PushRefStatus
+fromAheadFlags localAhead remoteAhead = case (localAhead, remoteAhead) of
+  (True, False) -> PushRefFastForwardable
+  (False, True) -> PushRefLocalOutOfDate
+  (False, False) -> PushRefLocalOutOfDate
+  (True, True)   -> PushRefUpToDate
+
 compareHistory :: Maybe String -> BundleName -> IO ()
 compareHistory maybeLocal bundleName = do
     maybeRemote <- Git.getHashFromBundle bundleName
@@ -487,14 +501,14 @@ compareHistory maybeLocal bundleName = do
                 else do
                     localAhead  <- Git.checkIsAhead rHash lHash
                     remoteAhead <- Git.checkIsAhead lHash rHash
+                    let status = fromAheadFlags localAhead remoteAhead
 
                     putStrLn "  Local branch configured for 'bit pull':"
                     putStrLn "    main merges with remote main"
                     putStrLn ""
                     putStrLn "  Local refs configured for 'bit push':"
-                    case (localAhead, remoteAhead) of
-                        (True, False) -> putStrLn "    main pushes to main (fast-forwardable)"
-                        (False, True) -> putStrLn "    main pushes to main (local out of date)"
-                        (False, False) -> putStrLn "    main pushes to main (local out of date)"
-                        (True, True)   -> putStrLn "    main pushes to main (up to date)"
+                    case status of
+                        PushRefFastForwardable -> putStrLn "    main pushes to main (fast-forwardable)"
+                        PushRefLocalOutOfDate  -> putStrLn "    main pushes to main (local out of date)"
+                        PushRefUpToDate       -> putStrLn "    main pushes to main (up to date)"
         _ -> pure ()
