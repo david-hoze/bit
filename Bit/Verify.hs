@@ -29,7 +29,7 @@ import Data.Maybe (maybeToList)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Internal.Git as Git
-import Bit.Internal.Metadata (MetaContent(..), parseMetadata, readMetadataOrComputeHash, parseMetadataFile, hashFile)
+import Bit.Internal.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, hashFile)
 import qualified Bit.Remote.Scan as Remote.Scan
 import qualified Bit.Remote
 import qualified Internal.Transport as Transport
@@ -133,17 +133,8 @@ loadMetadata (FromCommit commitHash) _concurrency = do
 
 -- | Read a single metadata entry from a filesystem path.
 readEntryFromFilesystem :: FilePath -> FilePath -> IO MetadataEntry
-readEntryFromFilesystem indexDir relPath = do
-  let fullPath = indexDir </> relPath
-  mc <- readMetadataOrComputeHash fullPath
-  case mc of
-    Just (MetaContent { metaHash = h, metaSize = sz }) ->
-      -- Check if this was parsed as metadata (binary) or computed from content (text)
-      -- by trying parseMetadata on the raw content
-      parseMetadataFile fullPath >>= \case
-        Just _ -> pure (BinaryEntry (Path relPath) h sz)   -- has hash:/size: format → binary
-        Nothing -> pure (TextEntry (Path relPath))          -- content IS the file → text
-    Nothing -> pure (TextEntry (Path relPath))  -- shouldn't happen, but safe fallback
+readEntryFromFilesystem indexDir relPath =
+  classifyMetadataFile (Path relPath) (indexDir </> relPath)
 
 -- | Read a single metadata entry from a git commit tree.
 readEntryFromCommit :: String -> FilePath -> IO MetadataEntry
@@ -152,12 +143,22 @@ readEntryFromCommit commitHash relPath = do
   (code, content, _) <- readProcessWithExitCode "git"
     [ "-C", bitIndexPath, "show", commitHash ++ ":" ++ relPath ] ""
   pure $ case code of
-    ExitSuccess -> case parseMetadata content of
-      Just (MetaContent { metaHash = h, metaSize = sz }) ->
-        BinaryEntry (Path relPath) h sz
-      Nothing ->
-        TextEntry (Path relPath)  -- text file: content IS the data, skip hash verify
-    _ -> TextEntry (Path relPath)
+    ExitSuccess -> classifyMetadata (Path relPath) content
+    _           -> TextEntry (Path relPath)
+
+-- | Classify metadata content string as binary or text entry.
+classifyMetadata :: Path -> String -> MetadataEntry
+classifyMetadata p content =
+  case parseMetadata content of
+    Just mc -> BinaryEntry p (metaHash mc) (metaSize mc)
+    Nothing -> TextEntry p
+
+-- | Classify a metadata file on disk as binary or text entry.
+classifyMetadataFile :: Path -> FilePath -> IO MetadataEntry
+classifyMetadataFile p filePath =
+  parseMetadataFile filePath >>= \case
+    Just mc -> pure (BinaryEntry p (metaHash mc) (metaSize mc))
+    Nothing -> pure (TextEntry p)
 
 -- | Load only binary (hash-verifiable) metadata entries from the index.
 -- Text files are excluded. If you need all entries, use 'loadMetadata' directly.
@@ -219,33 +220,42 @@ verifyLocalAt root mCounter _concurrency = do
   pure (totalChecked, allIssues)
   where
     checkChanged indexDir relPath = do
-      -- Read expected metadata from committed state
       (showCode, committedContent, _) <- Git.runGitAt indexDir ["show", "HEAD:" ++ relPath]
-      -- Read actual metadata from filesystem (updated by scan)
       let fsPath = indexDir </> relPath
       fsExists <- doesFileExist fsPath
       case (showCode, fsExists) of
         (ExitSuccess, True) -> do
-          let mExpected = parseMetadata committedContent
-          mActual <- parseMetadataFile fsPath
-          case (mExpected, mActual) of
-            (Just expected, Just actual) ->
-              -- Binary file: compare hash+size metadata
+          let committed = classifyMetadata (Path relPath) committedContent
+          actual <- classifyMetadataFile (Path relPath) fsPath
+          case (committed, actual) of
+            (BinaryEntry _ eh es, BinaryEntry _ ah as') ->
               pure [HashMismatch (Path relPath)
-                      (T.unpack (hashToText (metaHash expected)))
-                      (T.unpack (hashToText (metaHash actual)))
-                      (metaSize expected)
-                      (metaSize actual)]
-            _ -> do
-              -- Text file: git diff says it changed, report mismatch
+                      (T.unpack (hashToText eh))
+                      (T.unpack (hashToText ah))
+                      es
+                      as']
+            (BinaryEntry _ eh es, TextEntry _) -> do
               actualHash <- hashFile fsPath
               actualSize <- fromIntegral . BS.length <$> BS.readFile fsPath
               pure [HashMismatch (Path relPath)
-                      "(committed)"
+                      (T.unpack (hashToText eh))
                       (T.unpack (hashToText actualHash))
-                      0
+                      es
                       actualSize]
+            (TextEntry _, TextEntry _) ->
+              reportTextMismatch fsPath relPath
+            (TextEntry _, BinaryEntry _ _ _) ->
+              reportTextMismatch fsPath relPath
         _ -> pure []
+
+    reportTextMismatch fsPath relPath = do
+      actualHash <- hashFile fsPath
+      actualSize <- fromIntegral . BS.length <$> BS.readFile fsPath
+      pure [HashMismatch (Path relPath)
+              "(committed)"
+              (T.unpack (hashToText actualHash))
+              0
+              actualSize]
 
 -- | Verify local working tree against committed metadata in .bit/index.
 -- Returns (number of files checked, list of issues).
