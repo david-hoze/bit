@@ -24,6 +24,7 @@ import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import qualified Bit.Device as Device
 import qualified Bit.DevicePrompt as DevicePrompt
+import Data.UUID (UUID)
 import System.IO (stderr, hPutStrLn)
 import Control.Exception (try, IOException)
 import Data.Maybe (fromMaybe)
@@ -88,29 +89,13 @@ addRemoteFilesystem cwd name filePath = do
         (Just u, Nothing) -> do
             mLabel <- Device.getVolumeLabel volRoot
             deviceName' <- promptDeviceName cwd volRoot mLabel
-            storeType' <- Device.detectStorageType volRoot
-            mSerial <- case storeType' of
-                Device.Physical -> Device.getHardwareSerial volRoot
-                Device.Network -> pure Nothing
-            Device.writeDeviceFile cwd deviceName' (Device.DeviceInfo u storeType' mSerial)
-            Device.writeRemoteFile cwd name (Device.TargetDevice deviceName' relPath)
-            putStrLn $ "Remote '" ++ name ++ "' → " ++ deviceName' ++ ":" ++ relPath
-            putStrLn $ "Device '" ++ deviceName' ++ "' registered (" ++ (case storeType' of Device.Physical -> "physical"; Device.Network -> "network") ++ ")."
-            pure ()
+            registerDevice cwd name volRoot deviceName' relPath u
         (Nothing, _) -> do
             mLabel <- Device.getVolumeLabel volRoot
             deviceName' <- promptDeviceName cwd volRoot mLabel
             u <- Device.generateStoreUuid
             Device.writeBitStore volRoot u
-            storeType' <- Device.detectStorageType volRoot
-            mSerial <- case storeType' of
-                Device.Physical -> Device.getHardwareSerial volRoot
-                Device.Network -> pure Nothing
-            Device.writeDeviceFile cwd deviceName' (Device.DeviceInfo u storeType' mSerial)
-            Device.writeRemoteFile cwd name (Device.TargetDevice deviceName' relPath)
-            putStrLn $ "Remote '" ++ name ++ "' → " ++ deviceName' ++ ":" ++ relPath
-            putStrLn $ "Device '" ++ deviceName' ++ "' registered (" ++ (case storeType' of Device.Physical -> "physical"; Device.Network -> "network") ++ ")."
-            pure ()
+            registerDevice cwd name volRoot deviceName' relPath u
     case result of
         Right () -> pure ()
         Left _err -> do
@@ -119,6 +104,23 @@ addRemoteFilesystem cwd name filePath = do
             Device.writeRemoteFile cwd name (Device.TargetLocalPath absPath)
             void $ Git.addRemote name absPath
             putStrLn $ "Remote '" ++ name ++ "' added (" ++ absPath ++ ")."
+
+-- | Detect storage type, get serial, write device + remote files, and print confirmation.
+-- Shared between the "existing UUID / no device" and "no UUID" branches.
+registerDevice :: FilePath -> String -> FilePath -> String -> FilePath -> UUID -> IO ()
+registerDevice cwd name volRoot deviceName' relPath u = do
+    storeType' <- Device.detectStorageType volRoot
+    mSerial <- case storeType' of
+        Device.Physical -> Device.getHardwareSerial volRoot
+        Device.Network -> pure Nothing
+    Device.writeDeviceFile cwd deviceName' (Device.DeviceInfo u storeType' mSerial)
+    Device.writeRemoteFile cwd name (Device.TargetDevice deviceName' relPath)
+    putStrLn $ "Remote '" ++ name ++ "' → " ++ deviceName' ++ ":" ++ relPath
+    putStrLn $ "Device '" ++ deviceName' ++ "' registered (" ++ displayStorageType storeType' ++ ")."
+
+displayStorageType :: Device.StorageType -> String
+displayStorageType Device.Physical = "physical"
+displayStorageType Device.Network  = "network"
 
 -- ============================================================================
 -- Remote show / repair
@@ -442,7 +444,7 @@ formatRemoteDisplay cwd name = maybe (pure (name ++ " → (no target)")) $ \case
     Device.TargetDevice dev devPath -> do
         res <- Device.resolveRemoteTarget cwd (Device.TargetDevice dev devPath)
         mInfo <- Device.readDeviceFile cwd dev
-        let typ = maybe "unknown" (\i -> case Device.deviceType i of Device.Physical -> "physical"; Device.Network -> "network") mInfo
+        let typ = maybe "unknown" (displayStorageType . Device.deviceType) mInfo
         case res of
             Device.Resolved mount -> pure (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", connected at " ++ mount ++ ")")
             Device.NotConnected _ -> pure (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", NOT CONNECTED)")

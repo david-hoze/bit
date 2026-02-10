@@ -203,19 +203,8 @@ doRestore args = do
     when (code == ExitSuccess) $ do
         let stagedOnly = ("--staged" `elem` args || "-S" `elem` args) &&
                          not ("--worktree" `elem` args || "-W" `elem` args)
-        unless stagedOnly $ do
-            let rawPaths = restoreCheckoutPaths args
-            paths <- lift $ expandPathsToFiles cwd rawPaths
-            forM_ paths $ \filePath -> do
-                let metaPath = cwd </> bitIndexPath </> filePath
-                let workPath = cwd </> filePath
-                metaExists <- lift $ fileExistsE metaPath
-                when metaExists $ do
-                    mcontent <- lift $ readFileE metaPath
-                    let isBinaryMetadata = maybe True (\content -> any ("hash: " `isPrefixOf`) (lines content)) mcontent
-                    unless isBinaryMetadata $ do
-                        lift $ createDirE (takeDirectory workPath)
-                        lift $ copyFileE metaPath workPath
+        unless stagedOnly $
+            syncTextFilesFromIndex cwd (restoreCheckoutPaths args)
     pure code
 
 doCheckout :: [String] -> BitM ExitCode
@@ -227,16 +216,21 @@ doCheckout args = do
     code <- lift $ Git.runGitRaw ("checkout" : args')
     when (code == ExitSuccess) $ do
         cwd <- asks envCwd
-        let rawPaths = restoreCheckoutPaths args'
-        paths <- lift $ expandPathsToFiles cwd rawPaths
-        forM_ paths $ \filePath -> do
-            let metaPath = cwd </> bitIndexPath </> filePath
-            let workPath = cwd </> filePath
-            metaExists <- lift $ fileExistsE metaPath
-            when metaExists $ do
-                mcontent <- lift $ readFileE metaPath
-                let isBinaryMetadata = maybe True (\content -> any ("hash: " `isPrefixOf`) (lines content)) mcontent
-                unless isBinaryMetadata $ do
-                    lift $ createDirE (takeDirectory workPath)
-                    lift $ copyFileE metaPath workPath
+        syncTextFilesFromIndex cwd (restoreCheckoutPaths args')
     pure code
+
+-- | After a successful restore/checkout, copy text files from .bit/index/ back
+-- to the working directory. Binary metadata files are left alone.
+syncTextFilesFromIndex :: FilePath -> [FilePath] -> BitM ()
+syncTextFilesFromIndex cwd rawPaths = do
+    paths <- lift $ expandPathsToFiles cwd rawPaths
+    forM_ paths $ \filePath -> do
+        let metaPath = cwd </> bitIndexPath </> filePath
+        let workPath = cwd </> filePath
+        metaExists <- lift $ fileExistsE metaPath
+        when metaExists $ do
+            mcontent <- lift $ readFileE metaPath
+            let isBinaryMetadata = maybe True (\content -> any ("hash: " `isPrefixOf`) (lines content)) mcontent
+            unless isBinaryMetadata $ lift $ do
+                createDirE (takeDirectory workPath)
+                copyFileE metaPath workPath
