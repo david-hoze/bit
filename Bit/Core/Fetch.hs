@@ -85,7 +85,7 @@ filesystemFetch _cwd remote = do
     -- Output fetch results similar to cloud fetch
     hPutStrLn stderr $ "From " ++ remoteName remote
     hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
-    
+
     putStrLn "Fetch complete."
 
 -- ============================================================================

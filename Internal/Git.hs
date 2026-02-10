@@ -44,6 +44,7 @@ module Internal.Git
     , runGitRawAt
     , runGitWithOutput
     , runGitAt
+    , rewriteGitHints
     , ConflictType(..)
     , readFileFromRef
     , listFilesInRef

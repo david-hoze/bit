@@ -29,20 +29,20 @@ module Bit.Core.GitPassthrough
 
 import Prelude hiding (log)
 import qualified System.Directory as Dir
-import System.FilePath ((</>), takeDirectory)
+import System.FilePath ((</>), takeDirectory, equalFilePath)
 import Control.Monad (when, unless, void, forM_)
 import Data.Foldable (traverse_)
 import Control.Monad.Trans.Class (lift)
 import System.Exit (ExitCode(..), exitWith)
-import Control.Exception (throwIO)
+import Control.Exception (throwIO, IOException, catch)
 import qualified Internal.Git as Git
 import Internal.Config (bitIndexPath)
-import System.IO (stderr, hPutStrLn)
+import System.IO (stderr, hPutStrLn, hPutStr)
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import qualified Data.List
 import Control.Monad.IO.Class (liftIO)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, foldl')
 import qualified Bit.Conflict as Conflict
 import qualified Bit.Device as Device
 import qualified Bit.Internal.Metadata as Metadata
@@ -82,8 +82,37 @@ lsFiles args = Git.runGitRaw ("ls-files" : args)
 reset :: [String] -> IO ExitCode
 reset args = Git.runGitRaw ("reset" : args)
 
-rm :: [String] -> IO ExitCode
-rm args = Git.runGitRaw ("rm" : args)
+rm :: [String] -> BitM ExitCode
+rm args = do
+    cwd <- asks envCwd
+    let flags = parseRmFlags args
+        -- Strip quiet flags so git always outputs the file list for parsing
+        gitArgs = stripQuiet args
+    (code, out, err) <- liftIO $ Git.runGitWithOutput ("rm" : gitArgs)
+
+    -- Remove actual files from working directory
+    when (code == ExitSuccess && not (rmCached flags) && not (rmDryRun flags)) $ liftIO $ do
+        let paths = parseRmOutput out
+        forM_ paths $ \path -> do
+            let actualPath = cwd </> path
+            exists <- Dir.doesFileExist actualPath
+            when exists $
+                Dir.removeFile actualPath `catch` \(e :: IOException) ->
+                    hPutStrLn stderr $ "warning: failed to remove " ++ path ++ ": " ++ show e
+        -- Clean up empty parent directories
+        forM_ paths $ \path ->
+            removeEmptyParents cwd (takeDirectory (cwd </> path))
+
+    -- Print output
+    liftIO $ do
+        unless (rmQuiet flags) $
+            putStr (Git.rewriteGitHints out)
+        hPutStr stderr (Git.rewriteGitHints err)
+        case code of
+            ExitSuccess -> pure ()
+            ExitFailure n -> hPutStrLn stderr ("bit: git exited with code " ++ show n)
+
+    pure code
 
 mv :: [String] -> IO ExitCode
 mv args = Git.runGitRaw ("mv" : args)
@@ -234,3 +263,64 @@ syncTextFilesFromIndex cwd rawPaths = do
             unless isBinaryMetadata $ lift $ do
                 createDirE (takeDirectory workPath)
                 copyFileE metaPath workPath
+
+-- ============================================================================
+-- rm helpers
+-- ============================================================================
+
+data RmFlags = RmFlags
+    { rmCached :: Bool
+    , rmDryRun :: Bool
+    , rmQuiet  :: Bool
+    }
+
+-- | Parse rm-relevant flags from args, respecting @--@ separator.
+parseRmFlags :: [String] -> RmFlags
+parseRmFlags args =
+    let (flagPart, _) = break (== "--") args
+    in foldl' checkArg (RmFlags False False False) flagPart
+  where
+    checkArg flags "--cached"  = flags { rmCached = True }
+    checkArg flags "--dry-run" = flags { rmDryRun = True }
+    checkArg flags "--quiet"   = flags { rmQuiet = True }
+    checkArg flags arg
+        | "-" `isPrefixOf` arg && not ("--" `isPrefixOf` arg) =
+            flags { rmDryRun = rmDryRun flags || 'n' `elem` drop 1 arg
+                  , rmQuiet  = rmQuiet flags || 'q' `elem` drop 1 arg
+                  }
+    checkArg flags _ = flags
+
+-- | Strip @-q@/@--quiet@ from args (before @--@) so git always outputs file list.
+stripQuiet :: [String] -> [String]
+stripQuiet args =
+    let (before, after) = break (== "--") args
+    in concatMap stripArg before ++ after
+  where
+    stripArg "--quiet" = []
+    stripArg arg
+        | "-" `isPrefixOf` arg && not ("--" `isPrefixOf` arg) =
+            let stripped = filter (/= 'q') (drop 1 arg)
+            in if null stripped then [] else ['-' : stripped]
+    stripArg arg = [arg]
+
+-- | Parse @rm 'path'@ lines from git rm output.
+parseRmOutput :: String -> [FilePath]
+parseRmOutput out =
+    [ take (length path - 1) path
+    | line <- lines out
+    , "rm '" `isPrefixOf` line
+    , let path = drop 4 line
+    , not (null path)
+    ]
+
+-- | Remove empty parent directories up to (but not including) @stopAt@.
+removeEmptyParents :: FilePath -> FilePath -> IO ()
+removeEmptyParents stopAt dir = go dir `catch` \(_ :: IOException) -> pure ()
+  where
+    go d | equalFilePath d stopAt = pure ()
+         | equalFilePath d (takeDirectory d) = pure ()
+         | otherwise = do
+              contents <- Dir.listDirectory d
+              when (null contents) $ do
+                  Dir.removeDirectory d
+                  go (takeDirectory d)

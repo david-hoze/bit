@@ -205,7 +205,7 @@ filesystemPush cwd remote = do
             -- 8. Update local tracking ref
             putStrLn "Updating local tracking ref..."
             void $ Git.updateRemoteTrackingBranchToHead
-            
+
             putStrLn "Push complete."
         _ -> do
             hPutStrLn stderr $ "error: Failed to merge at remote: " ++ mergeErr

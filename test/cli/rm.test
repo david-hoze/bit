@@ -1,0 +1,159 @@
+# Test bit rm — remove files from tracking and working directory
+# Setup: fresh repo with committed files
+timeout /t 1 >nul & rmdir /s /q test\cli\output\rmwork 2>nul & mkdir test\cli\output\rmwork & cd test\cli\output\rmwork & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\rmwork & echo hello> file.txt & echo world> other.txt & bit add . & bit commit -m "Add files"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# ---- Basic rm: removes from index AND working directory ----
+cd test\cli\output\rmwork & bit rm file.txt
+<<<
+>>> /rm 'file.txt'/
+>>>= 0
+
+# Verify actual file is gone from working directory
+if exist test\cli\output\rmwork\file.txt (echo FAIL file still exists) else (echo OK file removed)
+<<<
+>>>
+OK file removed
+>>>= 0
+
+# Verify metadata file is gone from index
+if exist test\cli\output\rmwork\.bit\index\file.txt (echo FAIL meta still exists) else (echo OK meta removed)
+<<<
+>>>
+OK meta removed
+>>>= 0
+
+# Commit the removal so we have a clean state
+cd test\cli\output\rmwork & bit commit -m "Remove file"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# ---- rm --cached: removes from staging only, keeps working dir file ----
+cd test\cli\output\rmwork & bit rm --cached other.txt
+<<<
+>>> /rm 'other.txt'/
+>>>= 0
+
+# Verify actual file still exists in working directory
+if exist test\cli\output\rmwork\other.txt (echo OK file kept) else (echo FAIL file removed)
+<<<
+>>>
+OK file kept
+>>>= 0
+
+# Re-add other.txt so it's tracked again for subsequent tests
+cd test\cli\output\rmwork & bit add .
+<<<
+>>>
+>>>= 0
+
+# ---- rm --dry-run: shows what would be removed, removes nothing ----
+cd test\cli\output\rmwork & bit rm -n other.txt
+<<<
+>>> /rm 'other.txt'/
+>>>= 0
+
+# Verify actual file still exists after dry run
+if exist test\cli\output\rmwork\other.txt (echo OK file kept) else (echo FAIL file removed)
+<<<
+>>>
+OK file kept
+>>>= 0
+
+# Verify metadata file still exists after dry run
+if exist test\cli\output\rmwork\.bit\index\other.txt (echo OK meta kept) else (echo FAIL meta removed)
+<<<
+>>>
+OK meta kept
+>>>= 0
+
+# ---- rm nonexistent file: git errors, no files removed ----
+cd test\cli\output\rmwork & bit rm nonexistent.txt 2>&1
+<<<
+>>> /pathspec .* did not match/
+>>>= /[1-9]/
+
+# ---- rm with file already deleted from working dir ----
+cd test\cli\output\rmwork & del other.txt & bit rm other.txt
+<<<
+>>> /rm 'other.txt'/
+>>>= 0
+
+cd test\cli\output\rmwork & bit commit -m "Remove other"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# ---- rm in subdirectory: also cleans up empty parent dirs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\rmwork2 2>nul & mkdir test\cli\output\rmwork2 & cd test\cli\output\rmwork2 & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\rmwork2 & mkdir subdir & echo nested> subdir\deep.txt & bit add . & bit commit -m "Add nested"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+cd test\cli\output\rmwork2 & bit rm subdir\deep.txt
+<<<
+>>> /rm 'subdir\/deep.txt'/
+>>>= 0
+
+# Verify nested file is gone
+if exist test\cli\output\rmwork2\subdir\deep.txt (echo FAIL) else (echo OK file removed)
+<<<
+>>>
+OK file removed
+>>>= 0
+
+# Verify empty parent directory was cleaned up
+if exist test\cli\output\rmwork2\subdir (echo FAIL dir still exists) else (echo OK dir cleaned)
+<<<
+>>>
+OK dir cleaned
+>>>= 0
+
+# ---- rm -r: recursive removal ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\rmwork3 2>nul & mkdir test\cli\output\rmwork3 & cd test\cli\output\rmwork3 & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\rmwork3 & mkdir mydir & echo a> mydir\a.txt & echo b> mydir\b.txt & bit add . & bit commit -m "Add dir"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+cd test\cli\output\rmwork3 & bit rm -r mydir
+<<<
+>>> /rm 'mydir/
+>>>= 0
+
+# Verify both files are gone from working directory
+if exist test\cli\output\rmwork3\mydir\a.txt (echo FAIL a exists) else (echo OK a removed)
+<<<
+>>>
+OK a removed
+>>>= 0
+
+if exist test\cli\output\rmwork3\mydir\b.txt (echo FAIL b exists) else (echo OK b removed)
+<<<
+>>>
+OK b removed
+>>>= 0
+
+# Verify mydir directory was cleaned up
+if exist test\cli\output\rmwork3\mydir (echo FAIL dir exists) else (echo OK dir cleaned)
+<<<
+>>>
+OK dir cleaned
+>>>= 0

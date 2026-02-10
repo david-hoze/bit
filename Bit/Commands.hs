@@ -37,6 +37,7 @@ run = do
             , "  commit -m <msg>                Record changes to the repository"
             , "  log                            Show commit history"
             , "  diff                           Show changes"
+            , "  rm [options] <path>            Remove files from tracking"
             , "  restore [options] [--] <path>  Restore working tree files"
             , "  checkout [options] -- <path>   Checkout files from index"
             , ""
@@ -227,6 +228,8 @@ runCommand args = do
         ["remote", "repair", name]      -> runBaseWithRemote name $ Bit.remoteRepair (Just name) (if isSequential then Sequential else Parallel 0)
         ["verify"]                      -> runBase $ Bit.verify Bit.VerifyLocal (if isSequential then Sequential else Parallel 0)
         ["verify", "--remote"]          -> runBase $ Bit.verify Bit.VerifyRemote (if isSequential then Sequential else Parallel 0)
+
+        ("rm":rest)                     -> runBase (Bit.rm rest) >>= exitWith
 
         -- ── Full scanned env (needs working directory state) ─
         ("add":rest)                    -> do
