@@ -2,7 +2,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Bit.Core.Verify
-    ( verify
+    ( VerifyTarget(..)
+    , verify
     , fsck
     ) where
 
@@ -27,9 +28,13 @@ import qualified Bit.Device as Device
 import Bit.Core.Helpers (withRemote, printVerifyIssue, getRemoteTargetType)
 import Bit.Remote (Remote, remoteName, remoteUrl)
 
-verify :: Bool -> Concurrency -> BitM ()
-verify isRemote concurrency
-  | isRemote = withRemote $ \remote -> do
+-- | Whether to verify local working tree or remote.
+data VerifyTarget = VerifyLocal | VerifyRemote
+  deriving (Show, Eq)
+
+verify :: VerifyTarget -> Concurrency -> BitM ()
+verify target concurrency = case target of
+  VerifyRemote -> withRemote $ \remote -> do
       cwd <- asks envCwd
       mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
       let isFilesystem = maybe False Device.isFilesystemTarget mTarget
@@ -37,7 +42,7 @@ verify isRemote concurrency
         then verifyFilesystemRemote (remoteUrl remote) concurrency
         else verifyCloudRemote cwd remote concurrency
 
-  | otherwise = do
+  VerifyLocal -> do
       cwd <- asks envCwd
       let indexDir = cwd </> ".bit/index"
       meta <- liftIO $ Verify.loadBinaryMetadata indexDir concurrency

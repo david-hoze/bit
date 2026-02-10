@@ -223,6 +223,7 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 | `Resolution` | `bit.Conflict` | KeepLocal or TakeRemote — conflict resolution choice |
 | `DeletedSide` | `bit.Conflict` | DeletedInOurs or DeletedInTheirs — which side deleted in modify/delete conflict |
 | `ConflictInfo` | `bit.Conflict` | ContentConflict, ModifyDelete path DeletedSide, AddAdd — conflict type from git ls-files -u |
+| `VerifyTarget` | `bit.Core.Verify` | VerifyLocal or VerifyRemote — whether verify checks local or remote |
 | `DeviceInfo` | `bit.Device` | UUID + storage type + optional hardware serial |
 | `RemoteTarget` | `bit.Device` | TargetCloud, TargetDevice, TargetLocalPath |
 
@@ -932,7 +933,7 @@ case cmd of
     ("log":rest)          -> Bit.log rest >>= exitWith
     ("ls-files":rest)     -> Bit.lsFiles rest >>= exitWith
     ["remote", "show"]    -> baseEnv >>= \env -> runBitM env $ Bit.remoteShow Nothing
-    ["verify"]            -> baseEnv >>= \env -> runBitM env $ Bit.verify False ...
+    ["verify"]            -> baseEnv >>= \env -> runBitM env $ Bit.verify Bit.VerifyLocal ...
     
     -- ── Full scanned env (needs working directory state) ─
     ("add":rest)          -> do _ <- scannedEnv; Bit.add rest >>= exitWith

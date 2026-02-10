@@ -27,6 +27,7 @@ module Bit.Core
     , fetch
 
       -- Verification
+    , VerifyTarget(..)
     , verify
     , fsck
 
@@ -73,5 +74,5 @@ import Bit.Core.Push (push)
 import Bit.Core.Pull (pull)
 import Bit.Core.Fetch (fetch)
 import Bit.Core.RemoteManagement (remoteAdd, remoteShow, remoteRepair)
-import Bit.Core.Verify (verify, fsck)
+import Bit.Core.Verify (VerifyTarget(..), verify, fsck)
 

@@ -225,8 +225,8 @@ runCommand args = do
         ["remote", "show", name]        -> runBaseWithRemote name $ Bit.remoteShow (Just name)
         ["remote", "repair"]             -> runBase $ Bit.remoteRepair Nothing (if isSequential then Sequential else Parallel 0)
         ["remote", "repair", name]      -> runBaseWithRemote name $ Bit.remoteRepair (Just name) (if isSequential then Sequential else Parallel 0)
-        ["verify"]                      -> runBase $ Bit.verify False (if isSequential then Sequential else Parallel 0)
-        ["verify", "--remote"]          -> runBase $ Bit.verify True (if isSequential then Sequential else Parallel 0)
+        ["verify"]                      -> runBase $ Bit.verify Bit.VerifyLocal (if isSequential then Sequential else Parallel 0)
+        ["verify", "--remote"]          -> runBase $ Bit.verify Bit.VerifyRemote (if isSequential then Sequential else Parallel 0)
 
         -- ── Full scanned env (needs working directory state) ─
         ("add":rest)                    -> do
