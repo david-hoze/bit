@@ -16,7 +16,7 @@ main = do
   let purgeAndMkdir =
         rawSystem "rclone" ["purge", "gdrive-test:bit-test"] >>
         rawSystem "rclone" ["mkdir", "gdrive-test:bit-test"]
-  _ <- catch (void purgeAndMkdir) (\(_ :: SomeException) -> pure ())
+  void $ catch (void purgeAndMkdir) (\(_ :: SomeException) -> pure ())
   -- Prepend directory containing bit to PATH so shelltest runs use this build
   bitBin <- readProcess "cabal" ["list-bin", "bit"] ""
   let bitDir = takeDirectory (filter (`notElem` "\n\r") bitBin)

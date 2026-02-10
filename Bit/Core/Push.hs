@@ -192,15 +192,15 @@ filesystemPush cwd remote = do
             let newHead = filter (not . isSpace) newHeadOut
             
             -- 7. Sync actual files based on what changed
-            maybe (do
+            case mOldHead of
+                Nothing -> do
                     -- First push: sync all files from new HEAD
                     putStrLn "First push: syncing all files to remote..."
-                    filesystemSyncAllFiles cwd remotePath newHead)
-                (\oldHead -> do
+                    filesystemSyncAllFiles cwd remotePath newHead
+                Just oldHead -> do
                     -- Subsequent push: sync only changed files
                     putStrLn "Syncing changed files to remote..."
-                    filesystemSyncChangedFiles cwd remotePath oldHead newHead)
-                mOldHead
+                    filesystemSyncChangedFiles cwd remotePath oldHead newHead
             
             -- 8. Update local tracking ref
             putStrLn "Updating local tracking ref..."
