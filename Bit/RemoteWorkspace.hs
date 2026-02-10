@@ -201,8 +201,8 @@ classifyTextCandidates remote config candidates = do
             ExitSuccess ->
                 case kind fe of
                     File{fSize} -> do
-                        (h, isText) <- hashAndClassifyFile localPath fSize config
-                        pure fe { kind = File { fHash = h, fSize = fSize, fContentType = if isText then TextContent else BinaryContent } }
+                        (h, contentType) <- hashAndClassifyFile localPath fSize config
+                        pure fe { kind = File { fHash = h, fSize = fSize, fContentType = contentType } }
                     _ -> pure fe
             _ -> do
                 hPutStrLn stderr $ "Warning: Could not download " ++ unPath (path fe) ++ " for classification, treating as binary."

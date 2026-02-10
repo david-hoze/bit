@@ -53,10 +53,10 @@ import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 binaryExtensions :: [String]
 binaryExtensions = [".mp4", ".zip", ".bin", ".exe", ".dll", ".so", ".dylib", ".jpg", ".jpeg", ".png", ".gif", ".pdf", ".gz", ".bz2", ".xz", ".tar", ".rar", ".7z", ".iso", ".img", ".dmg", ".deb", ".rpm", ".msi"]
 
--- | Single-pass file hash and classification. Returns (hash, isText).
--- For large files or binary extensions: streams hash only, returns isText=False.
+-- | Single-pass file hash and classification. Returns (hash, contentType).
+-- For large files or binary extensions: streams hash only, returns BinaryContent.
 -- For others: reads first 8KB for text classification, then streams remaining chunks for hash.
-hashAndClassifyFile :: FilePath -> Integer -> ConfigFile.TextConfig -> IO (Hash 'MD5, Bool)
+hashAndClassifyFile :: FilePath -> Integer -> ConfigFile.TextConfig -> IO (Hash 'MD5, ContentType)
 hashAndClassifyFile filePath size config = do
     let ext = map toLower (takeExtension filePath)
     
@@ -64,13 +64,13 @@ hashAndClassifyFile filePath size config = do
     if size >= ConfigFile.textSizeLimit config || ext `elem` binaryExtensions
         then do
             h <- streamHash filePath
-            pure (h, False)
+            pure (h, BinaryContent)
         else
             -- Single-pass: read first 8KB for classification, continue streaming for hash
             withFile filePath ReadMode $ \handle -> do
                 firstChunk <- BS.hGet handle 8192
-                let isText = not (BS.elem 0 firstChunk) &&
-                             isRight (decodeUtf8' firstChunk)
+                let contentType = if not (BS.elem 0 firstChunk) && isRight (decodeUtf8' firstChunk)
+                                  then TextContent else BinaryContent
                 
                 -- Continue streaming hash from where we left off
                 let loop !ctx = do
@@ -85,7 +85,7 @@ hashAndClassifyFile filePath size config = do
                 
                 -- Start with first chunk already included
                 h <- loop (MD5.update MD5.init firstChunk)
-                pure (h, isText)
+                pure (h, contentType)
   where
     -- Stream hash for files we're not classifying
     streamHash fp = withFile fp ReadMode $ \h -> do
@@ -105,16 +105,16 @@ data CacheEntry = CacheEntry
   { ceMtime :: Integer
   , ceSize :: Integer
   , ceHash :: Hash 'MD5
-  , ceIsText :: Bool
+  , ceContentType :: ContentType
   } deriving (Show, Eq)
 
--- | Serialize cache entry to string format
+-- | Serialize cache entry to string format (isText for backward compatibility)
 serializeCacheEntry :: CacheEntry -> String
 serializeCacheEntry ce =
   "mtime: " ++ show (ceMtime ce) ++ "\n"
   ++ "size: " ++ show (ceSize ce) ++ "\n"
   ++ "hash: " ++ T.unpack (hashToText (ceHash ce)) ++ "\n"
-  ++ "isText: " ++ show (ceIsText ce) ++ "\n"
+  ++ "isText: " ++ show (ceContentType ce == TextContent) ++ "\n"
 
 -- | Parse cache entry from string format
 parseCacheEntry :: String -> Maybe CacheEntry
@@ -132,13 +132,14 @@ parseCacheEntry content = do
   size <- readMaybeInt (trim sizeLine)
   let hashVal = trim hashLine
   isText <- readMaybeBool (trim isTextLine)
+  let contentType = if isText then TextContent else BinaryContent
   if null hashVal
     then Nothing
     else Just CacheEntry
       { ceMtime = mtime
       , ceSize = size
       , ceHash = Hash (T.pack hashVal)
-      , ceIsText = isText
+      , ceContentType = contentType
       }
   where
     trim = dropWhileEnd isSpaceChar . dropWhile isSpaceChar
@@ -267,20 +268,20 @@ scanWorkingDir root = do
               cached <- loadCacheEntry root rel
               case cached of
                 Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
-                  -- Cache hit: reuse hash and isText
+                  -- Cache hit: reuse hash and contentType
                   atomicModifyIORef' counter (\n -> (n + 1, ()))
                   pure $ FileEntry
                       { path = Path rel
-                      , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = if ceIsText ce then TextContent else BinaryContent }
+                      , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ceContentType ce }
                       }
                 _ -> do
                   -- Cache miss: hash the file, save cache entry
-                  (h, isText) <- hashAndClassifyFile fullPath (fromIntegral size) config
-                  saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h isText)
+                  (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config
+                  saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
                   atomicModifyIORef' counter (\n -> (n + 1, ()))
                   pure $ FileEntry
                       { path = Path rel
-                      , kind = File { fHash = h, fSize = fromIntegral size, fContentType = if isText then TextContent else BinaryContent }
+                      , kind = File { fHash = h, fSize = fromIntegral size, fContentType = contentType }
                       }
     
       -- Wrap hashing with progress reporter

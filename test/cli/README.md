@@ -129,7 +129,20 @@ Cleanup commands use `timeout /t 1 >nul &` before `rmdir` to give Windows time t
 2. Build bit: `cabal build bit`
 3. Run CLI tests: `cabal test cli`
 
-The test runner puts the built `bit` on `PATH` and invokes `shelltest test/cli`, so all `.test` files under `test/cli/` are run. To run a single file: `shelltest test/cli/init.test` (ensure `bit` is on `PATH`, e.g. `cabal exec -- env PATH="$(cabal list-bin bit):$PATH" shelltest test/cli/init.test` on Unix).
+The test runner puts the built `bit` on `PATH` and invokes `shelltest test/cli`, so all `.test` files under `test/cli/` are run.
+
+### Fast tests (over 3 minutes)
+
+To run the main test suites in one go (unit tests, lint, a subset of CLI shell tests, and literate doc generation):
+
+- **Suites:** **lint-tests**, **pipeline**, **device-prompt**, **cli-fast**, **generate-literate-docs**
+- **cli-fast** runs a subset of CLI tests (no gdrive, no device prompt): init, status, merge-local, fsck, verify, scan-cache, filesystem-remote-direct, etc. Full **cli** (all shell tests including gdrive) is not part of fast tests.
+- One-liner: `cabal test lint-tests pipeline device-prompt cli-fast generate-literate-docs`
+- Script: `scripts\run-fast-tests.bat` (from repo root)
+
+Expect runtime over 3 minutes. For quicker feedback (under one minute), run only unit/lint: `cabal test lint-tests pipeline device-prompt`.
+
+To run a single CLI file: `shelltest test/cli/init.test` (ensure `bit` is on `PATH`, e.g. `cabal exec -- env PATH="$(cabal list-bin bit):$PATH" shelltest test/cli/init.test` on Unix).
 
 ## gdrive-remote.test
 

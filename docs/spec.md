@@ -1252,7 +1252,7 @@ Interactive per-file conflict resolution:
 | `Internal/ConfigFile.hs` | Config file parsing (strict ByteString) |
 | `bit/Types.hs` | Core types: Hash, FileEntry, BitEnv, BitM |
 | `bit/Internal/Metadata.hs` | Canonical metadata parser/serializer |
-| `bit/Scan.hs` | Working directory scanning, hash computation, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO) |
+| `bit/Scan.hs` | Working directory scanning, hash computation (`hashAndClassifyFile` returns `ContentType`), cache entries use `ContentType`, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO) |
 | `bit/Concurrency.hs` | Bounded parallelism helpers: concurrency level calculation, sequential/parallel mode switching |
 | `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
 | `bit/Plan.hs` | Pure plan: GitDiff → RcloneAction |
