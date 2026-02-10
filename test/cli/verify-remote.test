@@ -1,0 +1,78 @@
+# bit verify --remote tests (filesystem remotes)
+# Verifies that verify --remote works for filesystem remotes by scanning
+# the remote working directory instead of using the cloud bundle path.
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_vr 2>nul & rmdir /s /q test\cli\output\remote_vr 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: init, add remote, add files, commit, push
+# ======================================================================
+
+mkdir test\cli\output\work_vr & mkdir test\cli\output\remote_vr & cd test\cli\output\work_vr & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_vr & bit remote add origin ..\remote_vr
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\output\work_vr & echo hello> greet.txt & echo binarydata> data.bin & bit add greet.txt data.bin & bit commit -m "Add files"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_vr & bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# TEST: Clean verify — all files match
+# ======================================================================
+
+cd test\cli\output\work_vr & bit verify --remote
+<<<
+>>> /\[OK\] All [0-9]+ files match metadata/
+>>>= 0
+
+# ======================================================================
+# TEST: Corrupted file — hash mismatch detected
+# ======================================================================
+
+cd test\cli\output\remote_vr & echo corrupted> data.bin
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_vr & bit verify --remote
+<<<
+>>>2 /\[ERROR\] Hash mismatch.*data\.bin/
+>>>= 0
+
+# ======================================================================
+# TEST: Missing file — detected
+# ======================================================================
+
+cd test\cli\output\remote_vr & del greet.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_vr & bit verify --remote
+<<<
+>>>2 /\[ERROR\] Missing.*greet\.txt/
+>>>= 0
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_vr 2>nul & rmdir /s /q test\cli\output\remote_vr 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

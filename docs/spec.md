@@ -985,14 +985,12 @@ Verifies local working tree files match their committed metadata. Scans the work
 
 ### `bit verify --remote`
 
-Verifies that remote files match what the remote Git bundle says they should be:
-1. Fetch remote bundle (committed metadata)
-2. Scan remote files via `rclone lsjson --hash`
-3. Compare: Do actual remote files match what the committed metadata claims?
+Detects remote type via `getRemoteTargetType`/`Device.isFilesystemTarget` and routes accordingly:
 
-For filesystem remotes, uses the same scan + git diff approach as local verification (`verifyLocalAt`).
+- **Filesystem remotes**: Scans the remote working directory using `Verify.verifyLocalAt`, the same scan + git diff approach as local verification.
+- **Cloud remotes**: Fetches the remote bundle (committed metadata), scans remote files via `rclone lsjson --hash`, and compares.
 
-**Progress reporting**: On TTY with >5 files, displays live progress during comparison phase.
+**Progress reporting**: On TTY with >5 files, displays live progress during comparison phase (cloud remotes only).
 
 ### `bit fsck`
 

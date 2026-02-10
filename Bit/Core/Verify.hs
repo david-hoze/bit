@@ -23,47 +23,19 @@ import qualified Bit.Fsck as Fsck
 import Internal.Config (fetchedBundle)
 import Bit.Progress (reportProgress, clearProgress)
 
-import Bit.Core.Helpers (withRemote, printVerifyIssue)
+import qualified Bit.Device as Device
+import Bit.Core.Helpers (withRemote, printVerifyIssue, getRemoteTargetType)
+import Bit.Remote (Remote, remoteName, remoteUrl)
 
 verify :: Bool -> Concurrency -> BitM ()
 verify isRemote concurrency
   | isRemote = withRemote $ \remote -> do
       cwd <- asks envCwd
-      liftIO $ putStrLn "Fetching remote metadata..."
-      liftIO $ putStrLn "Scanning remote files..."
-
-      remoteMeta <- liftIO $ Verify.loadMetadataFromBundle fetchedBundle
-      let fileCount = length remoteMeta
-
-      if fileCount > 5
-        then liftIO $ do
-          isTTY <- hIsTerminalDevice stderr
-          counter <- newIORef (0 :: Int)
-          let shouldShowProgress = isTTY
-
-          reporterThread <- if shouldShowProgress
-            then Just <$> forkIO (verifyProgressLoop counter fileCount)
-            else pure Nothing
-
-          (actualCount, issues) <- finally
-            (Verify.verifyRemote cwd remote (Just counter) concurrency)
-            (do
-              traverse_ killThread reporterThread
-              when shouldShowProgress clearProgress
-            )
-
-          if null issues
-            then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
-            else do
-              mapM_ (printVerifyIssue truncateHash) issues
-              putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
-        else liftIO $ do
-          (actualCount, issues) <- Verify.verifyRemote cwd remote Nothing concurrency
-          if null issues
-            then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
-            else do
-              mapM_ (printVerifyIssue truncateHash) issues
-              putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
+      mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
+      let isFilesystem = maybe False Device.isFilesystemTarget mTarget
+      if isFilesystem
+        then verifyFilesystemRemote (remoteUrl remote) concurrency
+        else verifyCloudRemote cwd remote concurrency
 
   | otherwise = do
       cwd <- asks envCwd
@@ -100,6 +72,56 @@ verify isRemote concurrency
             else do
               mapM_ (printVerifyIssue truncateHash) issues
               putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found. Run 'bit status' for details."
+
+-- | Verify a filesystem remote by scanning its working directory.
+verifyFilesystemRemote :: FilePath -> Concurrency -> BitM ()
+verifyFilesystemRemote remotePath concurrency = liftIO $ do
+    putStrLn "Verifying remote files..."
+    (actualCount, issues) <- Verify.verifyLocalAt remotePath Nothing concurrency
+    if null issues
+      then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+      else do
+        mapM_ (printVerifyIssue truncateHash) issues
+        putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
+
+-- | Verify a cloud remote using the fetched bundle.
+verifyCloudRemote :: FilePath -> Remote -> Concurrency -> BitM ()
+verifyCloudRemote cwd remote concurrency = liftIO $ do
+    putStrLn "Fetching remote metadata..."
+    putStrLn "Scanning remote files..."
+
+    remoteMeta <- Verify.loadMetadataFromBundle fetchedBundle
+    let fileCount = length remoteMeta
+
+    if fileCount > 5
+      then do
+        isTTY <- hIsTerminalDevice stderr
+        counter <- newIORef (0 :: Int)
+        let shouldShowProgress = isTTY
+
+        reporterThread <- if shouldShowProgress
+          then Just <$> forkIO (verifyProgressLoop counter fileCount)
+          else pure Nothing
+
+        (actualCount, issues) <- finally
+          (Verify.verifyRemote cwd remote (Just counter) concurrency)
+          (do
+            traverse_ killThread reporterThread
+            when shouldShowProgress clearProgress
+          )
+
+        if null issues
+          then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+          else do
+            mapM_ (printVerifyIssue truncateHash) issues
+            putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
+      else do
+        (actualCount, issues) <- Verify.verifyRemote cwd remote Nothing concurrency
+        if null issues
+          then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+          else do
+            mapM_ (printVerifyIssue truncateHash) issues
+            putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
 
 verifyProgressLoop :: IORef Int -> Int -> IO ()
 verifyProgressLoop counter total = go

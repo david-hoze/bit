@@ -59,6 +59,11 @@ shelltest test/cli/specific.test --debug    # Single test
 shelltest test/cli --debug                  # Full suite
 ```
 
+### Cloud Remote Tests
+- `gdrive-test` is a configured rclone remote for cloud tests (`test/cli/gdrive-remote.test`)
+- Cloud tests are active in the full test suite — they are not excluded or skipped
+- Cloud tests require network access and are slow; run filesystem remote tests first when iterating
+
 ## Commit Messages
 
 - Imperative mood: "Add feature" not "Added feature"
