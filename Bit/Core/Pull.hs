@@ -22,7 +22,6 @@ module Bit.Core.Pull
     ) where
 
 import Prelude hiding (log)
-import qualified System.Directory as Dir
 import System.FilePath ((</>), normalise, takeDirectory)
 import Control.Monad (when, unless, void, forM_)
 import Data.Foldable (traverse_)
@@ -30,7 +29,6 @@ import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (bitIndexPath, fetchedBundle)
-import Data.Char (isSpace)
 import qualified Bit.Scan as Scan
 import qualified Bit.Verify as Verify
 import qualified Bit.Conflict as Conflict
@@ -39,7 +37,7 @@ import qualified Data.List as List
 import qualified Data.Map as Map
 import System.IO (stderr, hPutStrLn)
 import Control.Exception (try, SomeException, throwIO)
-import Bit.Utils (toPosix, filterOutBitPaths)
+import Bit.Utils (toPosix, filterOutBitPaths, trimGitOutput)
 import Data.Maybe (maybeToList)
 import Bit.Remote (Remote, remoteName, remoteUrl)
 import Bit.Types (BitM, BitEnv(..), ForceMode(..), Hash, HashAlgo(..), EntryKind(..), syncHash, runBitM, unPath)
@@ -66,6 +64,7 @@ import Bit.Core.Helpers
     , copyFileE
     , writeFileAtomicE
     , printVerifyIssue
+    , checkFilesystemRemoteIsRepo
     )
 import Bit.Core.Transport
     ( FileTransport
@@ -106,11 +105,7 @@ filesystemPull cwd remote opts = do
     putStrLn $ "Pulling from filesystem remote: " ++ remotePath
     
     -- Check if remote has .bit/ directory
-    let remoteBitDir = remotePath </> ".bit"
-    remoteHasBit <- Dir.doesDirectoryExist remoteBitDir
-    unless remoteHasBit $ do
-        hPutStrLn stderr "error: Remote is not a bit repository."
-        exitWith (ExitFailure 1)
+    checkFilesystemRemoteIsRepo remotePath
     
     -- 1. Fetch remote into local
     let remoteIndexGit = remotePath </> ".bit" </> "index" </> ".git"
@@ -133,7 +128,7 @@ filesystemPull cwd remote opts = do
         hPutStrLn stderr "Error: Could not get remote HEAD"
         exitWith (ExitFailure 1)
     
-    let remoteHash = filter (not . isSpace) remoteHeadOut
+    let remoteHash = trimGitOutput remoteHeadOut
     
     -- NEW: Proof of possession — verify filesystem remote before pulling
     unless (pullMode opts == PullAcceptRemote || pullSkipVerify opts) $ do

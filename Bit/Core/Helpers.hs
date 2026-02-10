@@ -13,6 +13,7 @@ module Bit.Core.Helpers
     , checkIsAheadE
     , hasStagedChangesE
     , getRemoteTargetType
+    , checkFilesystemRemoteIsRepo
       -- Monadic helpers
     , withRemote
     , gitQuery
@@ -38,19 +39,18 @@ module Bit.Core.Helpers
 import qualified System.Directory as Dir
 import System.Directory (copyFile, removeFile, createDirectoryIfMissing, removeDirectory, listDirectory, doesDirectoryExist)
 import System.FilePath ((</>), normalise)
-import Control.Monad (when, forM_)
+import Control.Monad (when, unless, forM_)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Bit.Device as Device
 import Bit.Remote (Remote)
-import Data.Char (isSpace)
 import Data.List (isPrefixOf, foldl')
 import System.IO (stderr, hPutStrLn)
 import Data.Maybe (mapMaybe)
 import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
-import Bit.Utils (toPosix, atomicWriteFileStr)
+import Bit.Utils (toPosix, atomicWriteFileStr, trimGitOutput)
 import qualified Bit.Verify as Verify
 import qualified Bit.Scan as Scan
 import Internal.Config (bitIndexPath)
@@ -86,7 +86,7 @@ getLocalHeadE :: IO (Maybe String)
 getLocalHeadE = do
     (code, out, _) <- Git.runGitWithOutput ["rev-parse", "HEAD"]
     pure $ case code of
-        ExitSuccess -> Just (filter (not . isSpace) out)
+        ExitSuccess -> Just (trimGitOutput out)
         _ -> Nothing
 
 -- | Check if @localHash@ is ahead of @remoteHash@ (i.e., remote is an ancestor of local).
@@ -105,6 +105,16 @@ hasStagedChangesE =
 -- Returns the RemoteTarget if the remote is configured, Nothing otherwise.
 getRemoteTargetType :: FilePath -> String -> IO (Maybe Device.RemoteTarget)
 getRemoteTargetType cwd remName = Device.readRemoteFile cwd remName
+
+-- | Check if a filesystem path is a bit repository. Exits with error if not.
+-- Used by filesystem push, pull, and fetch operations to validate the remote.
+checkFilesystemRemoteIsRepo :: FilePath -> IO ()
+checkFilesystemRemoteIsRepo remotePath = do
+    let remoteBitDir = remotePath </> ".bit"
+    remoteHasBit <- Dir.doesDirectoryExist remoteBitDir
+    unless remoteHasBit $ do
+        hPutStrLn stderr "error: Remote is not a bit repository."
+        exitWith (ExitFailure 1)
 
 -- ============================================================================
 -- Compatibility helpers (effect system removal)

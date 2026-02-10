@@ -15,7 +15,7 @@ module Bit.Core.Fetch
 
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
-import Control.Monad (when, unless)
+import Control.Monad (when)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
@@ -25,7 +25,7 @@ import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Internal.Config (fromCwdPath, bundleCwdPath, fetchedBundle)
-import Bit.Core.Helpers (getRemoteTargetType, withRemote, safeRemove)
+import Bit.Core.Helpers (getRemoteTargetType, withRemote, safeRemove, checkFilesystemRemoteIsRepo)
 import qualified Bit.Device as Device
 import System.Directory (copyFile)
 import Control.Monad (void)
@@ -69,11 +69,7 @@ filesystemFetch _cwd remote = do
     putStrLn $ "Fetching from filesystem remote: " ++ remotePath
     
     -- Check if remote has .bit/ directory
-    let remoteBitDir = remotePath </> ".bit"
-    remoteHasBit <- Dir.doesDirectoryExist remoteBitDir
-    unless remoteHasBit $ do
-        hPutStrLn stderr "error: Remote is not a bit repository."
-        exitWith (ExitFailure 1)
+    checkFilesystemRemoteIsRepo remotePath
     
     -- Fetch remote into local
     let remoteIndexGit = remotePath </> ".bit" </> "index" </> ".git"

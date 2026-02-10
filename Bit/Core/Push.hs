@@ -23,7 +23,7 @@ import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (fetchedBundle, BundleName(..), bundleCwdPath, fromCwdPath)
-import Data.Char (isSpace)
+import Bit.Utils (trimGitOutput)
 import qualified Bit.Pipeline as Pipeline
 import qualified Bit.Remote.Scan as Remote.Scan
 import qualified Data.List as List
@@ -163,7 +163,7 @@ filesystemPush cwd remote = do
     -- 3. Capture remote HEAD before merge
     (oldHeadCode, oldHeadOut, _) <- Git.runGitAt remoteIndex ["rev-parse", "HEAD"]
     let mOldHead = case oldHeadCode of
-            ExitSuccess -> Just (filter (not . isSpace) oldHeadOut)
+            ExitSuccess -> Just (trimGitOutput oldHeadOut)
             _ -> Nothing
     
     -- 4. Check if remote HEAD is ancestor of what we're pushing (fast-forward check)
@@ -189,7 +189,7 @@ filesystemPush cwd remote = do
                 hPutStrLn stderr "Error: Could not get remote HEAD after merge"
                 exitWith (ExitFailure 1)
             
-            let newHead = filter (not . isSpace) newHeadOut
+            let newHead = trimGitOutput newHeadOut
             
             -- 7. Sync actual files based on what changed
             case mOldHead of

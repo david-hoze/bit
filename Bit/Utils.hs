@@ -13,6 +13,7 @@ module Bit.Utils
   
     -- * Formatting utilities
   , formatBytes
+  , trimGitOutput
   
     -- * Atomic file writes (re-exported from Bit.AtomicWrite)
   , atomicWriteFile
@@ -75,3 +76,8 @@ formatBytes bytes
         let multiplier = 10 ^ decimals
             rounded = fromIntegral (round (n * multiplier) :: Integer) / multiplier
         in show rounded
+
+-- | Trim whitespace from git output (newlines, spaces, tabs, carriage returns).
+-- Git commands often return commit hashes or refs with trailing newlines.
+trimGitOutput :: String -> String
+trimGitOutput = filter (\c -> c /= ' ' && c /= '\n' && c /= '\r' && c /= '\t')

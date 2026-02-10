@@ -18,7 +18,7 @@ import Bit.Scan (hashAndClassifyFile, binaryExtensions)
 import qualified Internal.ConfigFile as ConfigFile
 import Internal.ConfigFile (TextConfig)
 import qualified Internal.Transport as Transport
-import Bit.Utils (isBitPath, atomicWriteFileStr)
+import Bit.Utils (isBitPath, atomicWriteFileStr, trimGitOutput)
 import Bit.Internal.Metadata (MetaContent(..), serializeMetadata)
 import System.FilePath ((</>), takeExtension, takeDirectory)
 import System.Directory
@@ -33,7 +33,7 @@ import System.Exit (ExitCode(..), exitWith)
 import System.IO (hPutStrLn, stderr, stdout, hFlush)
 import qualified Internal.Git as Git
 import Control.Monad (when, unless, forM, forM_, void)
-import Data.Char (toLower, isSpace)
+import Data.Char (toLower)
 import Data.List (partition)
 import Control.Exception (SomeException, bracket, catch)
 
@@ -132,13 +132,13 @@ withRemoteWorkspace remote action = withTempDir "bit-remote-ws" $ \tmpBase -> do
             inflateBundle bundlePath wsPath
             -- Capture HEAD before action
             (_, oldHeadRaw, _) <- Git.runGitAt wsPath ["rev-parse", "HEAD"]
-            let oldHead = filter (not . isSpace) oldHeadRaw
+            let oldHead = trimGitOutput oldHeadRaw
             -- Run action
             code <- action wsPath
             case code of
                 ExitSuccess -> do
                     (_, newHeadRaw, _) <- Git.runGitAt wsPath ["rev-parse", "HEAD"]
-                    let newHead = filter (not . isSpace) newHeadRaw
+                    let newHead = trimGitOutput newHeadRaw
                     if oldHead == newHead
                         then pure ExitSuccess
                         else do
