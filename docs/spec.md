@@ -221,6 +221,8 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 | `RcloneAction` | `bit.Plan` | Copy, Move, Delete, Swap — concrete rclone operations |
 | `FileIndex` | `bit.Diff` | Dual-indexed file map (byPath + byHash) for efficient diff/rename detection |
 | `Resolution` | `bit.Conflict` | KeepLocal or TakeRemote — conflict resolution choice |
+| `DeletedSide` | `bit.Conflict` | DeletedInOurs or DeletedInTheirs — which side deleted in modify/delete conflict |
+| `ConflictInfo` | `bit.Conflict` | ContentConflict, ModifyDelete path DeletedSide, AddAdd — conflict type from git ls-files -u |
 | `DeviceInfo` | `bit.Device` | UUID + storage type + optional hardware serial |
 | `RemoteTarget` | `bit.Device` | TargetCloud, TargetDevice, TargetLocalPath |
 
@@ -1261,7 +1263,7 @@ Interactive per-file conflict resolution:
 | `bit/RemoteWorkspace.hs` | Ephemeral remote workspace: `initRemote`, `addRemote`, `commitRemote`, `statusRemote`, `logRemote`; `withRemoteWorkspace` / `withRemoteWorkspaceReadOnly` orchestration; bundle inflation via `init+fetch+reset --hard` |
 | `bit/Device.hs` | Device identity, volume detection, .bit-store (strict IO, atomic writes) |
 | `bit/DevicePrompt.hs` | Interactive device setup prompts |
-| `bit/Conflict.hs` | Conflict resolution: Resolution, resolveAll |
+| `bit/Conflict.hs` | Conflict resolution: Resolution, DeletedSide, ConflictInfo, resolveAll |
 | `bit/Utils.hs` | Path utilities, filtering, atomic write re-exports |
 | `bit/AtomicWrite.hs` | Atomic file writes, directory locking, lock registry |
 | `bit/ConcurrentIO.hs` | Type-safe concurrent IO newtype (no MonadIO) |

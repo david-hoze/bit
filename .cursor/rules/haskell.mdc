@@ -33,6 +33,9 @@ Key types and conventions used throughout this codebase:
 | `FetchResult` | `BundleFound FilePath` / `RemoteEmpty` / `NetworkError String` | `Bit.Remote` |
 | `FileTransport` | Record of functions abstracting cloud vs filesystem transfer | `Bit.Core.Transport` |
 | `Concurrency` | `Parallel Int` / `Sequential` | `Bit.Concurrency` |
+| `Resolution` | `KeepLocal` / `TakeRemote` — conflict resolution choice | `Bit.Conflict` |
+| `DeletedSide` | `DeletedInOurs` / `DeletedInTheirs` — which side deleted in modify/delete conflict | `Bit.Conflict` |
+| `ConflictInfo` | `ContentConflict` / `ModifyDelete path DeletedSide` / `AddAdd` — conflict type from git ls-files -u | `Bit.Conflict` |
 | `BundleName` | `newtype` over `String` — logical bundle name, not a path | `Internal.Config` |
 | `GitRelPath` | `newtype` — path relative to `.bit/index/` (for git commands) | `Internal.Config` |
 | `CwdPath` | `newtype` — path relative to CWD (for filesystem operations) | `Internal.Config` |

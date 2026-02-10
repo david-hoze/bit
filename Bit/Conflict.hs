@@ -3,6 +3,7 @@
 
 module Bit.Conflict
   ( Resolution(..)
+  , DeletedSide(..)
   , ConflictInfo(..)
   , resolveConflict
   , resolveAll
@@ -24,11 +25,17 @@ import Bit.Internal.Metadata (MetaContent(..), parseMetadata, displayHash)
 data Resolution = KeepLocal | TakeRemote
   deriving (Show, Eq)
 
+-- | Which side deleted the file in a modify/delete conflict.
+data DeletedSide
+  = DeletedInOurs   -- ^ Deleted in HEAD (ours); modified in origin/main (theirs)
+  | DeletedInTheirs -- ^ Deleted in origin/main (theirs); modified in HEAD (ours)
+  deriving (Show, Eq)
+
 -- | Conflict type (mirrors Internal.Git.ConflictType but doesn't depend on IO module).
 data ConflictInfo
-  = ContentConflict FilePath   -- both modified
-  | ModifyDelete FilePath Bool -- True = deleted in HEAD (ours)
-  | AddAdd FilePath            -- both added different
+  = ContentConflict FilePath
+  | ModifyDelete FilePath DeletedSide
+  | AddAdd FilePath
   deriving (Show, Eq)
 
 -- | Get list of conflicted files
@@ -57,17 +64,17 @@ parseConflictInfo path out =
       has3 = 3 `elem` stageNums
   in if | has2 && has3 && has1     -> ContentConflict path
         | has2 && has3 && not has1 -> AddAdd path
-        | has2 && not has3         -> ModifyDelete path False
-        | has3 && not has2         -> ModifyDelete path True
+        | has2 && not has3         -> ModifyDelete path DeletedInTheirs
+        | has3 && not has2         -> ModifyDelete path DeletedInOurs
         | otherwise                -> ContentConflict path
 
 -- | Print a conflict type announcement (git-style message).
 announceConflict :: ConflictInfo -> IO ()
 announceConflict (ContentConflict path) =
   putStrLn $ "CONFLICT (content): Merge conflict in " ++ path
-announceConflict (ModifyDelete path True) =
+announceConflict (ModifyDelete path DeletedInOurs) =
   putStrLn $ "CONFLICT (modify/delete): " ++ path ++ " deleted in HEAD and modified in origin/main"
-announceConflict (ModifyDelete path False) =
+announceConflict (ModifyDelete path DeletedInTheirs) =
   putStrLn $ "CONFLICT (modify/delete): " ++ path ++ " deleted in origin/main and modified in HEAD"
 announceConflict (AddAdd path) =
   putStrLn $ "CONFLICT (add/add): Merge conflict in " ++ path

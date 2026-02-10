@@ -66,7 +66,7 @@ conflictInfoParsingTests = testGroup "parseConflictInfo"
             [ "100644 abc123 1\tindex/gone.bin"
             , "100644 def456 2\tindex/gone.bin"
             ]
-      parseConflictInfo "index/gone.bin" output @?= ModifyDelete "index/gone.bin" False
+      parseConflictInfo "index/gone.bin" output @?= ModifyDelete "index/gone.bin" DeletedInTheirs
 
   -- Modify/delete: theirs modified (stage 3) but ours deleted (no stage 2)
   , testCase "stage 3 only -> ModifyDelete (deleted in ours)" $ do
@@ -74,7 +74,7 @@ conflictInfoParsingTests = testGroup "parseConflictInfo"
             [ "100644 abc123 1\tindex/gone.bin"
             , "100644 ghi789 3\tindex/gone.bin"
             ]
-      parseConflictInfo "index/gone.bin" output @?= ModifyDelete "index/gone.bin" True
+      parseConflictInfo "index/gone.bin" output @?= ModifyDelete "index/gone.bin" DeletedInOurs
 
   -- Empty output (fallback)
   , testCase "empty output -> ContentConflict (fallback)" $ do
