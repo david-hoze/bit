@@ -305,7 +305,8 @@ pullManualMergeImpl remote = do
                 FetchError err -> lift $ tellErr $ "Error: " ++ err
                 _ -> pure ()  -- No need to render fetch output during pull
 
-            (remoteMeta, _allBundlePaths) <- lift $ Verify.loadMetadataFromBundle fetchedBundle
+            entries <- lift $ Verify.loadMetadataFromBundle fetchedBundle
+            let remoteMeta = Verify.binaryEntries entries
             lift $ tell "Scanning remote files... done."
             result <- lift $ Remote.Scan.fetchRemoteFiles remote
             case result of

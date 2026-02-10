@@ -90,8 +90,8 @@ verifyCloudRemote cwd remote concurrency = liftIO $ do
     putStrLn "Fetching remote metadata..."
     putStrLn "Scanning remote files..."
 
-    remoteMeta <- Verify.loadMetadataFromBundle fetchedBundle
-    let fileCount = length remoteMeta
+    entries <- Verify.loadMetadataFromBundle fetchedBundle
+    let fileCount = length entries
 
     if fileCount > 5
       then do

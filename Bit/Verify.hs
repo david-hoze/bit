@@ -20,16 +20,17 @@ module Bit.Verify
   ) where
 
 import Bit.Types (Hash(..), HashAlgo(..), Path(..), FileEntry(..), EntryKind(..), syncHash, hashToText)
-import Bit.Utils (filterOutBitPaths)
+import Bit.Utils (filterOutBitPaths, toPosix)
 import Bit.Concurrency (Concurrency(..), runConcurrently, ioConcurrency)
-import System.FilePath ((</>), makeRelative, normalise)
-import System.Directory (doesFileExist, listDirectory, doesDirectoryExist, removeFile)
+import System.FilePath ((</>), makeRelative, normalise, takeDirectory)
+import System.Directory (doesFileExist, listDirectory, doesDirectoryExist, removeFile, createDirectoryIfMissing, removeDirectoryRecursive, getPermissions, setPermissions, setOwnerWritable, setModificationTime)
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Data.List (isPrefixOf)
 import Data.Maybe (maybeToList)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Internal.Git as Git
-import Bit.Internal.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, hashFile)
+import Bit.Internal.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, hashFile, serializeMetadata)
 import qualified Bit.Remote.Scan as Remote.Scan
 import qualified Bit.Remote
 import qualified Internal.Transport as Transport
@@ -38,7 +39,7 @@ import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
 import System.IO (hPutStrLn, stderr)
-import Control.Monad (when, unless)
+import Control.Monad (when, unless, void)
 import Data.Foldable (traverse_)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -190,22 +191,29 @@ verifyLocalAt root mCounter _concurrency = do
   entries <- Scan.scanWorkingDir root
   Scan.writeMetadataFiles root entries
 
-  -- 2. git diff in the index repo to find files changed from committed state
+  -- 2. Defeat racy git: set mtime to epoch so git always re-reads content.
+  --    Without this, git's stat cache can skip content comparison when metadata
+  --    files have the same byte length (e.g. two 2-digit file sizes).
+  let metaFiles = [indexDir </> unPath (path e) | e <- entries
+                  , case kind e of File{} -> True; _ -> False]
+  mapM_ (\f -> setModificationTime f (posixSecondsToUTCTime 0)) metaFiles
+
+  -- 3. git diff in the index repo to find files changed from committed state
   (diffCode, diffOut, _) <- Git.runGitAt indexDir ["diff", "--name-only"]
   let changedPaths
         | diffCode == ExitSuccess = filter (not . null) (lines diffOut)
         | otherwise               = []
 
-  -- 3. Also check for missing files: committed paths not in working tree
+  -- 4. Also check for missing files: committed paths not in working tree
   (lsCode, lsOut, _) <- Git.runGitAt indexDir ["ls-tree", "-r", "--name-only", "HEAD"]
   let committedPaths
         | lsCode == ExitSuccess = filter isUserFile $ filter (not . null) (lines lsOut)
         | otherwise             = []
 
-  -- 4. Build issues from changed files (hash mismatches)
+  -- 5. Build issues from changed files (hash mismatches)
   mismatchIssues <- concat <$> mapM (checkChanged indexDir) changedPaths
 
-  -- 5. Build issues from missing files (committed but not in working tree)
+  -- 6. Build issues from missing files (committed but not in working tree)
   missingFiltered <- fmap concat $ mapM (\p -> do
     exists <- doesFileExist (root </> p)
     pure [Missing (Path p) | not exists]
@@ -265,12 +273,9 @@ verifyLocal cwd = verifyLocalAt cwd
 
 -- | Extract metadata from a bundle's HEAD commit.
 -- First fetches the bundle into the repo, then reads metadata from refs/remotes/origin/main.
--- Returns (binaryMetadata, allKnownPaths):
---   binaryMetadata: list of (path, hash, size) for binary files (verifiable)
---   allKnownPaths: set of all file paths in the bundle (binary + text, for "extra files" check)
--- Text files are NOT hash-verified because git may normalize line endings (CRLF→LF),
--- causing hash mismatches with the actual files on the remote.
-loadMetadataFromBundle :: BundleName -> IO ([(Path, Hash 'MD5, Integer)], Set.Set Path)
+-- Returns all metadata entries (binary + text). Callers extract what they need
+-- via 'binaryEntries' or 'allEntryPaths'.
+loadMetadataFromBundle :: BundleName -> IO [MetadataEntry]
 loadMetadataFromBundle bundleName = do
   -- First, fetch the bundle into the repo so we can read from it
   fetchCode <- Git.fetchFromBundle bundleName
@@ -283,17 +288,19 @@ loadMetadataFromBundle bundleName = do
         , "refs/remotes/origin/main"
         ] ""
       case filter (not . isSpace) out of
-        [] -> pure ([], Set.empty)
-        headHash -> do
-          entries <- loadMetadata (FromCommit headHash) Sequential
-          pure (binaryEntries entries, allEntryPaths entries)
-    _ -> pure ([], Set.empty)
+        [] -> pure []
+        headHash -> loadMetadata (FromCommit headHash) Sequential
+    _ -> pure []
 
 -- | Verify remote files match remote metadata.
+-- Sets up a temporary working tree in .bit/vremotes/<name>/, checks out the
+-- expected state from the bundle, overwrites with actual remote data (rclone
+-- metadata for binaries, downloaded content for text files), then runs a single
+-- git diff to find all mismatches.
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
 verifyRemote :: FilePath -> Bit.Remote.Remote -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
-verifyRemote _cwd remote mCounter _concurrency = do
+verifyRemote cwd remote mCounter _concurrency = do
   -- 1. Fetch the remote bundle if needed
   let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
   bundleExists <- doesFileExist fetchedPath
@@ -302,62 +309,113 @@ verifyRemote _cwd remote mCounter _concurrency = do
     fetchResult <- Transport.copyFromRemoteDetailed remote ".bit/bit.bundle" localDest
     case fetchResult of
       Transport.CopySuccess -> do
-        -- Copy to fetchedPath for consistency
         BS.readFile localDest >>= BS.writeFile fetchedPath
         when (localDest /= fetchedPath) $ safeRemove localDest
       _ -> do
         hPutStrLn stderr "Error: Could not fetch remote bundle."
         pure ()
-  
-  -- Check if bundle exists now (if fetch failed, we can't continue)
+
   bundleExistsNow <- doesFileExist fetchedPath
   if not bundleExistsNow
     then pure (0, [])
     else do
-      -- 2. Load metadata from the bundle (binary metadata + all known paths)
-      (remoteMeta, allKnownPaths) <- loadMetadataFromBundle fetchedBundle
+      -- 2. Load metadata from bundle (classifies entries; fetches bundle into .bit/index)
+      entries <- loadMetadataFromBundle fetchedBundle
+      let allKnownPaths = allEntryPaths entries
 
-      -- 3. Fetch actual remote files
+      -- 3. Fetch remote file list via rclone ls
       Remote.Scan.fetchRemoteFiles remote >>= either
         (const $ hPutStrLn stderr "Error: Could not fetch remote file list." >> pure (0, []))
         (\remoteFiles -> do
           let filteredRemoteFiles = filterOutBitPaths remoteFiles
-          
-          -- 4. Build maps for comparison (both use MD5 hashes)
-          let remoteFileMap = Map.fromList
+              remoteFileMap = Map.fromList
                 [ (normalise (unPath e.path), (h, e.kind))
                 | e <- filteredRemoteFiles
                 , h <- maybeToList (syncHash e.kind)
                 ]
-          
-          -- 5. Compare binary file metadata with actual files on remote
-          issues <- traverse (checkRemoteFile remoteFileMap) remoteMeta
-          
-          -- 6. Check for files on remote that aren't known to the bundle
-          -- Use allKnownPaths (binary + text) to avoid false positives for text files
+
+          -- 4. Set up verification working tree
+          let vremoteDir = cwd </> ".bit" </> "vremotes" </> Bit.Remote.remoteName remote
+          forceRemoveDir vremoteDir
+          createDirectoryIfMissing True vremoteDir
+
+          -- Checkout expected state from the remote's bundle
+          let absBundlePath = cwd </> fetchedPath
+          void $ Git.runGitAt vremoteDir ["init", "-q"]
+          void $ Git.runGitAt vremoteDir ["fetch", "-q", absBundlePath, "refs/heads/main:refs/heads/main"]
+          void $ Git.runGitAt vremoteDir ["checkout", "-q", "main"]
+
+          -- 5. Overwrite working tree with actual remote state:
+          --    Binary: construct metadata from rclone ls data
+          --    Text: download actual content from remote
+          --    Missing: delete the checked-out file
+          mapM_ (\entry -> do
+            let p = entryPath entry
+                destFile = vremoteDir </> unPath p
+            case entry of
+              BinaryEntry _ _ _ ->
+                case Map.lookup (normalise (unPath p)) remoteFileMap of
+                  Just (h, File _ sz _) ->
+                    writeFile destFile (serializeMetadata (MetaContent h sz))
+                  _ -> safeRemove destFile
+              TextEntry _ -> do
+                code <- Transport.copyFromRemote remote (toPosix (unPath p)) destFile
+                when (code /= ExitSuccess) $ safeRemove destFile
+            traverse_ (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
+            ) entries
+
+          -- 6. Single git diff: compares actual working tree against expected (HEAD)
+          (_, diffOut, _) <- Git.runGitAt vremoteDir
+            ["diff", "--ignore-cr-at-eol", "--name-status", "HEAD"]
+          let entryMap = Map.fromList
+                [(normalise (unPath (entryPath e)), e) | e <- entries]
+              issues = concatMap (parseDiffLine entryMap remoteFileMap)
+                (filter (not . null) (lines diffOut))
+
+          -- 7. Extra files on remote not in bundle metadata
           let filePaths = Set.fromList (map Path (Map.keys remoteFileMap))
               extraPaths = filePaths `Set.difference` allKnownPaths
               extraIssues = map (\p -> HashMismatch p "(not in metadata)" "(exists on remote)" 0 0) (Set.toList extraPaths)
-          
-          pure (length remoteMeta, concat issues ++ extraIssues))
+
+          -- 8. Clean up (.git/objects are read-only, need forceRemoveDir)
+          forceRemoveDir vremoteDir
+
+          pure (length entries, issues ++ extraIssues))
   where
-    -- Check one file from metadata against remote (both use MD5)
-    checkRemoteFile :: Map.Map FilePath (Hash 'MD5, EntryKind) -> (Path, Hash 'MD5, Integer) -> IO [VerifyIssue]
-    checkRemoteFile remoteFileMap (relPath, expectedHash, expectedSize) = do
-      let normalizedPath = normalise (unPath relPath)
-      result <- case Map.lookup normalizedPath remoteFileMap of
-        Nothing -> pure [Missing relPath]
-        Just (actualHash, File _ actualSize _) ->
-          if actualHash == expectedHash && actualSize == expectedSize
-            then pure []
-            else pure [HashMismatch relPath (T.unpack (hashToText expectedHash)) (T.unpack (hashToText actualHash)) expectedSize actualSize]
-        Just _ -> pure []
-      -- Increment counter after checking file
-      traverse_ (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
-      pure result
+    parseDiffLine entryMap remoteFileMap line =
+      let (status, rest) = break (== '\t') line
+          path = drop 1 rest
+          npath = normalise path
+      in case status of
+        "D" -> [Missing (Path path)]
+        "M" -> case (Map.lookup npath entryMap, Map.lookup npath remoteFileMap) of
+          (Just (BinaryEntry p eh es), Just (ah, File _ as' _)) ->
+            [HashMismatch p (T.unpack (hashToText eh)) (T.unpack (hashToText ah)) es as']
+          _ -> [HashMismatch (Path path) "(committed)" "(remote differs)" 0 0]
+        _ -> []
 
 -- Helper to safely remove a file
 safeRemove :: FilePath -> IO ()
 safeRemove filePath = do
   exists <- doesFileExist filePath
   when exists $ removeFile filePath
+
+-- | Remove a directory tree, handling read-only files (e.g. .git/objects).
+forceRemoveDir :: FilePath -> IO ()
+forceRemoveDir dir = do
+  exists <- doesDirectoryExist dir
+  when exists $ do
+    makeWritable dir
+    removeDirectoryRecursive dir
+  where
+    makeWritable d = do
+      contents <- listDirectory d
+      mapM_ (\name -> do
+        let full = d </> name
+        isDir <- doesDirectoryExist full
+        if isDir
+          then makeWritable full
+          else do
+            perms <- getPermissions full
+            setPermissions full (setOwnerWritable True perms)
+        ) contents

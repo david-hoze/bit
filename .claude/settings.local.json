@@ -24,7 +24,16 @@
       "Bash(shelltest test/cli:*)",
       "Bash(shelltest test/cli/fsck.test --debug:*)",
       "Bash(tee:*)",
-      "Bash(shelltest:*)"
+      "Bash(shelltest:*)",
+      "Bash(bit add:*)",
+      "Bash(bit commit:*)",
+      "Bash(bit push:*)",
+      "Bash(git diff --help:*)",
+      "Bash(git add:*)",
+      "Bash(echo:*)",
+      "Bash(ls:*)",
+      "Bash(cmd.exe //c \"echo original> C:\\\\Users\\\\natanh\\\\repos\\\\bit\\\\test\\\\cli\\\\output\\\\tmptest.bin\")",
+      "Bash(cmd.exe //c \"echo corrupted> C:\\\\Users\\\\natanh\\\\repos\\\\bit\\\\test\\\\cli\\\\output\\\\tmptest.bin\")"
     ]
   }
 }

@@ -262,7 +262,8 @@ repairCloud cwd remote concurrency = do
     -- Load committed metadata (immune to scan updates)
     let localIndexDir = cwd </> bitIndexPath
     localMeta <- Verify.loadCommittedBinaryMetadata localIndexDir
-    (remoteMeta, _allRemotePaths) <- Verify.loadMetadataFromBundle fetchedBundle
+    entries <- Verify.loadMetadataFromBundle fetchedBundle
+    let remoteMeta = Verify.binaryEntries entries
 
     -- Verify both sides
     putStrLn "Verifying local files..."
