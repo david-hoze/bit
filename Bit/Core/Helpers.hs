@@ -31,6 +31,7 @@ module Bit.Core.Helpers
       -- Utility functions
     , safeRemove
     , formatPathList
+    , formatVerifyCounts
     , printVerifyIssue
     , readFileMaybe
     , removeDirectoryRecursive
@@ -184,6 +185,10 @@ formatPathList paths
   | length paths <= 20 = map (\p -> "        " ++ toPosix p) paths
   | otherwise         = map (\p -> "        " ++ toPosix p) (take 10 paths)
                         ++ ["        ... and " ++ show (length paths - 10) ++ " more"]
+
+-- | Format "N files checked, M issues" with leading spaces (for verify/repair output).
+formatVerifyCounts :: Int -> Int -> String
+formatVerifyCounts count numIssues = "  " ++ show count ++ " files checked, " ++ show numIssues ++ " issues"
 
 printVerifyIssue :: (String -> String) -> Verify.VerifyIssue -> IO ()
 printVerifyIssue fmtHash = \case

@@ -73,7 +73,7 @@ import Bit.Core.Transport
     , applyMergeToWorkingDir
     , transportSyncAllFiles
     )
-import Bit.Core.Fetch (fetchRemoteBundle, saveFetchedBundle, FetchOutcome(..))
+import Bit.Core.Fetch (fetchRemoteBundle, saveFetchedBundle, FetchOutcome(..), printFetchBanner)
 
 -- ============================================================================
 -- Pull operations
@@ -116,8 +116,7 @@ filesystemPull cwd remote opts = do
         hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
         exitWith fetchCode
 
-    hPutStrLn stderr $ "From " ++ name
-    hPutStrLn stderr $ " * [new branch]      main       -> " ++ name ++ "/main"
+    printFetchBanner name (name ++ "/main")
 
     -- 3. Get remote HEAD hash
     (remoteHeadCode, remoteHeadOut, _) <- Git.runGitWithOutput ["rev-parse", Git.remoteTrackingRef name]

@@ -38,7 +38,7 @@ import Bit.Types (BitM, BitEnv(..), Path(..), Hash(..), HashAlgo(..), hashToText
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Bit.Remote (Remote, remoteUrl, remoteName, displayRemote, resolveRemote)
-import Bit.Core.Helpers (getRemoteType)
+import Bit.Core.Helpers (getRemoteType, formatVerifyCounts)
 import qualified Bit.Core.Fetch as Fetch
 import qualified Bit.Verify as Verify
 import Bit.Concurrency (Concurrency(..))
@@ -205,8 +205,7 @@ remoteShow mRemoteName = do
                                                 _ -> pure ()
                                             liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
                                         Nothing -> liftIO $ do
-                                            putStrLn $ "  Fetch URL: " ++ remoteUrl remote
-                                            putStrLn $ "  Push  URL: " ++ remoteUrl remote
+                                            printRemoteUrls (remoteUrl remote)
                                             putStrLn ""
                                             putStrLn "  HEAD branch: (unknown)"
                                             putStrLn ""
@@ -272,11 +271,11 @@ repairFilesystem cwd _remote remotePath concurrency = do
     -- Verify both sides
     putStrLn "Verifying local files..."
     localResult <- Verify.verifyLocal cwd Nothing concurrency
-    putStrLn $ "  " ++ show localResult.vrCount ++ " files checked, " ++ show (length localResult.vrIssues) ++ " issues"
+    putStrLn $ formatVerifyCounts localResult.vrCount (length localResult.vrIssues)
 
     putStrLn "Verifying remote files..."
     remoteResult <- Verify.verifyLocalAt remotePath Nothing concurrency
-    putStrLn $ "  " ++ show remoteResult.vrCount ++ " files checked, " ++ show (length remoteResult.vrIssues) ++ " issues"
+    putStrLn $ formatVerifyCounts remoteResult.vrCount (length remoteResult.vrIssues)
 
     runRepairLogic localMeta remoteMeta localResult.vrIssues remoteResult.vrIssues
         (executeFilesystemRepair cwd remotePath)
@@ -307,11 +306,11 @@ repairCloud cwd remote concurrency = do
     -- Verify both sides
     putStrLn "Verifying local files..."
     localResult <- Verify.verifyLocal cwd Nothing concurrency
-    putStrLn $ "  " ++ show localResult.vrCount ++ " files checked, " ++ show (length localResult.vrIssues) ++ " issues"
+    putStrLn $ formatVerifyCounts localResult.vrCount (length localResult.vrIssues)
 
     putStrLn "Verifying remote files..."
     remoteResult <- Verify.verifyRemote cwd remote Nothing concurrency
-    putStrLn $ "  " ++ show remoteResult.vrCount ++ " files checked, " ++ show (length remoteResult.vrIssues) ++ " issues"
+    putStrLn $ formatVerifyCounts remoteResult.vrCount (length remoteResult.vrIssues)
 
     runRepairLogic localMeta remoteMeta localResult.vrIssues remoteResult.vrIssues
         (executeRepair cwd remote)
@@ -504,6 +503,12 @@ formatRemoteDisplayByType cwd name mType remote = case mType of
     Just Device.RemoteCloud -> pure (name ++ " → " ++ remoteUrl remote ++ " (cloud)")
     Nothing -> pure (name ++ " → " ++ displayRemote remote)
 
+-- | Print "  Fetch URL:" and "  Push  URL:" lines for remote show output.
+printRemoteUrls :: String -> IO ()
+printRemoteUrls url = do
+    putStrLn $ "  Fetch URL: " ++ url
+    putStrLn $ "  Push  URL: " ++ url
+
 -- | Show remote status using git tracking refs (for filesystem/device remotes).
 -- No bundle needed — reads directly from refs/remotes/<name>/main.
 showRefBasedRemoteStatus :: String -> String -> IO ()
@@ -514,8 +519,7 @@ showRefBasedRemoteStatus name url = do
             ExitSuccess -> Just (filter (/= '\n') refOut)
             _ -> Nothing
     putStrLn $ "* remote " ++ name
-    putStrLn $ "  Fetch URL: " ++ url
-    putStrLn $ "  Push  URL: " ++ url
+    printRemoteUrls url
     putStrLn ""
     case (maybeLocal, maybeRemote) of
         (Nothing, Just _) -> do
@@ -561,8 +565,7 @@ showRemoteStatusFromBundle name mUrl = do
     maybeLocal <- Git.getLocalHead
     let url = fromMaybe "?" mUrl
     putStrLn $ "* remote " ++ name
-    putStrLn $ "  Fetch URL: " ++ url
-    putStrLn $ "  Push  URL: " ++ url
+    printRemoteUrls url
     putStrLn ""
     compareHistory maybeLocal fetchedBundle
 

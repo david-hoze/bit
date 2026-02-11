@@ -11,6 +11,7 @@ module Bit.Core.Fetch
     , classifyRemoteState
     , interpretRemoteItems
     , FetchOutcome(..)
+    , printFetchBanner
     ) where
 
 import System.FilePath ((</>))
@@ -77,14 +78,18 @@ filesystemFetch _cwd remote = do
         hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
         exitWith fetchCode
 
-    hPutStrLn stderr $ "From " ++ name
-    hPutStrLn stderr $ " * [new branch]      main       -> " ++ name ++ "/main"
-
+    printFetchBanner name (name ++ "/main")
     putStrLn "Fetch complete."
 
 -- ============================================================================
 -- Helper functions for fetch operations
 -- ============================================================================
+
+-- | Print git-style "From" and "[new branch] main ->" lines to stderr.
+printFetchBanner :: String -> String -> IO ()
+printFetchBanner fromName refLine = do
+    hPutStrLn stderr $ "From " ++ fromName
+    hPutStrLn stderr $ " * [new branch]      main       -> " ++ refLine
 
 -- | Classify remote state (empty, valid bit, non-bit, corrupted, network error)
 -- This is domain logic: it knows what .bit/ means and interprets remote contents
@@ -218,8 +223,7 @@ renderFetchOutcome _remote (Updated { foOldHash = old, foNewHash = new }) = do
     putStrLn "Fetch complete."
 renderFetchOutcome remote (FetchedFirst newHash) = do
     putStrLn "Scanning remote..."
-    hPutStrLn stderr $ "From " ++ remoteName remote
-    hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
+    printFetchBanner (remoteName remote) "origin/main"
     putStrLn $ "Fetched: " ++ newHash
     putStrLn "Fetch complete."
 renderFetchOutcome _remote (FetchError err) = do
