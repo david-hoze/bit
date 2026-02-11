@@ -34,7 +34,7 @@ Key types and conventions used throughout this codebase:
 | `FileTransport` | Record of functions abstracting cloud vs filesystem transfer | `Bit.Core.Transport` |
 | `Concurrency` | `Parallel Int` / `Sequential` | `Bit.Concurrency` |
 | `Resolution` | `KeepLocal` / `TakeRemote` — conflict resolution choice | `Bit.Conflict` |
-| `DeletedSide` | `DeletedInOurs` / `DeletedInTheirs` — which side deleted in modify/delete conflict | `Bit.Conflict` |
+| `DeletedSide` | `DeletedInOurs` / `DeletedInTheirs` — which side deleted in modify/delete conflict | `Internal.Git`, re-exported by `Bit.Conflict` |
 | `ConflictInfo` | `ContentConflict` / `ModifyDelete path DeletedSide` / `AddAdd` — conflict type from git ls-files -u | `Bit.Conflict` |
 | `NameStatusChange` | `Added` / `Deleted` / `Modified` / `Renamed` / `Copied` — parsed `git diff --name-status` output | `Internal.Git` |
 | `DivergentFile` | Record: dfPath, dfExpectedHash, dfActualHash, dfExpectedSize, dfActualSize — remote divergence | `Bit.Core.Pull` |

@@ -40,6 +40,7 @@ module Internal.Git
     , runGitWithOutput
     , runGitAt
     , rewriteGitHints
+    , DeletedSide(..)
     , ConflictType(..)
     , readFileFromRef
     , listFilesInRef
@@ -375,11 +376,17 @@ getConflictedFiles = do
     ExitSuccess -> filter (not . null) (lines out)
     _ -> []
 
+-- | Which side deleted the file in a modify/delete conflict.
+data DeletedSide
+  = DeletedInOurs   -- ^ Deleted in HEAD (ours); modified in theirs
+  | DeletedInTheirs -- ^ Deleted in theirs; modified in HEAD (ours)
+  deriving (Show, Eq)
+
 -- | Conflict type for Git-like messages. Path is work-tree relative (e.g. index/src/model.bin).
 data ConflictType
-  = ContentConflict FilePath   -- both modified
-  | ModifyDelete FilePath Bool -- True = deleted in HEAD (ours)
-  | AddAdd FilePath            -- both added different
+  = ContentConflict FilePath
+  | ModifyDelete FilePath DeletedSide
+  | AddAdd FilePath
   deriving (Show, Eq)
 
 -- | Determine conflict type using git ls-files -u. Path is as in index (e.g. index/foo).
@@ -400,8 +407,8 @@ getConflictType path = do
   let has3 = 3 `elem` stageNums
   pure $ if | has2 && has3 && has1     -> ContentConflict path
             | has2 && has3 && not has1 -> AddAdd path
-            | has2 && not has3         -> ModifyDelete path False  -- deleted in theirs
-            | has3 && not has2         -> ModifyDelete path True   -- deleted in ours (HEAD)
+            | has2 && not has3         -> ModifyDelete path DeletedInTheirs
+            | has3 && not has2         -> ModifyDelete path DeletedInOurs
             | otherwise                -> ContentConflict path
 
 -- | Check out our version for path (work-tree path under .rgit/index).

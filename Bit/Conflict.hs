@@ -3,7 +3,7 @@
 
 module Bit.Conflict
   ( Resolution(..)
-  , DeletedSide(..)
+  , DeletedSide(..)  -- re-exported from Internal.Git
   , ConflictInfo(..)
   , resolveConflict
   , resolveAll
@@ -18,17 +18,12 @@ import Text.Read (readMaybe)
 import Control.Monad (void, when)
 import System.Exit (ExitCode(..))
 import qualified Internal.Git as Git
+import Internal.Git (DeletedSide(..))
 import System.IO (hPutStrLn, stderr, hFlush, stdout)
 import Bit.Internal.Metadata (MetaContent(..), parseMetadata, displayHash)
 
 -- | A conflict resolution choice: keep local or take remote.
 data Resolution = KeepLocal | TakeRemote
-  deriving (Show, Eq)
-
--- | Which side deleted the file in a modify/delete conflict.
-data DeletedSide
-  = DeletedInOurs   -- ^ Deleted in HEAD (ours); modified in origin/main (theirs)
-  | DeletedInTheirs -- ^ Deleted in origin/main (theirs); modified in HEAD (ours)
   deriving (Show, Eq)
 
 -- | Conflict type (mirrors Internal.Git.ConflictType but doesn't depend on IO module).
