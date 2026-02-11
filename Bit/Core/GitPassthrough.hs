@@ -161,13 +161,11 @@ mergeContinue = do
                     traverse_ (\remote -> do
                             transport <- liftIO $ Transport.mkTransportForRemote cwd remote
                             Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
-                _ -> liftIO $ do
-                    hPutStrLn stderr "error: no merge in progress."
-                    exitWith (ExitFailure 1)
+                _ -> liftIO dieNoMergeInProgress
        | otherwise -> do
                 invalid <- liftIO $ Metadata.validateMetadataDir (cwd </> bitIndexPath)
                 unless (null invalid) $ liftIO $ do
-                    hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."
+                    hPutStrLn stderr Conflict.conflictMarkersFatalMessage
                     throwIO (userError "Invalid metadata")
 
                 oldHead <- liftIO getLocalHeadE
@@ -192,6 +190,12 @@ mergeContinue = do
 mergeAbort :: IO ()
 mergeAbort = doMergeAbort
 
+-- | Print "error: no merge in progress." and exit with failure.
+dieNoMergeInProgress :: IO ()
+dieNoMergeInProgress = do
+    hPutStrLn stderr "error: no merge in progress."
+    exitWith (ExitFailure 1)
+
 doMergeAbort :: IO ()
 doMergeAbort = do
     cwd <- Dir.getCurrentDirectory
@@ -208,9 +212,7 @@ doMergeAbort = do
             when conflictsExist $ do
                 removeDirectoryRecursive conflictsDir
                 putStrLn "Conflict directories cleaned up."
-        _ -> do
-            hPutStrLn stderr "error: no merge in progress."
-            exitWith (ExitFailure 1)
+        _ -> dieNoMergeInProgress
 
 unsetUpstream :: IO ()
 unsetUpstream = void Git.unsetBranchUpstream

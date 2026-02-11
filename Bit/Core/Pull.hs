@@ -206,7 +206,7 @@ filesystemPullLogicImpl transport remote remoteHash = do
                     invalid <- lift $ validateMetadataDir (cwd </> bitIndexPath)
                     unless (null invalid) $ lift $ do
                         void $ Git.runGitRaw ["merge", "--abort"]
-                        hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."
+                        hPutStrLn stderr Conflict.conflictMarkersFatalMessage
                         throwIO (userError "Invalid metadata")
 
                     conflictsNow <- lift Conflict.getConflictedFilesE
@@ -437,7 +437,7 @@ pullLogic transport remote _opts = do
                         invalid <- lift $ validateMetadataDir (cwd </> bitIndexPath)
                         unless (null invalid) $ lift $ do
                             void $ gitRaw ["merge", "--abort"]
-                            tellErr "fatal: Metadata files contain conflict markers. Merge aborted."
+                            tellErr Conflict.conflictMarkersFatalMessage
                             throwIO (userError "Invalid metadata")
 
                         conflictsNow <- lift Conflict.getConflictedFilesE

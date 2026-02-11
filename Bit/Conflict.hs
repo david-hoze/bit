@@ -5,6 +5,7 @@ module Bit.Conflict
   ( Resolution(..)
   , DeletedSide(..)  -- re-exported from Internal.Git
   , ConflictInfo(..)
+  , conflictMarkersFatalMessage
   , resolveConflict
   , resolveAll
   , getConflictedFilesE
@@ -21,6 +22,10 @@ import qualified Internal.Git as Git
 import Internal.Git (DeletedSide(..))
 import System.IO (hPutStrLn, stderr, hFlush, stdout)
 import Bit.Internal.Metadata (MetaContent(..), parseMetadata, displayHash)
+
+-- | Message shown when metadata contains conflict markers and merge is aborted.
+conflictMarkersFatalMessage :: String
+conflictMarkersFatalMessage = "fatal: Metadata files contain conflict markers. Merge aborted."
 
 -- | A conflict resolution choice: keep local or take remote.
 data Resolution = KeepLocal | TakeRemote

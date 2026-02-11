@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -74,6 +75,19 @@ runOrDie dir args desc = do
 -- Bundle operations
 ----------------------------------------------------------------------
 
+fatalNoRepoOnRemote, fatalFailedCreateBundle, fatalFailedPushBundle :: String
+fatalNoRepoOnRemote = "fatal: no bit repository on remote. Run 'bit @remote init' first."
+fatalFailedCreateBundle = "fatal: failed to create bundle."
+fatalFailedPushBundle = "fatal: failed to push bundle to remote."
+
+-- | Print stderr message for bundle fetch failure (CopyNotFound / CopyNetworkError / CopyOtherError).
+printBundleFetchError :: Transport.CopyResult -> IO ()
+printBundleFetchError = \case
+    Transport.CopyNotFound -> hPutStrLn stderr fatalNoRepoOnRemote
+    Transport.CopyNetworkError err -> hPutStrLn stderr $ "fatal: network error: " ++ err
+    Transport.CopyOtherError err -> hPutStrLn stderr $ "fatal: " ++ err
+    Transport.CopySuccess -> pure ()
+
 -- | Inflate a git bundle into a workspace directory.
 -- Uses init + fetch into tracking refs + checkout to avoid:
 --   1. "refusing to fetch into checked out branch" (init+fetch into heads)
@@ -97,12 +111,12 @@ bundleAndPush wsPath remote tmpBase = do
     putStrLn "Creating metadata bundle..."
     (bCode, _, _) <- Git.runGitAt wsPath ["bundle", "create", newBundle, "--all"]
     when (bCode /= ExitSuccess) $ do
-        hPutStrLn stderr "fatal: failed to create bundle."
+        hPutStrLn stderr fatalFailedCreateBundle
         exitWith (ExitFailure 1)
     putStrLn "Pushing bundle to remote..."
     pCode <- Transport.copyToRemote newBundle remote ".bit/bit.bundle"
     when (pCode /= ExitSuccess) $ do
-        hPutStrLn stderr "fatal: failed to push bundle to remote."
+        hPutStrLn stderr fatalFailedPushBundle
         exitWith (ExitFailure 1)
     putStrLn "Changes pushed to remote."
 
@@ -119,15 +133,6 @@ withRemoteWorkspace remote action = withTempDir "bit-remote-ws" $ \tmpBase -> do
         wsPath = tmpBase </> "workspace"
     result <- Transport.copyFromRemoteDetailed remote ".bit/bit.bundle" bundlePath
     case result of
-        Transport.CopyNotFound -> do
-            hPutStrLn stderr "fatal: no bit repository on remote. Run 'bit @remote init' first."
-            pure (ExitFailure 1)
-        Transport.CopyNetworkError err -> do
-            hPutStrLn stderr $ "fatal: network error: " ++ err
-            pure (ExitFailure 1)
-        Transport.CopyOtherError err -> do
-            hPutStrLn stderr $ "fatal: " ++ err
-            pure (ExitFailure 1)
         Transport.CopySuccess -> do
             inflateBundle bundlePath wsPath
             -- Capture HEAD before action
@@ -145,6 +150,7 @@ withRemoteWorkspace remote action = withTempDir "bit-remote-ws" $ \tmpBase -> do
                             bundleAndPush wsPath remote tmpBase
                             pure ExitSuccess
                 _ -> pure code
+        _ -> printBundleFetchError result >> pure (ExitFailure 1)
 
 -- | Read-only: fetches and inflates but never pushes back.
 -- Workspace is cleaned up on exit (exception-safe).
@@ -154,18 +160,10 @@ withRemoteWorkspaceReadOnly remote action = withTempDir "bit-remote-ro" $ \tmpBa
         wsPath = tmpBase </> "workspace"
     result <- Transport.copyFromRemoteDetailed remote ".bit/bit.bundle" bundlePath
     case result of
-        Transport.CopyNotFound -> do
-            hPutStrLn stderr "fatal: no bit repository on remote. Run 'bit @remote init' first."
-            pure (ExitFailure 1)
-        Transport.CopyNetworkError err -> do
-            hPutStrLn stderr $ "fatal: network error: " ++ err
-            pure (ExitFailure 1)
-        Transport.CopyOtherError err -> do
-            hPutStrLn stderr $ "fatal: " ++ err
-            pure (ExitFailure 1)
         Transport.CopySuccess -> do
             inflateBundle bundlePath wsPath
             action wsPath
+        _ -> printBundleFetchError result >> pure (ExitFailure 1)
 
 ----------------------------------------------------------------------
 -- File classification (preserved from old implementation)
@@ -338,14 +336,14 @@ initRemote remote remoteName = withTempDir "bit-remote-init" $ \tmpBase -> do
             let bundlePath = tmpBase </> "init.bundle"
             (bCode, _, _) <- Git.runGitAt wsPath ["bundle", "create", bundlePath, "--all"]
             when (bCode /= ExitSuccess) $ do
-                hPutStrLn stderr "fatal: failed to create bundle."
+                hPutStrLn stderr fatalFailedCreateBundle
                 exitWith (ExitFailure 1)
             pCode <- Transport.copyToRemote bundlePath remote ".bit/bit.bundle"
             case pCode of
                 ExitSuccess ->
                     putStrLn $ "Initialized bit repository on remote '" ++ remoteName ++ "'."
                 _ -> do
-                    hPutStrLn stderr "fatal: failed to push bundle to remote."
+                    hPutStrLn stderr fatalFailedPushBundle
                     exitWith (ExitFailure 1)
 
 -- | Add files in remote workspace (scan + stage + auto-commit).
