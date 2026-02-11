@@ -41,6 +41,7 @@ module Bit.Device
   , isFilesystemType
   ) where
 
+import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isPrefixOf, intercalate)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Control.Monad (when, filterM, join)
@@ -255,7 +256,7 @@ isFixedDriveWindows volRoot = do
         _ -> True  -- Default to fixed if detection fails
 
 trim :: String -> String
-trim = dropWhileEnd (== ' ') . dropWhile (== ' ')
+trim = dropWhileEnd isSpace . dropWhile isSpace
 
 -- | Get hardware serial for a physical volume
 getHardwareSerial :: FilePath -> IO (Maybe String)

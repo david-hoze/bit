@@ -45,7 +45,11 @@ resolveRemote :: FilePath -> String -> IO (Maybe Remote)
 resolveRemote cwd name = do
     mType <- Device.readRemoteType cwd name
     case mType of
-        Just Device.RemoteFilesystem -> resolveFromGitConfig name
+        Just Device.RemoteFilesystem -> do
+            result <- resolveFromGitConfig name
+            case result of
+                Just _  -> pure result
+                Nothing -> resolveOldFormat cwd name  -- fallback for pre-git-remote files
         Just Device.RemoteDevice     -> resolveDeviceRemote cwd name
         Just Device.RemoteCloud      -> resolveCloudRemote cwd name
         Nothing                      -> resolveOldFormat cwd name
