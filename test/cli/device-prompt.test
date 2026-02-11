@@ -27,7 +27,7 @@ findstr /C:"device:" test\cli\output\work\.bit\remotes\origin >nul || findstr /C
 >>>= 0
 
 # --- Cleanup ---
-subst Z: /D 2>nul & rmdir /s /q test\cli\output\work 2>nul & rmdir /s /q test\cli\output\device_prompt_remote 2>nul
+subst Z: /D 2>nul & del test\cli\.bit-store 2>nul & rmdir /s /q test\cli\output\work 2>nul & rmdir /s /q test\cli\output\device_prompt_remote 2>nul
 <<<
 >>>
 >>>= 0
