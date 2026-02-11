@@ -52,6 +52,7 @@ module Internal.Git
     , remoteTrackingRef
     , NameStatusChange(..)
     , parseNameStatusOutput
+    , getRemoteTrackingHash
     ) where
 
 import Data.Maybe (mapMaybe, listToMaybe)
@@ -72,6 +73,15 @@ baseFlags = ["-C", bitIndexPath]
 -- | Build the tracking ref for a named remote: @refs/remotes/\<name\>/main@
 remoteTrackingRef :: String -> String
 remoteTrackingRef name = "refs/remotes/" ++ name ++ "/main"
+
+-- | Read the hash from the tracking ref for a named remote (refs/remotes/<name>/main).
+-- Returns Nothing if the ref doesn't exist (e.g. first push before any fetch).
+getRemoteTrackingHash :: String -> IO (Maybe String)
+getRemoteTrackingHash name = do
+    (code, out, _) <- runGitWithOutput ["rev-parse", remoteTrackingRef name]
+    pure $ case code of
+        ExitSuccess -> Just (filter (not . isSpace) out)
+        _ -> Nothing
 
 -- | Query: is aqAncestor an ancestor of aqDescendant? Record avoids transposing the two String hashes.
 data AncestorQuery = AncestorQuery { aqAncestor, aqDescendant :: String }

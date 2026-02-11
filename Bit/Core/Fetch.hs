@@ -27,7 +27,6 @@ import Control.Monad.IO.Class (liftIO)
 import Internal.Config (fromCwdPath, bundleCwdPath, bundleForRemote, bundleGitRelPath, fromGitRelPath)
 import Bit.Core.Helpers (isFilesystemRemote, withRemote, safeRemove, checkFilesystemRemoteIsRepo)
 import System.Directory (copyFile, createDirectoryIfMissing)
-import Bit.Utils (trimGitOutput)
 
 -- ============================================================================
 -- Types
@@ -178,7 +177,7 @@ saveFetchedBundle remote (Just bPath) = do
     createDirectoryIfMissing True (takeDirectory fetchedPath)
 
     -- Read old tracking ref hash (before overwriting)
-    maybeOldHash <- revParseTrackingRef name
+    maybeOldHash <- Git.getRemoteTrackingHash name
 
     -- Copy bundle to per-remote path
     copyFile bPath fetchedPath
@@ -190,7 +189,7 @@ saveFetchedBundle remote (Just bPath) = do
 
     -- Read new tracking ref hash (populated by git fetch)
     maybeNewHash <- if fetchCode == ExitSuccess
-        then revParseTrackingRef name
+        then Git.getRemoteTrackingHash name
         else Git.getHashFromBundle bundleName  -- fallback
 
     -- If git fetch didn't update the ref (e.g. bundle has no matching refspec),
@@ -211,13 +210,6 @@ saveFetchedBundle remote (Just bPath) = do
         (Nothing, Just newHash) -> pure (FetchedFirst newHash)
         _ -> pure (FetchError "Could not extract hash from bundle")
 
--- | Read the tracking ref for a named remote. Returns Nothing if ref doesn't exist.
-revParseTrackingRef :: String -> IO (Maybe String)
-revParseTrackingRef name = do
-    (code, out, _) <- Git.runGitWithOutput ["rev-parse", Git.remoteTrackingRef name]
-    pure $ case code of
-        ExitSuccess -> Just (trimGitOutput out)
-        _ -> Nothing
 
 -- | Render fetch outcome to stdout/stderr.
 renderFetchOutcome :: Remote -> FetchOutcome -> IO ()

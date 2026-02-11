@@ -43,8 +43,13 @@ resolveSwaps actions =
                     ]
         swappedPaths = foldl' (\acc (a, b) -> Map.insert a () (Map.insert b () acc))
                               Map.empty swapPairs
+        -- Drop Move pairs that form swaps, AND redundant Copy actions for
+        -- those paths.  A content-swap (A↔B) produces both Modified (Copy)
+        -- and Renamed (Move) for the same paths; the Swap is a free
+        -- remote-side rename, so keep only the Swap.
         isSwapped action = case action of
             Move src dest -> Map.member src swappedPaths && Map.member dest swappedPaths
+            Copy src _    -> Map.member src swappedPaths
             _             -> False
         kept = filter (not . isSwapped) actions
         newSwaps = [ Swap (Path (unPath a <> ".bit-swap-tmp")) a b | (a, b) <- swapPairs ]

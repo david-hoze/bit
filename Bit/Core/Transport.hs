@@ -5,9 +5,6 @@ module Bit.Core.Transport
     ( -- Working directory sync operations
       syncAllFilesFromHEAD
     , applyMergeToWorkingDir
-    , filesystemDeleteFileAtRemote
-    , filesystemSyncAllFiles
-    , filesystemSyncChangedFiles
     , safeDeleteWorkFile
     , copyFromIndexToWorkTree
     , isTextFileInIndex
@@ -20,6 +17,7 @@ import qualified System.Directory as Dir
 import Bit.Platform (copyFile, createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, void, forM, forM_, unless)
+import Control.Exception (try, SomeException)
 import Bit.Concurrency (ioConcurrency, mapConcurrentlyBounded)
 import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..))
@@ -30,7 +28,7 @@ import Internal.Config (bitIndexPath, bundleForRemote)
 import Data.List (isPrefixOf)
 import Bit.Utils (toPosix)
 import Bit.Plan (RcloneAction(..))
-import Bit.Remote (Remote, remoteName, remoteUrl, RemotePath(..))
+import Bit.Remote (Remote, remoteName, remoteUrl)
 import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -144,111 +142,6 @@ applyMergeToWorkingDir remoteRoot cwd oldHead = do
         ) newHead
 
 -- ============================================================================
--- Filesystem remote push operations
--- ============================================================================
-
--- | Delete a file at the remote working tree.
-filesystemDeleteFileAtRemote :: RemotePath -> FilePath -> IO ()
-filesystemDeleteFileAtRemote (RemotePath remotePath) filePath = do
-    let fullPath = remotePath </> filePath
-    exists <- Platform.doesFileExist fullPath
-    when exists $ Platform.removeFile fullPath
-
--- | Sync all files from a commit to the filesystem remote (first push).
--- Text files are copied individually from remote index to remote working tree.
--- Binary files are batched via rcloneCopyFiles (local -> remote).
-filesystemSyncAllFiles :: FilePath -> RemotePath -> String -> IO ()
-filesystemSyncAllFiles localRoot (RemotePath remotePath) commitHash = do
-    let remoteIndex = remotePath </> ".bit" </> "index"
-    files <- Git.runGitAt remoteIndex ["ls-tree", "-r", "--name-only", commitHash]
-    case files of
-        (ExitSuccess, out, _) -> do
-            let paths = filter (not . null) (lines out)
-
-            -- Classify text vs binary (only include binaries that exist locally)
-            fileInfo <- fmap concat $ forM paths $ \filePath -> do
-                let metaPath = remoteIndex </> filePath
-                isText <- isTextMetadataFile metaPath
-                if isText
-                    then pure [TextToSync filePath]
-                    else do
-                        let srcPath = localRoot </> filePath
-                        srcExists <- Dir.doesFileExist srcPath
-                        pure [BinaryToSync filePath | srcExists]
-
-            -- Copy text files from remote index to remote working tree in parallel
-            let textPaths = [p | TextToSync p <- fileInfo]
-                copyText p = do
-                    let metaPath = remoteIndex </> p
-                        workPath = remotePath </> p
-                    createDirectoryIfMissing True (takeDirectory workPath)
-                    copyFile metaPath workPath
-            concLevel <- ioConcurrency
-            void $ mapConcurrentlyBounded concLevel copyText textPaths
-
-            -- Batch binary via rcloneCopyFiles (localRoot -> remotePath)
-            let binaryPaths = [p | BinaryToSync p <- fileInfo]
-            unless (null binaryPaths) $ do
-                progress <- CopyProgress.newSyncProgress (length binaryPaths)
-                CopyProgress.withSyncProgressReporter progress $
-                    CopyProgress.rcloneCopyFiles localRoot remotePath binaryPaths progress
-        _ -> pure ()
-
--- | Sync only changed files between two commits (subsequent push).
--- Text files are copied individually; binary files are batched via rcloneCopyFiles.
-filesystemSyncChangedFiles :: FilePath -> RemotePath -> String -> String -> IO ()
-filesystemSyncChangedFiles localRoot (RemotePath remotePath) oldHead newHead = do
-    let remoteIndex = remotePath </> ".bit" </> "index"
-    changes <- Git.runGitAt remoteIndex ["diff", "--name-status", oldHead, newHead]
-    case changes of
-        (ExitSuccess, out, _) -> do
-            let parsedChanges = Git.parseNameStatusOutput out
-
-            -- Process deletions individually
-            let rp = RemotePath remotePath
-            forM_ parsedChanges $ \change -> case change of
-                Deleted p -> filesystemDeleteFileAtRemote rp p
-                Renamed oldPath _ -> filesystemDeleteFileAtRemote rp oldPath
-                _ -> pure ()
-
-            -- Collect files to copy
-            let filesToCopy = concatMap (\change -> case change of
-                    Added p -> [p]
-                    Modified p -> [p]
-                    Renamed _ newPath -> [newPath]
-                    Copied _ newPath -> [newPath]
-                    Deleted _ -> []) parsedChanges
-
-            -- Classify text vs binary (only include binaries that exist locally)
-            fileInfo <- fmap concat $ forM filesToCopy $ \p -> do
-                let metaPath = remoteIndex </> p
-                isText <- isTextMetadataFile metaPath
-                if isText
-                    then pure [TextToSync p]
-                    else do
-                        let srcPath = localRoot </> p
-                        srcExists <- Dir.doesFileExist srcPath
-                        pure [BinaryToSync p | srcExists]
-
-            -- Copy text from remote index to remote working tree in parallel
-            let textPaths = [p | TextToSync p <- fileInfo]
-                copyText p = do
-                    let metaPath = remoteIndex </> p
-                        workPath = remotePath </> p
-                    createDirectoryIfMissing True (takeDirectory workPath)
-                    copyFile metaPath workPath
-            concLevel <- ioConcurrency
-            void $ mapConcurrentlyBounded concLevel copyText textPaths
-
-            -- Batch binary via rcloneCopyFiles (localRoot -> remotePath)
-            let binaryPaths = [p | BinaryToSync p <- fileInfo]
-            unless (null binaryPaths) $ do
-                progress <- CopyProgress.newSyncProgress (length binaryPaths)
-                CopyProgress.withSyncProgressReporter progress $
-                    CopyProgress.rcloneCopyFiles localRoot remotePath binaryPaths progress
-        _ -> pure ()
-
--- ============================================================================
 -- Working tree helpers
 -- ============================================================================
 
@@ -268,7 +161,7 @@ safeDeleteWorkFile cwd filePath = do
 isTextFileInIndex :: FilePath -> FilePath -> IO Bool
 isTextFileInIndex localRoot filePath = do
     let metaPath = localRoot </> bitIndexPath </> filePath
-    exists <- Dir.doesFileExist metaPath
+    exists <- Platform.doesFileExist metaPath
     if not exists then pure False
     else do
         mcontent <- readFileMaybe metaPath
@@ -285,15 +178,21 @@ copyFromIndexToWorkTree localRoot filePath = do
 
 -- | Check if a metadata file is a text file (content stored directly) or binary (hash/size stored).
 -- Text files don't have "hash:" lines, binary files do.
+-- Uses Platform.doesFileExist for UNC path compatibility on Windows.
 isTextMetadataFile :: FilePath -> IO Bool
 isTextMetadataFile metaPath = do
-    exists <- Dir.doesFileExist metaPath
+    exists <- Platform.doesFileExist metaPath
     if not exists then pure False
     else do
-        -- Use strict ByteString reading to avoid Windows file locking issues
-        bs <- BS.readFile metaPath
-        let content = either (const "") T.unpack (decodeUtf8' bs)
-        pure $ not (any ("hash: " `isPrefixOf`) (lines content))
+        -- Use strict ByteString reading to avoid Windows file locking issues.
+        -- try: BS.readFile can fail on UNC paths due to GHC's \\?\ prefix;
+        -- treat read failure as "not text" (binary) so the file goes through rclone.
+        result <- try (BS.readFile metaPath)
+        case result of
+            Left (_ :: SomeException) -> pure False
+            Right bs -> do
+                let content = either (const "") T.unpack (decodeUtf8' bs)
+                pure $ not (any ("hash: " `isPrefixOf`) (lines content))
 
 
 -- | Sync binaries after a successful merge commit.

@@ -301,8 +301,7 @@ files go through the rclone batch.
 - `applyMergeToWorkingDir`: Merge pull — diffs oldHead..newHead, processes deletions, copies text from index, batches binary via `rcloneCopyFiles`
 
 **Push** (Bit.Core.Push):
-- `syncRemoteFiles`: Partitions Copy actions from Move/Delete/Swap. Copies are batched into a single `rcloneCopyFiles` call; non-copies are executed individually.
-- `filesystemSyncAllFiles`/`filesystemSyncChangedFiles`: Same pattern for filesystem push.
+- `syncRemoteFiles`: Partitions Copy actions from Move/Delete/Swap. Copies are batched into a single `rcloneCopyFiles` call; non-copies are executed individually. Works for both cloud and filesystem remotes.
 
 Both cloud and filesystem paths use the same functions parameterized by a remote
 root string (`remoteUrl remote`). rclone handles both local-to-local and
@@ -493,26 +492,38 @@ For filesystem remotes, bit creates a **complete bit repository** at the remote:
 
 **Filesystem remote receives pushes via direct path**: The remote side does not need a named git remote pointing back. Different machines with different local paths can push to the same filesystem remote; the pusher passes its path directly to `git fetch`.
 
-#### Filesystem Push Flow
+#### Unified Push Architecture
 
-```
-filesystemPush :: FilePath -> Remote -> IO ()
+Push uses a single code path for both cloud and filesystem remotes. The only
+difference is the metadata transport — abstracted behind a `PushSeam`:
+
+```haskell
+data PushSeam = PushSeam
+    { ptFetchHistory :: IO (Maybe String)  -- Fetch remote history, return remote hash
+    , ptPushMetadata :: IO ()              -- Push metadata to remote after file sync
+    }
 ```
 
-1. **First push (no `.bit/` at remote)**: Initialize a bit repo at the remote via `initializeRepoAt`
-2. **Fetch local into remote**: `git -C remote/.bit/index fetch local/.bit/index/.git main:refs/remotes/origin/main` — Uses direct path, no named remote at the remote. From the remote's perspective, whoever pushes is its origin; `refs/remotes/origin/main` means "what was last pushed here," not "a remote named origin" (same model as a bare git repo).
-3. **Fast-forward check**: Verify remote HEAD is ancestor of what we're pushing (`git merge-base --is-ancestor`)
-4. **Merge at remote**: `git -C remote/.bit/index merge --ff-only refs/remotes/origin/main`
-5. **Sync files**: Copy changed files from local working tree to remote working tree
-   - Text files: Copy from remote's updated index (git put the content there)
-   - Binary files: Copy from local working tree (metadata in index, content in working tree)
-6. **Update tracking ref**: Set local `refs/remotes/origin/main` to current HEAD
+Everything else is shared: `classifyRemoteState`, `syncRemoteFiles` (rclone-based
+file sync), ancestry checks, `--force`/`--force-with-lease`, verification.
 
-If the fast-forward check fails, the remote has diverged:
-```
-error: Remote has local commits that you don't have.
-hint: Run 'bit pull' to merge remote changes first, then push again.
-```
+**Cloud seam** (`mkCloudSeam`): Downloads/uploads git bundles via rclone. Bundles
+are stored per-remote at `.bit/index/.git/bundles/<name>.bundle` so `bit status`
+can compare against them.
+
+**Filesystem seam** (`mkFilesystemSeam`): Uses native git fetch/pull. The local
+index registers the remote's `.bit/index` as a named git remote; metadata is pushed
+via `git pull --ff-only` at the remote side.
+
+**Push flow** (both transports):
+1. **Verify local** (proof of possession)
+2. **First-push detection** (filesystem only): If remote `.bit/` doesn't exist, create and initialize it
+3. **Classify remote state** via rclone (`classifyRemoteState`)
+4. **Fetch remote history** via seam (`ptFetchHistory`)
+5. **Ancestry/force checks** (`processExistingRemote`)
+6. **Sync files** via rclone (`syncRemoteFiles`) — same for both
+7. **Push metadata** via seam (`ptPushMetadata`)
+8. **Update tracking ref** (`Git.updateRemoteTrackingBranchToHead`) — same for both
 
 #### Filesystem Pull Flow
 
@@ -898,7 +909,7 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 - Human-readable byte formatting: `formatBytes` (B, KB, MB, GB, TB with 1 decimal place)
 
 **All remotes** (cloud and filesystem) use `rcloneCopyFiles` for binary sync:
-- **Push**: `filesystemSyncAllFiles` / `filesystemSyncChangedFiles` (filesystem), `syncRemoteFiles` (cloud)
+- **Push**: `syncRemoteFiles` (unified, works for both cloud and filesystem)
 - **Pull**: `syncAllFilesFromHEAD`, `applyMergeToWorkingDir` (both, parameterized by remote root)
 - Progress: counts binary files only (text files are small and fast via index copy)
 - Byte progress: parsed from rclone's `--use-json-log` output on stderr (stats block)

@@ -13,7 +13,7 @@ module Bit.CopyProgress
 
 import System.IO
     ( hIsTerminalDevice, hPutStrLn, hPutStr, stderr
-    , hIsEOF, hClose, Handle
+    , hIsEOF, hClose, Handle, hSetEncoding, utf8
     )
 import System.Process (CreateProcess(..), StdStream(..), proc, createProcess, waitForProcess, terminateProcess)
 import System.Exit (ExitCode(..))
@@ -109,7 +109,8 @@ rcloneCopyFiles _ _ [] _ = pure ()
 rcloneCopyFiles src dst files progress = do
     tmpDir <- getTemporaryDirectory
     bracket (openTempFile tmpDir "bit-files-.txt") cleanupTmpFile $ \(tmpPath, tmpHandle) -> do
-        -- Write one posix-style path per line
+        -- Write one posix-style path per line (UTF-8 for rclone compatibility)
+        hSetEncoding tmpHandle utf8
         mapM_ (\f -> hPutStr tmpHandle (toPosix f ++ "\n")) files
         hClose tmpHandle
 
