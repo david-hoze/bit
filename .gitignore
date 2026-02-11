@@ -31,3 +31,6 @@ Desktop.ini
 
 # Artifacts
 literate-output/
+
+# Ignore Claude local settings
+.claude/settings.local.json
