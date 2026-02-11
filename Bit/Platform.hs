@@ -28,6 +28,7 @@ import Control.Exception (try, IOException, bracket)
 import qualified System.Win32.File as Win32
 import Data.Bits ((.&.))
 import Control.Monad (unless, forM_)
+import Data.List (uncons)
 
 -- | A path is UNC if it starts with @\\\\@ or @//@.
 isUncPath :: FilePath -> Bool
@@ -74,8 +75,10 @@ createDirectoryIfMissing recursive p
     | otherwise         = do
         let parts = filter (not . null) $ splitDirectories p
             -- UNC root is \\server\share (first 2 components); skip those
-            ancestors = drop 2 $ tail $
-                scanl (\acc d -> joinPath [acc, d]) (head parts) (tail parts)
+            ancestors = case uncons parts of
+                Nothing -> []
+                Just (first, rest) -> drop 2 $ tail $
+                    scanl (\acc d -> joinPath [acc, d]) first rest
         mapM_ createIfMissing ancestors
   where
     createIfMissing dir = do
