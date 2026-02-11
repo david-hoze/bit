@@ -16,7 +16,7 @@ import System.IO
     , hIsTerminalDevice, hPutStrLn, stderr
     )
 import Bit.Progress (reportProgress, clearProgress)
-import System.Directory (createDirectoryIfMissing, copyFile)
+import Bit.Platform (createDirectoryIfMissing, copyFile)
 import System.FilePath (takeDirectory)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Control.Concurrent (forkIO, threadDelay, killThread)

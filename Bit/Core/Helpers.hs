@@ -39,8 +39,9 @@ module Bit.Core.Helpers
     , expandPathsToFiles
     ) where
 
-import qualified System.Directory as Dir
-import System.Directory (copyFile, removeFile, createDirectoryIfMissing, removeDirectory, listDirectory, doesDirectoryExist)
+import System.Directory (removeDirectory)
+import qualified Bit.Platform as Platform
+import Bit.Platform (copyFile, removeFile, createDirectoryIfMissing, listDirectory, doesDirectoryExist, doesFileExist)
 import System.FilePath ((</>), normalise)
 import Control.Monad (when, unless, forM_)
 import System.Exit (ExitCode(..), exitWith)
@@ -123,7 +124,7 @@ isFilesystemRemote remote = do
 checkFilesystemRemoteIsRepo :: FilePath -> IO ()
 checkFilesystemRemoteIsRepo remotePath = do
     let remoteBitDir = remotePath </> ".bit"
-    remoteHasBit <- Dir.doesDirectoryExist remoteBitDir
+    remoteHasBit <- Platform.doesDirectoryExist remoteBitDir
     unless remoteHasBit $ do
         hPutStrLn stderr "error: Remote is not a bit repository."
         exitWith (ExitFailure 1)
@@ -154,7 +155,7 @@ copyFileE :: FilePath -> FilePath -> IO ()
 copyFileE = copyFile
 
 fileExistsE :: FilePath -> IO Bool
-fileExistsE = Dir.doesFileExist
+fileExistsE = doesFileExist
 
 createDirE :: FilePath -> IO ()
 createDirE = createDirectoryIfMissing True
@@ -177,8 +178,8 @@ withRemote action = do
 
 safeRemove :: FilePath -> IO ()
 safeRemove filePath = do
-    exists <- Dir.doesFileExist filePath
-    when exists (Dir.removeFile filePath)
+    exists <- doesFileExist filePath
+    when exists (removeFile filePath)
 
 formatPathList :: [FilePath] -> [String]
 formatPathList paths
@@ -201,7 +202,7 @@ printVerifyIssue fmtHash = \case
 
 readFileMaybe :: FilePath -> IO (Maybe String)
 readFileMaybe filePath = do
-    exists <- Dir.doesFileExist filePath
+    exists <- doesFileExist filePath
     if exists
         then do
             bs <- BS.readFile filePath

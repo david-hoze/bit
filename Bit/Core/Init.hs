@@ -8,6 +8,7 @@ module Bit.Core.Init
 
 import Prelude hiding (init)
 import qualified System.Directory as Dir
+import qualified Bit.Platform as Platform
 import System.FilePath ((</>))
 import Control.Monad (unless, void)
 import qualified Internal.Git as Git
@@ -35,13 +36,13 @@ initializeRepoAt targetDir = do
     let targetBitRemotesDir = targetBitDir </> "remotes"
 
     -- 1. Create .bit directory
-    Dir.createDirectoryIfMissing True targetBitDir
+    Platform.createDirectoryIfMissing True targetBitDir
 
     -- 2. Create .bit/index directory (needed before git init)
-    Dir.createDirectoryIfMissing True targetBitIndexPath
+    Platform.createDirectoryIfMissing True targetBitIndexPath
 
     -- 3. Init Git in the index directory
-    hasGit <- Dir.doesDirectoryExist targetBitGitDir
+    hasGit <- Platform.doesDirectoryExist targetBitGitDir
     unless hasGit $ do
         -- Initialize git in .bit/index, which will create .bit/index/.git
         void $ Git.runGitAt targetBitIndexPath ["init"]
@@ -53,7 +54,7 @@ initializeRepoAt targetDir = do
         void $ readProcessWithExitCode "git" ["config", "--global", "--add", "safe.directory", safePath] ""
 
     -- 3a. Create .git/bundles directory for storing bundle files
-    Dir.createDirectoryIfMissing True (targetBitGitDir </> "bundles")
+    Platform.createDirectoryIfMissing True (targetBitGitDir </> "bundles")
 
     -- 4. Configure default branch name to "main" (for the repo we just created)
     void $ Git.runGitAt targetBitIndexPath ["config", "init.defaultBranch", "main"]
@@ -65,12 +66,12 @@ initializeRepoAt targetDir = do
     void $ Git.runGitAt targetBitIndexPath ["branch", "-m", "master", "main"]
 
     -- 6. Create other .bit subdirectories
-    Dir.createDirectoryIfMissing True targetBitDevicesDir
-    Dir.createDirectoryIfMissing True targetBitRemotesDir
+    Platform.createDirectoryIfMissing True targetBitDevicesDir
+    Platform.createDirectoryIfMissing True targetBitRemotesDir
 
     -- 5a. Create config file with default values
     let configPath = targetBitDir </> "config"
-    configExists <- Dir.doesFileExist configPath
+    configExists <- Platform.doesFileExist configPath
     unless configExists $ do
         let defaultConfig = unlines
                 [ "[text]"
@@ -82,5 +83,5 @@ initializeRepoAt targetDir = do
     -- 5b. Merge driver: prevent Git from writing conflict markers
     void $ Git.runGitAt targetBitIndexPath ["config", "merge.bit-metadata.name", "bit metadata"]
     void $ Git.runGitAt targetBitIndexPath ["config", "merge.bit-metadata.driver", "false"]
-    Dir.createDirectoryIfMissing True (targetBitGitDir </> "info")
+    Platform.createDirectoryIfMissing True (targetBitGitDir </> "info")
     atomicWriteFileStr (targetBitGitDir </> "info" </> "attributes") "* merge=bit-metadata -text\n"

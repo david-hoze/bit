@@ -439,6 +439,7 @@ bit supports two kinds of remotes:
 - **Cloud remotes**: rclone-based (e.g., `gdrive:Projects/foo`). Identified by URL. Uses bundle + rclone sync.
 - **Filesystem remotes**: Local/network paths (USB drives, network shares, local directories). Creates a **full bit repository** at the remote location.
   - **UNC paths**: Under MINGW / Git Bash, UNC paths must use forward slashes (`//server/share/path`). The shell strips leading backslashes before bit receives the argument. bit normalizes forward-slash UNC paths and displays the canonical backslash form.
+  - **Platform layer**: GHC's `System.Directory` prepends `\\?\UNC\` to UNC paths for long-path support; virtual UNC providers (RDP tsclient, WebDAV) reject this prefix. `Bit.Platform` bypasses the prefix for UNC paths by calling Win32 directly, while keeping `System.Directory` (with long-path support) for local paths.
 
 The `bit.Device` module handles remote type classification and device resolution:
 - `RemoteType`: `RemoteFilesystem` (fixed paths), `RemoteDevice` (removable/network drives), `RemoteCloud` (rclone-based)
@@ -1272,6 +1273,7 @@ Interactive per-file conflict resolution:
 | `bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit.hs` | All business logic |
 | `Internal/Git.hs` | Git command wrapper; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
+| `Bit/Platform.hs` | UNC-safe wrappers for `System.Directory` (CPP: Win32 direct calls for UNC paths, `System.Directory` for local) |
 | `Internal/Transport.hs` | Rclone command wrapper |
 | `Internal/Config.hs` | Path constants |
 | `Internal/ConfigFile.hs` | Config file parsing (strict ByteString) |

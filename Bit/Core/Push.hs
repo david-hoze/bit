@@ -17,6 +17,7 @@ module Bit.Core.Push
     ) where
 
 import qualified System.Directory as Dir
+import qualified Bit.Platform as Platform
 import System.FilePath ((</>))
 import Control.Monad (when, unless, void)
 import Data.Foldable (traverse_)
@@ -40,7 +41,8 @@ import Control.Monad.Trans.Class (lift)
 import qualified Bit.CopyProgress as CopyProgress
 import qualified Bit.Verify as Verify
 import Bit.Concurrency (Concurrency(..))
-import System.Directory (copyFile)
+import qualified Bit.Device as Device
+import Bit.Platform (copyFile)
 import Bit.Core.Helpers
     ( AncestorQuery(..)
     , isFilesystemRemote
@@ -137,7 +139,7 @@ filesystemPush cwd remote = do
     
     -- 1. Check if remote has .bit/ directory (first push vs subsequent)
     let remoteBitDir = remotePath </> ".bit"
-    remoteHasBit <- Dir.doesDirectoryExist remoteBitDir
+    remoteHasBit <- Platform.doesDirectoryExist remoteBitDir
     
     unless remoteHasBit $ do
         putStrLn "First push: initializing bit repo at remote..."

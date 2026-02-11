@@ -26,7 +26,8 @@ module Bit.Core.Transport
     ) where
 
 import qualified System.Directory as Dir
-import System.Directory (copyFile, createDirectoryIfMissing)
+import qualified Bit.Platform as Platform
+import Bit.Platform (copyFile, createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, void, forM)
 import Data.Foldable (traverse_)
@@ -236,7 +237,7 @@ filesystemDownloadOrCopyFromIndex localRoot remotePath filePath progress = do
             -- Binary file: copy from remote working tree
             let srcPath = remotePath </> filePath
             let destPath = localRoot </> filePath
-            srcExists <- Dir.doesFileExist srcPath
+            srcExists <- Platform.doesFileExist srcPath
             when srcExists $ do
                 size <- Dir.getFileSize srcPath
                 writeIORef (CopyProgress.spCurrentFile progress) filePath
@@ -261,7 +262,7 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
                 then pure (TextToSync filePath)
                 else do
                     let srcPath = remotePath </> filePath
-                    srcExists <- Dir.doesFileExist srcPath
+                    srcExists <- Platform.doesFileExist srcPath
                     if srcExists
                         then BinaryToSync filePath . fromIntegral <$> Dir.getFileSize srcPath
                         else pure (BinaryToSync filePath 0)
@@ -287,7 +288,7 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
                 BinaryToSync filePath size -> do
                     let srcPath = remotePath </> filePath
                         destPath = localRoot </> filePath
-                    srcExists <- Dir.doesFileExist srcPath
+                    srcExists <- Platform.doesFileExist srcPath
                     when srcExists $ do
                         writeIORef (CopyProgress.spCurrentFile progress) filePath
                         CopyProgress.copyFileWithProgress srcPath destPath size progress
@@ -323,8 +324,8 @@ filesystemCopyFileToRemote localRoot remotePath remoteIndex filePath progress = 
 filesystemDeleteFileAtRemote :: FilePath -> FilePath -> IO ()
 filesystemDeleteFileAtRemote remotePath filePath = do
     let fullPath = remotePath </> filePath
-    exists <- Dir.doesFileExist fullPath
-    when exists $ Dir.removeFile fullPath
+    exists <- Platform.doesFileExist fullPath
+    when exists $ Platform.removeFile fullPath
 
 -- | Sync all files from a commit to the filesystem remote (first push).
 filesystemSyncAllFiles :: FilePath -> FilePath -> String -> IO ()

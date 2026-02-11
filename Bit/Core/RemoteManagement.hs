@@ -18,6 +18,7 @@ module Bit.Core.RemoteManagement
     ) where
 
 import qualified System.Directory as Dir
+import qualified Bit.Platform as Platform
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (unless, void, when, forM_)
 import System.Exit (ExitCode(..), exitWith)
@@ -74,7 +75,7 @@ promptDeviceName cwd _volRoot mLabel =
 addRemoteFilesystem :: FilePath -> String -> FilePath -> IO ()
 addRemoteFilesystem cwd name filePath = do
     absPath <- Dir.makeAbsolute filePath
-    exists <- Dir.doesDirectoryExist absPath
+    exists <- Platform.doesDirectoryExist absPath
     unless exists $ do
         hPutStrLn stderr ("fatal: Path does not exist or is not accessible: " ++ filePath)
         case filePath of
@@ -454,7 +455,7 @@ executeFilesystemRepair cwd remotePath (RepairLocal sourcePath destPath expected
     let srcFullPath = remotePath </> unPath sourcePath
         dstFullPath = cwd </> unPath destPath
     Dir.createDirectoryIfMissing True (takeDirectory dstFullPath)
-    result <- try @IOException $ Dir.copyFile srcFullPath dstFullPath
+    result <- try @IOException $ Platform.copyFile srcFullPath dstFullPath
     case result of
         Right () -> do
             restoreLocalMetadata cwd destPath expectedHash expectedSize
@@ -465,10 +466,10 @@ executeFilesystemRepair cwd remotePath (RepairRemote sourcePath destPath expecte
     let srcFullPath = cwd </> unPath sourcePath
         dstFullPath = remotePath </> unPath destPath
         remoteMetaPath = remotePath </> bitIndexPath </> unPath destPath
-    Dir.createDirectoryIfMissing True (takeDirectory dstFullPath)
-    Dir.createDirectoryIfMissing True (takeDirectory remoteMetaPath)
+    Platform.createDirectoryIfMissing True (takeDirectory dstFullPath)
+    Platform.createDirectoryIfMissing True (takeDirectory remoteMetaPath)
     result <- try @IOException $ do
-        Dir.copyFile srcFullPath dstFullPath
+        Platform.copyFile srcFullPath dstFullPath
         atomicWriteFileStr remoteMetaPath (serializeMetadata (MetaContent expectedHash expectedSize))
     pure $ case result of
         Right () -> Repaired destPath
