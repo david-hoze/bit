@@ -336,9 +336,9 @@ pullManualMergeImpl remote = do
                                 then do tell "Merging unrelated histories (e.g. first pull)..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", Git.remoteTrackingRef name]
                                 else pure (mergeCode, mergeOut, mergeErr)
 
-                            createConflictDirectories remote divergentFiles remoteFileMap remoteMetaMap localMetaMap
+                            createConflictDirectories remote divergentFiles localMetaMap
 
-                            lift $ printConflictList divergentFiles remoteFileMap remoteMetaMap localMetaMap
+                            lift $ printConflictList divergentFiles localMetaMap
                             lift $ do
                                 tell ""
                                 tell "To resolve:"
@@ -484,8 +484,8 @@ findDivergentFiles remoteFileMap remoteMetaMap _localMetaMap =
         ) [] remoteMetaMap
 
 -- | Create conflict directories for divergent files.
-createConflictDirectories :: Remote -> [DivergentFile] -> Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> BitM ()
-createConflictDirectories remote divergentFiles _remoteFileMap _remoteMetaMap localMetaMap = do
+createConflictDirectories :: Remote -> [DivergentFile] -> Map.Map FilePath (Hash 'MD5, Integer) -> BitM ()
+createConflictDirectories remote divergentFiles localMetaMap = do
     cwd <- asks envCwd
     let conflictsDir = cwd </> ".bit" </> "conflicts"
     lift $ createDirE conflictsDir
@@ -511,8 +511,8 @@ createConflictDirectories remote divergentFiles _remoteFileMap _remoteMetaMap lo
             serializeMetadata (MetaContent df.dfActualHash df.dfActualSize)
 
 -- | Print conflict list in spec format.
-printConflictList :: [DivergentFile] -> Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> IO ()
-printConflictList divergentFiles _remoteFileMap _remoteMetaMap localMetaMap = do
+printConflictList :: [DivergentFile] -> Map.Map FilePath (Hash 'MD5, Integer) -> IO ()
+printConflictList divergentFiles localMetaMap = do
     putStrLn ""
     putStrLn "✗ Remote divergence detected:"
     putStrLn ""
