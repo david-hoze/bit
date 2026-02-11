@@ -1268,7 +1268,7 @@ Interactive per-file conflict resolution:
 | `bit/Commands.hs` | CLI dispatch, env setup |
 | `bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit.hs` | All business logic |
-| `Internal/Git.hs` | Git command wrapper (`runGitAt`/`runGitRawAt` for arbitrary paths) |
+| `Internal/Git.hs` | Git command wrapper; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
 | `Internal/Transport.hs` | Rclone command wrapper |
 | `Internal/Config.hs` | Path constants |
 | `Internal/ConfigFile.hs` | Config file parsing (strict ByteString) |

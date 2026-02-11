@@ -14,6 +14,7 @@ module Internal.Git
     , createBundle
     , config
     , getLocalHead
+    , AncestorQuery(..)
     , checkIsAhead
     , getHashFromBundle
     , restore
@@ -72,6 +73,10 @@ baseFlags = ["-C", bitIndexPath]
 remoteTrackingRef :: String -> String
 remoteTrackingRef name = "refs/remotes/" ++ name ++ "/main"
 
+-- | Query: is aqAncestor an ancestor of aqDescendant? Record avoids transposing the two String hashes.
+data AncestorQuery = AncestorQuery { aqAncestor, aqDescendant :: String }
+  deriving (Show, Eq)
+
 -- | Represents the subset of Git functionality rgit uses
 data GitCommand
     = Init { _separateGitDir :: FilePath }
@@ -81,7 +86,7 @@ data GitCommand
     | RevList { _revListLeft :: String, _revListRight :: String }
     | CreateBundle { _createBundlePath :: FilePath }
     | GetBundleHead { _getBundleHeadPath :: FilePath }
-    | IsAncestor { _ancestorHash :: String, _descendantHash :: String }
+    | IsAncestor AncestorQuery
     | GetHead
 
 -- | Run a Git command and return (ExitCode, StdOut, StdErr)
@@ -119,7 +124,7 @@ runGit cmd = do
         GetBundleHead path ->
             ["bundle", "list-heads", path]
 
-        IsAncestor a d ->
+        IsAncestor (AncestorQuery a d) ->
             ["merge-base", "--is-ancestor", a, d]
 
         GetHead ->
@@ -147,7 +152,7 @@ runGitCommand cmd = do
     hPutStr stderr e
     pure c
   where
-    isAncestorCommand (IsAncestor _ _) = True
+    isAncestorCommand (IsAncestor _) = True
     isAncestorCommand _ = False
 
 commitFile :: String -> FilePath -> IO ExitCode
@@ -164,11 +169,10 @@ createBundle bundleName =
 config :: String -> String -> IO ExitCode
 config configName configValue = runGitCommand (Config configName configValue)
 
--- | Check if @localHash@ is ahead of @remoteHash@ (i.e., remote is an ancestor of local).
--- Parameter order: remote hash first, local hash second — matching @git merge-base --is-ancestor@.
-checkIsAhead :: String -> String -> IO Bool
-checkIsAhead remoteHash localHash =
-    (== ExitSuccess) <$> runGitCommand (IsAncestor remoteHash localHash)
+-- | Check if aqDescendant is ahead of aqAncestor (i.e., aqAncestor is an ancestor of aqDescendant).
+checkIsAhead :: AncestorQuery -> IO Bool
+checkIsAhead q =
+    (== ExitSuccess) <$> runGitCommand (IsAncestor q)
 
 replace :: String -> String -> String -> String
 replace _ _ [] = []

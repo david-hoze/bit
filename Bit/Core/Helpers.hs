@@ -9,6 +9,7 @@ module Bit.Core.Helpers
     , PullOptions(..)
     , defaultPullOptions
       -- Git helpers
+    , AncestorQuery(..)
     , getLocalHeadE
     , checkIsAheadE
     , hasStagedChangesE
@@ -41,6 +42,7 @@ import System.Directory (copyFile, removeFile, createDirectoryIfMissing, removeD
 import System.FilePath ((</>), normalise)
 import Control.Monad (when, unless, forM_)
 import System.Exit (ExitCode(..), exitWith)
+import Internal.Git (AncestorQuery(..))
 import qualified Internal.Git as Git
 import qualified Bit.Device as Device
 import Bit.Remote (Remote)
@@ -87,12 +89,11 @@ getLocalHeadE = do
         ExitSuccess -> Just (trimGitOutput out)
         _ -> Nothing
 
--- | Check if @localHash@ is ahead of @remoteHash@ (i.e., remote is an ancestor of local).
--- Parameter order: remote hash first, local hash second — matching @git merge-base --is-ancestor@.
-checkIsAheadE :: String -> String -> IO Bool
-checkIsAheadE remoteHash localHash =
+-- | Check if aqDescendant is ahead of aqAncestor (i.e., aqAncestor is an ancestor of aqDescendant).
+checkIsAheadE :: AncestorQuery -> IO Bool
+checkIsAheadE (AncestorQuery ancestor descendant) =
     (\(code, _, _) -> code == ExitSuccess) <$>
-    Git.runGitWithOutput ["merge-base", "--is-ancestor", remoteHash, localHash]
+    Git.runGitWithOutput ["merge-base", "--is-ancestor", ancestor, descendant]
 
 hasStagedChangesE :: IO Bool
 hasStagedChangesE =

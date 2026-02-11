@@ -43,7 +43,8 @@ import Bit.Concurrency (Concurrency(..))
 import qualified Bit.Device as Device
 import System.Directory (copyFile)
 import Bit.Core.Helpers
-    ( getRemoteType
+    ( AncestorQuery(..)
+    , getRemoteType
     , withRemote
     , getLocalHeadE
     , checkIsAheadE
@@ -323,7 +324,7 @@ processExistingRemote = do
 
                     case (maybeLocalHash, maybeRemoteHash) of
                         (Just lHash, Just rHash) -> do
-                            isAhead <- lift $ checkIsAheadE rHash lHash
+                            isAhead <- lift $ checkIsAheadE (AncestorQuery { aqAncestor = rHash, aqDescendant = lHash })
 
                             if isAhead
                                 then do

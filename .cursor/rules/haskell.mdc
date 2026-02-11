@@ -36,6 +36,7 @@ Key types and conventions used throughout this codebase:
 | `Concurrency` | `Parallel Int` / `Sequential` | `Bit.Concurrency` |
 | `Resolution` | `KeepLocal` / `TakeRemote` — conflict resolution choice | `Bit.Conflict` |
 | `DeletedSide` | `DeletedInOurs` / `DeletedInTheirs` — which side deleted in modify/delete conflict | `Internal.Git`, re-exported by `Bit.Conflict` |
+| `AncestorQuery` | Record: aqAncestor, aqDescendant — for `checkIsAhead`/`checkIsAheadE`, replaces bare (String, String) param order | `Internal.Git`, re-exported by `Bit.Core.Helpers` |
 | `ConflictInfo` | `ContentConflict` / `ModifyDelete path DeletedSide` / `AddAdd` — conflict type from git ls-files -u | `Bit.Conflict` |
 | `NameStatusChange` | `Added` / `Deleted` / `Modified` / `Renamed` / `Copied` — parsed `git diff --name-status` output | `Internal.Git` |
 | `DivergentFile` | Record: dfPath, dfExpectedHash, dfActualHash, dfExpectedSize, dfActualSize — remote divergence; `findDivergentFiles` takes remoteFileMap and remoteMetaMap only | `Bit.Core.Pull` |

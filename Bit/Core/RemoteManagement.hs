@@ -21,6 +21,7 @@ import qualified System.Directory as Dir
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (unless, void, when, forM_)
 import System.Exit (ExitCode(..), exitWith)
+import Internal.Git (AncestorQuery(..))
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import qualified Bit.Device as Device
@@ -577,8 +578,8 @@ data PushRefStatus
 -- callers never see raw boolean ancestry flags.
 classifyPushStatus :: String -> String -> IO PushRefStatus
 classifyPushStatus localHash remoteHash = do
-  localAhead  <- Git.checkIsAhead remoteHash localHash  -- is local ahead of remote?
-  remoteAhead <- Git.checkIsAhead localHash remoteHash  -- is remote ahead of local?
+  localAhead  <- Git.checkIsAhead (AncestorQuery { aqAncestor = remoteHash, aqDescendant = localHash })
+  remoteAhead <- Git.checkIsAhead (AncestorQuery { aqAncestor = localHash, aqDescendant = remoteHash })
   pure $ case (localAhead, remoteAhead) of
     (True, False) -> PushRefFastForwardable
     (False, True) -> PushRefLocalOutOfDate
