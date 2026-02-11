@@ -2,13 +2,12 @@
 # Proof of Possession Tests
 #
 # Tests the proof of possession rule: push/pull must verify that working tree
-# matches metadata before transferring metadata.
+# matches metadata before transferring metadata. Verification is unconditional.
 #
 # Covers:
 # - Push verification blocks when a tracked file is missing from working tree
+# - Push verification blocks even with --force (force only skips ancestry check)
 # - Pull verification blocks when remote files don't match remote metadata
-# - --skip-verify bypasses verification on pull
-# - --force bypasses verification on push
 # - --accept-remote bypasses verification on pull
 # =============================================================================
 
@@ -72,10 +71,17 @@ cd test\cli\output\work_pop_local & del file.txt & bit push
 >>>2 /Working tree does not match metadata/
 >>>= 1
 
-# ---- Verify --force bypasses verification on push ----
-cd test\cli\output\work_pop_local & echo original content > file.txt & bit push --force
+# ---- Verify --force does NOT bypass verification on push ----
+cd test\cli\output\work_pop_local & del file.txt & bit push --force
 <<<
->>> /Push|Pushing to filesystem remote/
+>>> /Verifying local files/
+>>>2 /Working tree does not match metadata/
+>>>= 1
+
+# ---- Restore file so remaining tests can proceed ----
+cd test\cli\output\work_pop_local & echo original content > file.txt
+<<<
+>>>
 >>>= 0
 
 # ======================================================================
@@ -89,13 +95,7 @@ cd test\cli\output\work_pop_remote & echo corrupted content > file.txt & cd ..\w
 >>>2 /Remote working tree does not match remote metadata/
 >>>= 1
 
-# ---- Verify --skip-verify bypasses verification on pull ----
-cd test\cli\output\work_pop_local & bit pull --skip-verify
-<<<
->>> /Pull|Fetching remote commits/
->>>= 0
-
-# ---- Verify --accept-remote bypasses verification (after re-corrupting remote) ----
+# ---- Verify --accept-remote bypasses verification ----
 cd test\cli\output\work_pop_remote & echo corrupted again > file.txt & cd ..\work_pop_local & bit pull origin --accept-remote
 <<<
 >>> /Accepting remote file state/

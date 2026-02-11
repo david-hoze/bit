@@ -43,7 +43,7 @@ bit verifies automatically in:
   data from a remote
 
 This is the **proof of possession** rule: you can't transfer metadata claims you
-can't substantiate, i.e. provide the actual file. You can skip it with `--skip-verify` when needed.
+can't substantiate, i.e. provide the actual file.
 
 ## `bit verify --remote`
 

@@ -130,8 +130,8 @@ filesystemPull cwd remote opts = do
     
     let remoteHash = trimGitOutput remoteHeadOut
     
-    -- NEW: Proof of possession — verify filesystem remote before pulling
-    unless (pullMode opts == PullAcceptRemote || pullSkipVerify opts) $ do
+    -- Proof of possession — always verify filesystem remote before pulling
+    unless (pullMode opts == PullAcceptRemote) $ do
         putStrLn "Verifying remote repository..."
         (remoteCount, remoteIssues) <- Verify.verifyLocalAt remotePath Nothing (Parallel 0)
         if null remoteIssues
@@ -141,7 +141,6 @@ filesystemPull cwd remote opts = do
                 mapM_ (printVerifyIssue id) remoteIssues
                 hPutStrLn stderr "hint: Run 'bit verify' in the remote repo to see all mismatches."
                 hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
-                hPutStrLn stderr "hint: Run 'bit push --force' to overwrite remote with local state."
                 exitWith (ExitFailure 1)
     
     -- 4. Build transport and delegate to unified pull logic
@@ -149,7 +148,7 @@ filesystemPull cwd remote opts = do
     
     -- Create a minimal BitEnv to call the shared logic
     localFiles <- Scan.scanWorkingDir cwd
-    let env = BitEnv cwd localFiles (Just remote) NoForce (pullSkipVerify opts)
+    let env = BitEnv cwd localFiles (Just remote) NoForce
     
     -- Delegate to the unified path
     case pullMode opts of
@@ -364,7 +363,7 @@ pullWithCleanup transport remote opts = do
         (const $ pure ()) result
 
 pullLogic :: FileTransport -> Remote -> PullOptions -> BitM ()
-pullLogic transport remote opts = do
+pullLogic transport remote _opts = do
     cwd <- asks envCwd
     maybeBundlePath <- lift $ fetchRemoteBundle remote
     case maybeBundlePath of
@@ -378,19 +377,17 @@ pullLogic transport remote opts = do
             let n = takeWhile (`elem` ['0'..'9']) (filter (/= '\n') countOut)
             lift $ tell $ "remote: Counting objects: " ++ (if null n then "0" else n) ++ ", done."
 
-            -- NEW: Proof of possession — verify remote before pulling
-            unless (pullSkipVerify opts) $ do
-                lift $ putStrLn "Verifying remote files..."
-                (remoteFileCount, remoteIssues) <- lift $ Verify.verifyRemote cwd remote Nothing (Parallel 0)
-                if null remoteIssues
-                    then lift $ putStrLn $ "Verified " ++ show remoteFileCount ++ " remote files."
-                    else lift $ do
-                        hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
-                        mapM_ (printVerifyIssue id) remoteIssues
-                        hPutStrLn stderr "hint: Run 'bit verify --remote' to see all mismatches."
-                        hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
-                        hPutStrLn stderr "hint: Run 'bit push --force' to overwrite remote with local state."
-                        exitWith (ExitFailure 1)
+            -- Proof of possession — always verify remote before pulling
+            lift $ putStrLn "Verifying remote files..."
+            (remoteFileCount, remoteIssues) <- lift $ Verify.verifyRemote cwd remote Nothing (Parallel 0)
+            if null remoteIssues
+                then lift $ putStrLn $ "Verified " ++ show remoteFileCount ++ " remote files."
+                else lift $ do
+                    hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
+                    mapM_ (printVerifyIssue id) remoteIssues
+                    hPutStrLn stderr "hint: Run 'bit verify --remote' to see all mismatches."
+                    hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
+                    exitWith (ExitFailure 1)
 
             oldHash <- lift getLocalHeadE
             (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]

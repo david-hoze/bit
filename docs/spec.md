@@ -145,8 +145,8 @@ The existing divergence resolution mechanisms (`--accept-remote`, `--force`, `--
 
 **Implementation status:** The proof of possession rule is fully implemented as of this version:
 
-- `bit push` verifies local working tree before pushing (unless `--force` or `--skip-verify`)
-- `bit pull` verifies remote before pulling (unless `--accept-remote`, `--manual-merge`, or `--skip-verify`)
+- `bit push` always verifies local working tree before pushing (unconditional — `--force` only affects ancestry check)
+- `bit pull` verifies remote before pulling (unless `--accept-remote` or `--manual-merge`)
 - `bit fetch` does NOT verify (fetch only transfers metadata, no file sync happens)
 - `bit fetch` is silent when already up to date (no stdout), similar to `git fetch`
 - Cloud remotes: verified via `Verify.verifyRemote` using `rclone lsjson --hash`
@@ -496,7 +496,7 @@ filesystemPull :: FilePath -> Remote -> PullOptions -> IO ()
 ```
 
 1. **Fetch remote into local**: `git -C local/.bit/index fetch remote/.bit/index/.git main:refs/remotes/origin/main`
-2. **Proof of possession**: Verify remote working tree matches remote metadata (unless `--accept-remote` or `--skip-verify`)
+2. **Proof of possession**: Verify remote working tree matches remote metadata (unless `--accept-remote`)
 3. **Build filesystem transport**: Create a `FileTransport` that copies files directly from remote working tree
 4. **Merge locally**: Delegate to unified `pullLogic` or `pullAcceptRemoteImpl`
    - Note: Upstream tracking (`branch.main.remote`) is NOT auto-set; user must use `bit push -u <remote>`
@@ -1237,8 +1237,7 @@ Interactive per-file conflict resolution:
 - HLint enforcement of IO safety rules
 - Proof of possession verification for push and pull operations
   - `verifyLocalAt` function for verifying arbitrary repo paths (used for filesystem remotes)
-  - `--skip-verify` flag to bypass verification when needed
-  - Integration with existing escape hatches (`--force`, `--accept-remote`, `--manual-merge`)
+  - Integration with existing escape hatches (`--accept-remote`, `--manual-merge`)
 
 ### Module Map
 

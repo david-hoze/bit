@@ -69,7 +69,6 @@ data BitEnv = BitEnv
     , envLocalFiles     :: [FileEntry]
     , envRemote         :: Maybe Remote
     , envForceMode      :: ForceMode
-    , envSkipVerify     :: Bool
     }
 
 type BitM = ReaderT BitEnv IO

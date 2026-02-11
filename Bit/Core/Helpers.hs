@@ -70,13 +70,12 @@ data PullMode
     | PullManualMerge   -- ^ Interactive per-file conflict resolution
     deriving (Show, Eq)
 
-data PullOptions = PullOptions
+newtype PullOptions = PullOptions
     { pullMode       :: PullMode
-    , pullSkipVerify :: Bool
     } deriving (Show)
 
 defaultPullOptions :: PullOptions
-defaultPullOptions = PullOptions PullNormal False
+defaultPullOptions = PullOptions PullNormal
 
 -- ============================================================================
 -- Git helpers via effect layer
