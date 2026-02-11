@@ -35,7 +35,9 @@
       "Bash(cmd.exe //c \"echo original> C:\\\\Users\\\\natanh\\\\repos\\\\bit\\\\test\\\\cli\\\\output\\\\tmptest.bin\")",
       "Bash(cmd.exe //c \"echo corrupted> C:\\\\Users\\\\natanh\\\\repos\\\\bit\\\\test\\\\cli\\\\output\\\\tmptest.bin\")",
       "Bash(grep:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(bit remote-add:*)",
+      "Bash(bit:*)"
     ]
   }
 }
