@@ -49,6 +49,7 @@ Key types and conventions used throughout this codebase:
 | `GitRelPath` | `newtype` — path relative to `.bit/index/` (for git commands) | `Internal.Config` |
 | `CwdPath` | `newtype` — path relative to CWD (for filesystem operations) | `Internal.Config` |
 | `fetchedBundle` | Constant `BundleName "fetched_remote"` | `Internal.Config` |
+| `DangerousPattern` | Record: dpPattern, dpReason, dpFix — test lint patterns, replaces (String, String, String) | `test/LintTestFiles.hs` |
 
 ### Architecture patterns
 - **`BitM` actions** use `asks envCwd` to get the working directory, `asks envRemote` for the remote, etc.

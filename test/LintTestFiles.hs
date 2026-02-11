@@ -101,27 +101,34 @@ data LineType
     | ContinuationLine String
     deriving (Show, Eq)
 
--- | Dangerous patterns that must not appear in test files
-dangerousPatterns :: [(String, String, String)]
+-- | Dangerous pattern: variable that must not appear in test files, with explanation and fix.
+-- Record avoids transposition bugs vs bare (pattern, reason, fix) tuple — all three are String.
+data DangerousPattern = DangerousPattern
+  { dpPattern :: String
+  , dpReason  :: String
+  , dpFix     :: String
+  } deriving (Show, Eq)
+
+dangerousPatterns :: [DangerousPattern]
 dangerousPatterns =
-    [ ("%CD%", 
-       "Windows expands %CD% before the command chain executes. If the preceding `cd` fails, commands run in the main repo directory.",
-       "Use relative paths (e.g., ..\\remote_mirror) instead.")
-    , ("%~dp0",
-       "Batch script directory variable expands before command execution, risking sandbox escape.",
-       "Use relative paths instead.")
-    , ("%USERPROFILE%",
-       "Could resolve to real user directories outside the test sandbox.",
-       "Use relative paths or test-specific directories instead.")
-    , ("%APPDATA%",
-       "Could resolve to real user directories outside the test sandbox.",
-       "Use relative paths or test-specific directories instead.")
-    , ("%HOMEDRIVE%",
-       "Could resolve to real user directories outside the test sandbox.",
-       "Use relative paths or test-specific directories instead.")
-    , ("%HOMEPATH%",
-       "Could resolve to real user directories outside the test sandbox.",
-       "Use relative paths or test-specific directories instead.")
+    [ DangerousPattern "%CD%"
+        "Windows expands %CD% before the command chain executes. If the preceding `cd` fails, commands run in the main repo directory."
+        "Use relative paths (e.g., ..\\remote_mirror) instead."
+    , DangerousPattern "%~dp0"
+        "Batch script directory variable expands before command execution, risking sandbox escape."
+        "Use relative paths instead."
+    , DangerousPattern "%USERPROFILE%"
+        "Could resolve to real user directories outside the test sandbox."
+        "Use relative paths or test-specific directories instead."
+    , DangerousPattern "%APPDATA%"
+        "Could resolve to real user directories outside the test sandbox."
+        "Use relative paths or test-specific directories instead."
+    , DangerousPattern "%HOMEDRIVE%"
+        "Could resolve to real user directories outside the test sandbox."
+        "Use relative paths or test-specific directories instead."
+    , DangerousPattern "%HOMEPATH%"
+        "Could resolve to real user directories outside the test sandbox."
+        "Use relative paths or test-specific directories instead."
     ]
 
 -- | Split file content into test cases
@@ -252,9 +259,9 @@ scanForViolations :: FilePath -> String -> [String]
 scanForViolations path content =
     let linesWithNumbers = zip [1..] (lines content)
         checkLine (lineNum, lineText) =
-            [ formatViolation path lineNum lineText pattern reason fix
-            | (pattern, reason, fix) <- dangerousPatterns
-            , containsPattern pattern lineText
+            [ formatViolation path lineNum lineText dp
+            | dp <- dangerousPatterns
+            , containsPattern (dpPattern dp) lineText
             ]
     in concatMap checkLine linesWithNumbers
 
@@ -266,15 +273,15 @@ containsPattern pattern text =
     in lowerPattern `isInfixOf` lowerText
 
 -- | Format a violation message
-formatViolation :: FilePath -> Int -> String -> String -> String -> String -> String
-formatViolation path lineNum lineText pattern reason fix =
+formatViolation :: FilePath -> Int -> String -> DangerousPattern -> String
+formatViolation path lineNum lineText dp =
     unlines
         [ ""
         , "DANGEROUS PATTERN in " ++ path ++ ":" ++ show lineNum
-        , "  Found: " ++ pattern
+        , "  Found: " ++ dpPattern dp
         , "  Line:  " ++ lineText
         , ""
-        , "  Why dangerous: " ++ reason
-        , "  Fix: " ++ fix
+        , "  Why dangerous: " ++ dpReason dp
+        , "  Fix: " ++ dpFix dp
         , ""
         ]
