@@ -29,7 +29,6 @@ import Data.List (isPrefixOf)
 import Data.Maybe (maybeToList)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
-import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import Bit.Internal.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, hashFile, serializeMetadata)
 import qualified Bit.Remote.Scan as Remote.Scan
@@ -273,25 +272,30 @@ verifyLocal :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyI
 verifyLocal cwd = verifyLocalAt cwd
 
 -- | Extract metadata from a bundle's HEAD commit.
--- First fetches the bundle into the repo, then reads metadata from refs/remotes/origin/main.
+-- Reads the hash from the bundle, then loads metadata from that commit.
+-- The objects must already be in the repo (via git fetch <name> in saveFetchedBundle).
+-- Falls back to fetching from the bundle file directly if objects aren't available.
 -- Returns all metadata entries (binary + text). Callers extract what they need
 -- via 'binaryEntries' or 'allEntryPaths'.
 loadMetadataFromBundle :: BundleName -> IO [MetadataEntry]
 loadMetadataFromBundle bundleName = do
-  -- First, fetch the bundle into the repo so we can read from it
-  fetchCode <- Git.fetchFromBundle bundleName
-  case fetchCode of
-    ExitSuccess -> do
-      -- Get the remote HEAD hash (now available as refs/remotes/origin/main)
-      (_code, out, _) <- readProcessWithExitCode "git"
-        [ "-C", bitIndexPath
-        , "rev-parse"
-        , remoteTrackingRef "origin"
-        ] ""
-      case filter (not . isSpace) out of
-        [] -> pure []
-        headHash -> loadMetadata (FromCommit headHash) Sequential
-    _ -> pure []
+  -- Get the hash from the bundle
+  mHash <- Git.getHashFromBundle bundleName
+  case mHash of
+    Nothing -> pure []
+    Just headHash -> do
+      -- Try to load from the commit (objects should already be fetched)
+      entries <- loadMetadata (FromCommit headHash) Sequential
+      if null entries
+        then do
+          -- Objects not in repo yet — fetch from bundle file directly
+          let bundlePath = fromCwdPath (bundleCwdPath bundleName)
+          (fetchCode, _, _) <- readProcessWithExitCode "git"
+            ["-C", bitIndexPath, "fetch", bundlePath, "+refs/heads/*:refs/remotes/bundle/*"] ""
+          case fetchCode of
+            ExitSuccess -> loadMetadata (FromCommit headHash) Sequential
+            _ -> pure []
+        else pure entries
 
 -- | Verify remote files match remote metadata.
 -- Sets up a temporary working tree in .bit/vremotes/<name>/, checks out the

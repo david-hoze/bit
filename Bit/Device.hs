@@ -10,6 +10,7 @@ module Bit.Device
   , RemotePathType(..)
   , RemoteTarget(..)
   , ResolveResult(..)
+  , RemoteType(..)
     -- Classification
   , classifyRemotePath
   , getRcloneRemotes
@@ -19,6 +20,7 @@ module Bit.Device
   , detectStorageType
   , getHardwareSerial
   , getVolumeLabel
+  , isFixedDrive
     -- .bit-store
   , readBitStore
   , writeBitStore
@@ -26,6 +28,7 @@ module Bit.Device
   , readDeviceFile
   , writeDeviceFile
   , readRemoteFile
+  , readRemoteType
   , writeRemoteFile
   , listDeviceNames
   , findDeviceByUuid
@@ -35,6 +38,7 @@ module Bit.Device
   , generateStoreUuid
     -- Predicates
   , isFilesystemTarget
+  , isFilesystemType
   ) where
 
 import Data.List (dropWhileEnd, isPrefixOf, intercalate)
@@ -92,6 +96,15 @@ data ResolveResult
   = Resolved FilePath     -- Runtime path (e.g. E:\Backup)
   | NotConnected String   -- Device not found
   deriving (Show, Eq)
+
+-- | Classification of a remote by transport type.
+data RemoteType = RemoteFilesystem | RemoteDevice | RemoteCloud
+  deriving (Show, Eq)
+
+-- | True for types that resolve to a local filesystem path.
+isFilesystemType :: RemoteType -> Bool
+isFilesystemType RemoteCloud = False
+isFilesystemType _           = True
 
 -- ---------------------------------------------------------------------------
 -- Classification: cloud vs filesystem
@@ -221,6 +234,25 @@ detectStorageTypeLinux _ = do
       in if fstype `elem` ["nfs", "nfs4", "cifs", "smb", "smbfs", "sshfs"]
             then Network else Physical
     _ -> Physical
+
+-- | Is the volume a fixed (non-removable, non-network) drive?
+-- Fixed drives use RemoteFilesystem; removable/network use RemoteDevice.
+isFixedDrive :: FilePath -> IO Bool
+isFixedDrive volumeRoot
+  | isWindows = isFixedDriveWindows volumeRoot
+  | otherwise = (== Physical) <$> detectStorageType volumeRoot
+
+isFixedDriveWindows :: FilePath -> IO Bool
+isFixedDriveWindows volRoot = do
+  let drive = take 2 (filter (`elem` ['A'..'Z'] ++ ['a'..'z'] ++ ":") volRoot)
+  case drive of
+    [] -> pure False  -- UNC: treat as network
+    _ -> do
+      (code, out, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
+        "[int]([System.IO.DriveInfo]::new('" ++ drive ++ "').DriveType)"] ""
+      pure $ case code of
+        ExitSuccess -> trim out == "3"  -- DriveType.Fixed == 3
+        _ -> True  -- Default to fixed if detection fails
 
 trim :: String -> String
 trim = dropWhileEnd (== ' ') . dropWhile (== ' ')
@@ -421,16 +453,42 @@ readRemoteFile repoRoot remoteName = do
         pure $ Just $ maybe (TargetCloud (device ++ ":" ++ relPath))
           (const $ TargetDevice device relPath) mDev
 
-writeRemoteFile :: FilePath -> String -> RemoteTarget -> IO ()
-writeRemoteFile repoRoot remoteName target = do
+-- | Read the remote type from .bit/remotes/<name>.
+-- New format: "type: filesystem|device|cloud". Old format: inferred from "target:" line.
+readRemoteType :: FilePath -> String -> IO (Maybe RemoteType)
+readRemoteType repoRoot name = do
+  let path = repoRoot </> bitRemotesDir </> name
+  exists <- Dir.doesFileExist path
+  if not exists then pure Nothing
+  else do
+    bs <- BS.readFile path
+    let content = either (const "") T.unpack (decodeUtf8' bs)
+        ls = lines content
+        getVal prefix = listToMaybe [ trim (drop (length prefix) l) | l <- ls, prefix `isPrefixOf` l ]
+    case getVal "type: " of
+      Just "filesystem" -> pure (Just RemoteFilesystem)
+      Just "device"     -> pure (Just RemoteDevice)
+      Just "cloud"      -> pure (Just RemoteCloud)
+      _ -> -- Old format: infer from target line
+        case getVal "target: " of
+          Just t | "local:" `isPrefixOf` t -> pure (Just RemoteFilesystem)
+          Just t -> case break (== ':') t of
+            (dev, ':':_) | not (null dev) -> do
+              mDev <- readDeviceFile repoRoot dev
+              pure $ Just $ maybe RemoteCloud (const RemoteDevice) mDev
+            _ -> pure (Just RemoteCloud)
+          Nothing -> pure Nothing
+
+writeRemoteFile :: FilePath -> String -> RemoteType -> Maybe String -> IO ()
+writeRemoteFile repoRoot name remoteType mTarget = do
   Dir.createDirectoryIfMissing True (repoRoot </> bitRemotesDir)
-  let path = repoRoot </> bitRemotesDir </> remoteName
-  let line = case target of
-        TargetCloud url -> "target: " ++ url
-        TargetDevice dev p -> "target: " ++ dev ++ ":" ++ p
-        TargetLocalPath p -> "target: local:" ++ p
+  let path = repoRoot </> bitRemotesDir </> name
+  let content = case remoteType of
+        RemoteFilesystem -> "type: filesystem"
+        RemoteCloud      -> "type: cloud\ntarget: " ++ fromMaybe "" mTarget
+        RemoteDevice     -> "type: device\ntarget: " ++ fromMaybe "" mTarget
   -- Use atomic write for crash safety and Windows compatibility
-  atomicWriteFile path (encodeUtf8 (T.pack line))
+  atomicWriteFile path (encodeUtf8 (T.pack content))
 
 -- | Parse a target string (e.g. "black_usb:Backup" or "gdrive:Projects/foo")
 parseRemoteTarget :: String -> RemoteTarget

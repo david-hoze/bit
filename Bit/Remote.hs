@@ -12,6 +12,7 @@ module Bit.Remote
 
 import qualified Internal.Git as Git
 import qualified Bit.Device as Device
+import Data.List (isSuffixOf)
 
 -- | A resolved remote. Bit.hs works with this; only Transport sees the url.
 data Remote = Remote
@@ -35,13 +36,55 @@ displayRemote r = _remoteName r ++ " (" ++ _remoteUrl r ++ ")"
 mkRemote :: String -> String -> Remote
 mkRemote = Remote
 
--- | Resolve a remote name to a Remote. Checks:
---   1. .rgit/remotes/<name> (device resolution via Device.hs)
---   2. Git config (git remote get-url <name>)
--- Returns Nothing if remote doesn't exist or device is not connected.
+-- | Resolve a remote name to a Remote. Dispatches on RemoteType:
+--   Filesystem: reads URL from git config, strips .bit/index suffix
+--   Device:     resolves device UUID to mount path
+--   Cloud:      reads target from remote file (rclone URL)
+--   Nothing:    backward compat fallback
 resolveRemote :: FilePath -> String -> IO (Maybe Remote)
 resolveRemote cwd name = do
-    -- Try .rgit/remotes/<name> first (device-aware resolution)
+    mType <- Device.readRemoteType cwd name
+    case mType of
+        Just Device.RemoteFilesystem -> resolveFromGitConfig name
+        Just Device.RemoteDevice     -> resolveDeviceRemote cwd name
+        Just Device.RemoteCloud      -> resolveCloudRemote cwd name
+        Nothing                      -> resolveOldFormat cwd name
+
+-- | Filesystem remote: URL is in git config, strip .bit/index suffix to get base path.
+resolveFromGitConfig :: String -> IO (Maybe Remote)
+resolveFromGitConfig name = do
+    mUrl <- Git.getRemoteUrl name
+    case mUrl of
+        Just url | not (null url) -> pure (Just (mkRemote name (stripBitIndexSuffix url)))
+        _ -> pure Nothing
+
+-- | Device remote: read target from file, resolve device UUID.
+resolveDeviceRemote :: FilePath -> String -> IO (Maybe Remote)
+resolveDeviceRemote cwd name = do
+    mTarget <- Device.readRemoteFile cwd name
+    case mTarget of
+        Just target -> do
+            res <- Device.resolveRemoteTarget cwd target
+            case res of
+                Device.Resolved url -> pure (Just (mkRemote name url))
+                Device.NotConnected _ -> pure Nothing
+        Nothing -> pure Nothing
+
+-- | Cloud remote: read target from file (rclone URL).
+resolveCloudRemote :: FilePath -> String -> IO (Maybe Remote)
+resolveCloudRemote cwd name = do
+    mTarget <- Device.readRemoteFile cwd name
+    case mTarget of
+        Just target -> do
+            res <- Device.resolveRemoteTarget cwd target
+            case res of
+                Device.Resolved url -> pure (Just (mkRemote name url))
+                Device.NotConnected _ -> pure Nothing
+        Nothing -> pure Nothing
+
+-- | Backward compat: try remote file, then git config.
+resolveOldFormat :: FilePath -> String -> IO (Maybe Remote)
+resolveOldFormat cwd name = do
     mTarget <- Device.readRemoteFile cwd name
     case mTarget of
         Just target -> do
@@ -50,11 +93,19 @@ resolveRemote cwd name = do
                 Device.Resolved url -> pure (Just (mkRemote name url))
                 Device.NotConnected _ -> pure Nothing
         Nothing -> do
-            -- Fall back to git remote URL
             mUrl <- Git.getRemoteUrl name
             case mUrl of
-                Just url | not (null url) -> pure (Just (mkRemote name url))
+                Just url | not (null url) -> pure (Just (mkRemote name (stripBitIndexSuffix url)))
                 _ -> pure Nothing
+
+-- | Strip /.bit/index or \.bit\index suffix from a git remote URL to get the base path.
+stripBitIndexSuffix :: String -> String
+stripBitIndexSuffix url =
+    let normalized = map (\c -> if c == '\\' then '/' else c) url
+        suffix = "/.bit/index"
+    in if suffix `isSuffixOf` normalized
+       then take (length url - length suffix) url
+       else url
 
 -- | Get the default remote for push/pull/fetch.
 -- Checks branch tracking config, falls back to "origin".

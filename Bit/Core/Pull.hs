@@ -26,7 +26,6 @@ import System.FilePath ((</>), normalise, takeDirectory)
 import Control.Monad (when, unless, void, forM_)
 import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
-import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (bitIndexPath, fetchedBundle)
@@ -52,7 +51,7 @@ import Bit.Core.Helpers
     ( PullMode(..)
     , PullOptions(..)
     , defaultPullOptions
-    , getRemoteTargetType
+    , getRemoteType
     , withRemote
     , getLocalHeadE
     , hasStagedChangesE
@@ -85,9 +84,9 @@ pull opts = withRemote $ \remote -> do
     cwd <- asks envCwd
     
     -- Determine if this is a filesystem or cloud remote
-    mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
-    case mTarget of
-        Just t | Device.isFilesystemTarget t -> liftIO $ filesystemPull cwd remote opts
+    mType <- liftIO $ getRemoteType cwd (remoteName remote)
+    case mType of
+        Just t | Device.isFilesystemType t -> liftIO $ filesystemPull cwd remote opts
         _ -> cloudPull remote opts  -- Cloud remote or no target info (use cloud flow)
 
 -- | Pull from a cloud remote (uses unified transport abstraction).
@@ -99,36 +98,35 @@ cloudPull remote opts =
         PullManualMerge  -> pullManualMergeImpl remote
         PullNormal       -> pullWithCleanup transport remote opts
 
--- | Pull from a filesystem remote. Fetches directly from the remote's .bit/index/.git.
+-- | Pull from a filesystem remote using named git remote.
 filesystemPull :: FilePath -> Remote -> PullOptions -> IO ()
 filesystemPull cwd remote opts = do
-    let remotePath = remoteUrl remote
+    let name = remoteName remote
+        remotePath = remoteUrl remote
     putStrLn $ "Pulling from filesystem remote: " ++ remotePath
-    
+
     -- Check if remote has .bit/ directory
     checkFilesystemRemoteIsRepo remotePath
-    
-    -- 1. Fetch remote into local
-    let remoteIndexGit = remotePath </> ".bit" </> "index" </> ".git"
-    
+
+    -- 1. Ensure git remote URL is current and fetch
+    void $ Git.addRemote name (remotePath </> ".bit" </> "index")
+
     putStrLn "Fetching remote commits..."
-    (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput 
-        ["fetch", remoteIndexGit, "main:" ++ remoteTrackingRef "origin"]
-    
+    (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput ["fetch", name]
+
     when (fetchCode /= ExitSuccess) $ do
         hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
         exitWith fetchCode
-    
-    -- Output fetch results similar to cloud pull
-    hPutStrLn stderr $ "From " ++ remoteName remote
-    hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
-    
+
+    hPutStrLn stderr $ "From " ++ name
+    hPutStrLn stderr $ " * [new branch]      main       -> " ++ name ++ "/main"
+
     -- 3. Get remote HEAD hash
-    (remoteHeadCode, remoteHeadOut, _) <- Git.runGitWithOutput ["rev-parse", remoteTrackingRef "origin"]
+    (remoteHeadCode, remoteHeadOut, _) <- Git.runGitWithOutput ["rev-parse", Git.remoteTrackingRef name]
     when (remoteHeadCode /= ExitSuccess) $ do
         hPutStrLn stderr "Error: Could not get remote HEAD"
         exitWith (ExitFailure 1)
-    
+
     let remoteHash = trimGitOutput remoteHeadOut
     
     -- Proof of possession — always verify filesystem remote before pulling
@@ -153,37 +151,38 @@ filesystemPull cwd remote opts = do
     
     -- Delegate to the unified path
     case pullMode opts of
-        PullAcceptRemote -> runBitM env (filesystemPullAcceptRemoteImpl transport remoteHash)
+        PullAcceptRemote -> runBitM env (filesystemPullAcceptRemoteImpl transport name remoteHash)
         _                -> runBitM env (filesystemPullLogicImpl transport remote remoteHash)
 
 -- | Filesystem pull logic (simplified - no bundle fetching, just merge + sync)
 filesystemPullLogicImpl :: FileTransport -> Remote -> String -> BitM ()
-filesystemPullLogicImpl transport _remote remoteHash = do
+filesystemPullLogicImpl transport remote remoteHash = do
     cwd <- asks envCwd
     oldHash <- lift getLocalHeadE
-    
+    let name = remoteName remote
+
     case oldHash of
         Nothing -> do
             lift $ putStrLn $ "Checking out " ++ take 7 remoteHash ++ " (first pull)"
-            checkoutCode <- lift $ Git.checkoutRemoteAsMain
+            checkoutCode <- lift $ Git.checkoutRemoteAsMain name
             case checkoutCode of
                 ExitSuccess -> lift $ do
                     transportSyncAllFiles transport cwd
                     putStrLn "Syncing binaries... done."
-                    void $ Git.updateRemoteTrackingBranchToHash remoteHash
+                    void $ Git.updateRemoteTrackingBranchToHash name remoteHash
                 _ -> lift $ hPutStrLn stderr "Error: Failed to checkout remote branch."
-        
+
         Just localHash -> do
-            (mergeCode, mergeOut, mergeErr) <- lift $ Git.runGitWithOutput 
-                ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
-            
+            (mergeCode, mergeOut, mergeErr) <- lift $ Git.runGitWithOutput
+                ["merge", "--no-commit", "--no-ff", Git.remoteTrackingRef name]
+
             (finalMergeCode, finalMergeOut, finalMergeErr) <-
                 lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
                 then do
                     putStrLn "Merging unrelated histories..."
-                    Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", remoteTrackingRef "origin"]
+                    Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", Git.remoteTrackingRef name]
                 else pure (mergeCode, mergeOut, mergeErr)
-            
+
             case finalMergeCode of
                 ExitSuccess -> do
                     lift $ putStrLn $ "Updating " ++ take 7 localHash ++ ".." ++ take 7 remoteHash
@@ -193,7 +192,7 @@ filesystemPullLogicImpl transport _remote remoteHash = do
                     -- CRITICAL: Always read actual HEAD after merge, never use remoteHash
                     lift $ applyMergeToWorkingDir transport cwd localHash
                     lift $ putStrLn "Syncing binaries... done."
-                    lift $ void $ Git.updateRemoteTrackingBranchToHash remoteHash
+                    lift $ void $ Git.updateRemoteTrackingBranchToHash name remoteHash
                 _ -> do
                     lift $ do
                         putStrLn finalMergeOut
@@ -202,17 +201,17 @@ filesystemPullLogicImpl transport _remote remoteHash = do
                         putStrLn "bit requires you to pick a version for each conflict."
                         putStrLn ""
                         putStrLn "Resolving conflicts..."
-                    
+
                     conflicts <- lift Conflict.getConflictedFilesE
                     resolutions <- lift $ Conflict.resolveAll conflicts
                     let total = length resolutions
-                    
+
                     invalid <- lift $ validateMetadataDir (cwd </> bitIndexPath)
                     unless (null invalid) $ lift $ do
                         void $ Git.runGitRaw ["merge", "--abort"]
                         hPutStrLn stderr "fatal: Metadata files contain conflict markers. Merge aborted."
                         throwIO (userError "Invalid metadata")
-                    
+
                     conflictsNow <- lift Conflict.getConflictedFilesE
                     when (null conflictsNow) $ lift $ do
                         void $ Git.runGitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
@@ -220,28 +219,28 @@ filesystemPullLogicImpl transport _remote remoteHash = do
                         -- CRITICAL: Always read actual HEAD after merge, never use remoteHash
                         applyMergeToWorkingDir transport cwd localHash
                         putStrLn "Syncing binaries... done."
-                        void $ Git.updateRemoteTrackingBranchToHash remoteHash
+                        void $ Git.updateRemoteTrackingBranchToHash name remoteHash
 
 -- | Filesystem pull --accept-remote implementation
-filesystemPullAcceptRemoteImpl :: FileTransport -> String -> BitM ()
-filesystemPullAcceptRemoteImpl transport remoteHash = do
+filesystemPullAcceptRemoteImpl :: FileTransport -> String -> String -> BitM ()
+filesystemPullAcceptRemoteImpl transport name remoteHash = do
     cwd <- asks envCwd
     lift $ putStrLn "Accepting remote file state as truth..."
-    
+
     -- Record current HEAD before checkout
     oldHead <- lift getLocalHeadE
-    
+
     -- Force-checkout the remote branch
-    checkoutCode <- lift Git.checkoutRemoteAsMain
+    checkoutCode <- lift $ Git.checkoutRemoteAsMain name
     case checkoutCode of
         ExitSuccess -> do
             -- Sync actual files based on what changed
             maybe (lift $ transportSyncAllFiles transport cwd)
                   (\oh -> lift $ applyMergeToWorkingDir transport cwd oh) oldHead
-            
+
             -- Update tracking ref
             lift $ do
-                void $ Git.updateRemoteTrackingBranchToHash remoteHash
+                void $ Git.updateRemoteTrackingBranchToHash name remoteHash
                 putStrLn "Pull with --accept-remote completed."
         _ -> lift $ hPutStrLn stderr "Error: Failed to checkout remote state."
 
@@ -250,6 +249,7 @@ filesystemPullAcceptRemoteImpl transport remoteHash = do
 pullAcceptRemoteImpl :: FileTransport -> Remote -> BitM ()
 pullAcceptRemoteImpl transport remote = do
     cwd <- asks envCwd
+    let name = remoteName remote
     lift $ tell "Accepting remote file state as truth..."
 
     -- 1. Fetch the remote bundle so git has the remote's history
@@ -266,21 +266,19 @@ pullAcceptRemoteImpl transport remote = do
             oldHead <- lift getLocalHeadE
 
             -- 3. Force-checkout the remote branch.
-            --    This makes .bit/index/ match the remote's metadata exactly:
-            --    text files get actual content, binary files get hash/size.
             lift $ tell "Scanning remote files..."
-            checkoutCode <- lift Git.checkoutRemoteAsMain
+            checkoutCode <- lift $ Git.checkoutRemoteAsMain name
             case checkoutCode of
                 ExitSuccess -> do
                     -- 4. Sync actual files to working tree based on what changed in git
-                    (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", remoteTrackingRef "origin"]
+                    (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", Git.remoteTrackingRef name]
                     let _newHash = takeWhile (/= '\n') remoteOut
-                    maybe (lift $ transportSyncAllFiles transport cwd)  -- First time, no diff available
+                    maybe (lift $ transportSyncAllFiles transport cwd)
                           (\oh -> lift $ applyMergeToWorkingDir transport cwd oh) oldHead
 
                     -- 5. Update tracking ref
                     maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
-                    lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash) maybeRemoteHash
+                    lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash name) maybeRemoteHash
 
                     lift $ tell "Pull with --accept-remote completed."
                 _ -> lift $ tellErr "Error: Failed to checkout remote state."
@@ -289,6 +287,7 @@ pullAcceptRemoteImpl transport remote = do
 pullManualMergeImpl :: Remote -> BitM ()
 pullManualMergeImpl remote = do
     cwd <- asks envCwd
+    let name = remoteName remote
     lift $ tell "Fetching remote metadata... done."
 
     maybeBundlePath <- lift $ fetchRemoteBundle remote
@@ -328,12 +327,12 @@ pullManualMergeImpl remote = do
                             pullWithCleanup transport remote defaultPullOptions
                         else do
                             _oldHash <- lift getLocalHeadE
-                            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", remoteTrackingRef "origin"]
+                            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", Git.remoteTrackingRef name]
                             let _newHash = takeWhile (/= '\n') remoteOut
 
-                            (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
+                            (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", Git.remoteTrackingRef name]
                             (_finalMergeCode, _, _) <- lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
-                                then do tell "Merging unrelated histories (e.g. first pull)..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", remoteTrackingRef "origin"]
+                                then do tell "Merging unrelated histories (e.g. first pull)..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", Git.remoteTrackingRef name]
                                 else pure (mergeCode, mergeOut, mergeErr)
 
                             createConflictDirectories remote divergentFiles remoteFileMap remoteMetaMap localMetaMap
@@ -366,6 +365,7 @@ pullWithCleanup transport remote opts = do
 pullLogic :: FileTransport -> Remote -> PullOptions -> BitM ()
 pullLogic transport remote _opts = do
     cwd <- asks envCwd
+    let name = remoteName remote
     maybeBundlePath <- lift $ fetchRemoteBundle remote
     case maybeBundlePath of
         Nothing -> pure ()
@@ -374,7 +374,7 @@ pullLogic transport remote _opts = do
             case outcome of
                 FetchError err -> lift $ tellErr $ "Error: " ++ err
                 _ -> pure ()  -- No need to render fetch output during pull
-            (_, countOut, _) <- lift $ gitQuery ["rev-list", "--count", remoteTrackingRef "origin"]
+            (_, countOut, _) <- lift $ gitQuery ["rev-list", "--count", Git.remoteTrackingRef name]
             let n = takeWhile (`elem` ['0'..'9']) (filter (/= '\n') countOut)
             lift $ tell $ "remote: Counting objects: " ++ (if null n then "0" else n) ++ ", done."
 
@@ -391,13 +391,13 @@ pullLogic transport remote _opts = do
                     exitWith (ExitFailure 1)
 
             oldHash <- lift getLocalHeadE
-            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", remoteTrackingRef "origin"]
+            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", Git.remoteTrackingRef name]
             let newHash = takeWhile (/= '\n') remoteOut
 
             case oldHash of
                 Nothing -> do
                     lift $ tell $ "Checking out " ++ take 7 newHash ++ " (first pull)"
-                    checkoutCode <- lift $ Git.checkoutRemoteAsMain
+                    checkoutCode <- lift $ Git.checkoutRemoteAsMain name
                     case checkoutCode of
                         ExitSuccess -> lift $ do
                             transportSyncAllFiles transport cwd
@@ -405,11 +405,11 @@ pullLogic transport remote _opts = do
                         _ -> lift $ tellErr "Error: Failed to checkout remote branch."
 
                 Just localHead -> do
-                    (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
+                    (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", Git.remoteTrackingRef name]
 
                     (finalMergeCode, finalMergeOut, finalMergeErr) <-
                         lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
-                        then do tell "Merging unrelated histories..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", remoteTrackingRef "origin"]
+                        then do tell "Merging unrelated histories..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", Git.remoteTrackingRef name]
                         else pure (mergeCode, mergeOut, mergeErr)
 
                     case finalMergeCode of
@@ -423,7 +423,7 @@ pullLogic transport remote _opts = do
                             applyMergeToWorkingDir transport cwd localHead
                             tell "Syncing binaries... done."
                         maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
-                        lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash) maybeRemoteHash
+                        lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash name) maybeRemoteHash
                       _ -> do
                         lift $ do
                             tell finalMergeOut
@@ -449,7 +449,7 @@ pullLogic transport remote _opts = do
                             tell $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
                             applyMergeToWorkingDir transport cwd localHead
                             tell "Syncing binaries... done."
-                            void $ Git.updateRemoteTrackingBranchToHash newHash
+                            void $ Git.updateRemoteTrackingBranchToHash name newHash
 
 -- ============================================================================
 -- Helper functions

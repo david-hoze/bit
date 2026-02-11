@@ -19,6 +19,9 @@ dist-newstyle/
 # CLI test work directories
 test/cli/output/
 
+# bit's own data directory (created if tests accidentally run at project root)
+.bit/
+
 # Test report
 test.txt
 

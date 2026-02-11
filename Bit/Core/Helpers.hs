@@ -12,6 +12,7 @@ module Bit.Core.Helpers
     , getLocalHeadE
     , checkIsAheadE
     , hasStagedChangesE
+    , getRemoteType
     , getRemoteTargetType
     , checkFilesystemRemoteIsRepo
       -- Monadic helpers
@@ -100,7 +101,12 @@ hasStagedChangesE =
     (\(code, _, _) -> code == ExitFailure 1) <$>
     Git.runGitWithOutput ["diff", "--cached", "--quiet"]
 
--- | Determine the remote target type from a remote name.
+-- | Determine the remote type from a remote name.
+-- Returns the RemoteType if the remote is configured, Nothing otherwise.
+getRemoteType :: FilePath -> String -> IO (Maybe Device.RemoteType)
+getRemoteType cwd remName = Device.readRemoteType cwd remName
+
+-- | Determine the remote target type from a remote name (legacy, for backward compat).
 -- Returns the RemoteTarget if the remote is configured, Nothing otherwise.
 getRemoteTargetType :: FilePath -> String -> IO (Maybe Device.RemoteTarget)
 getRemoteTargetType cwd remName = Device.readRemoteFile cwd remName

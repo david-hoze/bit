@@ -35,7 +35,6 @@ import Data.Foldable (traverse_)
 import Control.Monad.Trans.Class (lift)
 import System.Exit (ExitCode(..), exitWith)
 import Control.Exception (throwIO, IOException, catch)
-import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import Internal.Config (bitIndexPath)
 import System.IO (stderr, hPutStrLn, hPutStr)
@@ -58,7 +57,7 @@ import Bit.Core.Helpers
     , restoreCheckoutPaths
     , expandPathsToFiles
     , getLocalHeadE
-    , getRemoteTargetType
+    , getRemoteType
     )
 
 -- ============================================================================
@@ -162,9 +161,9 @@ mergeContinue = do
                         void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
                         putStrLn "Merge complete."
                     traverse_ (\remote -> do
-                            mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
-                            let transport = case mTarget of
-                                  Just t | Device.isFilesystemTarget t -> Transport.mkFilesystemTransport (remoteUrl remote)
+                            mType <- liftIO $ getRemoteType cwd (remoteName remote)
+                            let transport = case mType of
+                                  Just t | Device.isFilesystemType t -> Transport.mkFilesystemTransport (remoteUrl remote)
                                   _ -> Transport.mkCloudTransport remote
                             Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
                 _ -> liftIO $ do
@@ -179,7 +178,9 @@ mergeContinue = do
                 oldHead <- liftIO getLocalHeadE
                 (code, _, _) <- liftIO $ Git.runGitWithOutput ["rev-parse", "--verify", "MERGE_HEAD"]
                 when (code /= ExitSuccess) $ do
-                    (mergeCode, _, _) <- liftIO $ Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
+                    -- Use actual remote name if available, fall back to "origin"
+                    let remName = maybe "origin" remoteName mRemote
+                    (mergeCode, _, _) <- liftIO $ Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", Git.remoteTrackingRef remName]
                     when (mergeCode /= ExitSuccess) $
                         liftIO $ hPutStrLn stderr "warning: Could not start merge. Proceeding anyway."
 
@@ -190,9 +191,9 @@ mergeContinue = do
                     putStrLn "Conflict directories cleaned up."
 
                 traverse_ (\remote -> do
-                        mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
-                        let transport = case mTarget of
-                              Just t | Device.isFilesystemTarget t -> Transport.mkFilesystemTransport (remoteUrl remote)
+                        mType <- liftIO $ getRemoteType cwd (remoteName remote)
+                        let transport = case mType of
+                              Just t | Device.isFilesystemType t -> Transport.mkFilesystemTransport (remoteUrl remote)
                               _ -> Transport.mkCloudTransport remote
                         Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
 

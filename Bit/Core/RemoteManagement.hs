@@ -31,12 +31,12 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
-import Internal.Config (bitDevicesDir, bitRemotesDir, fetchedBundle, bundleCwdPath, fromCwdPath, BundleName(..), bitIndexPath)
+import Internal.Config (bitDevicesDir, bitRemotesDir, fetchedBundle, bundleCwdPath, fromCwdPath, BundleName(..), bitIndexPath, bundleGitRelPath, fromGitRelPath)
 import Bit.Types (BitM, BitEnv(..), Path(..), Hash(..), HashAlgo(..), hashToText)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Bit.Remote (Remote, remoteUrl, remoteName, displayRemote, resolveRemote)
-import Bit.Core.Helpers (getRemoteTargetType)
+import Bit.Core.Helpers (getRemoteType)
 import qualified Bit.Core.Fetch as Fetch
 import qualified Bit.Verify as Verify
 import Bit.Concurrency (Concurrency(..))
@@ -58,8 +58,10 @@ addRemote name pathOrUrl = do
     pathType <- Device.classifyRemotePath pathOrUrl
     case pathType of
         Device.CloudRemote url -> do
-            Device.writeRemoteFile cwd name (Device.TargetCloud url)
-            void $ Git.addRemote name url
+            Device.writeRemoteFile cwd name Device.RemoteCloud (Just url)
+            -- Register bundle path as named git remote (bundle may not exist yet)
+            let bundleGitPath = fromGitRelPath (bundleGitRelPath fetchedBundle)
+            void $ Git.addRemote name bundleGitPath
             putStrLn $ "Remote '" ++ name ++ "' added (" ++ url ++ ")."
         Device.FilesystemPath filePath -> addRemoteFilesystem cwd name filePath
 
@@ -75,6 +77,21 @@ addRemoteFilesystem cwd name filePath = do
         hPutStrLn stderr ("fatal: Path does not exist or is not accessible: " ++ filePath)
         exitWith (ExitFailure 1)
     volRoot <- Device.getVolumeRoot absPath
+    isFixed <- Device.isFixedDrive volRoot
+    if isFixed
+        then addRemoteFixed cwd name absPath
+        else addRemoteDevice cwd name absPath volRoot
+
+-- | Add a fixed-drive filesystem remote. Path stored only in git config.
+addRemoteFixed :: FilePath -> String -> FilePath -> IO ()
+addRemoteFixed cwd name absPath = do
+    void $ Git.addRemote name (absPath </> ".bit" </> "index")
+    Device.writeRemoteFile cwd name Device.RemoteFilesystem Nothing
+    putStrLn $ "Remote '" ++ name ++ "' added (" ++ absPath ++ ")."
+
+-- | Add a removable/network device remote. Uses device UUID tracking.
+addRemoteDevice :: FilePath -> String -> FilePath -> FilePath -> IO ()
+addRemoteDevice cwd name absPath volRoot = do
     let relPath = Device.getRelativePath volRoot absPath
     mStoreUuid <- Device.readBitStore volRoot
     mExistingDevice <- maybe (pure Nothing) (Device.findDeviceByUuid cwd) mStoreUuid
@@ -82,7 +99,8 @@ addRemoteFilesystem cwd name filePath = do
         (Just _u, Just dev) -> do
             putStrLn $ "Using existing device '" ++ dev ++ "'."
             _mInfo <- Device.readDeviceFile cwd dev
-            Device.writeRemoteFile cwd name (Device.TargetDevice dev relPath)
+            Device.writeRemoteFile cwd name Device.RemoteDevice (Just (dev ++ ":" ++ relPath))
+            void $ Git.addRemote name (absPath </> ".bit" </> "index")
             putStrLn $ "Remote '" ++ name ++ "' → " ++ dev ++ ":" ++ relPath
             putStrLn $ "(using existing device '" ++ dev ++ "')"
             pure ()
@@ -90,19 +108,21 @@ addRemoteFilesystem cwd name filePath = do
             mLabel <- Device.getVolumeLabel volRoot
             deviceName' <- promptDeviceName cwd volRoot mLabel
             registerDevice cwd name volRoot deviceName' relPath u
+            void $ Git.addRemote name (absPath </> ".bit" </> "index")
         (Nothing, _) -> do
             mLabel <- Device.getVolumeLabel volRoot
             deviceName' <- promptDeviceName cwd volRoot mLabel
             u <- Device.generateStoreUuid
             Device.writeBitStore volRoot u
             registerDevice cwd name volRoot deviceName' relPath u
+            void $ Git.addRemote name (absPath </> ".bit" </> "index")
     case result of
         Right () -> pure ()
         Left _err -> do
             -- Cannot create .bit-store at volume root (e.g. permission denied on C:\)
             -- Fall back to path-based storage for local directories
-            Device.writeRemoteFile cwd name (Device.TargetLocalPath absPath)
-            void $ Git.addRemote name absPath
+            Device.writeRemoteFile cwd name Device.RemoteFilesystem Nothing
+            void $ Git.addRemote name (absPath </> ".bit" </> "index")
             putStrLn $ "Remote '" ++ name ++ "' added (" ++ absPath ++ ")."
 
 -- | Detect storage type, get serial, write device + remote files, and print confirmation.
@@ -114,7 +134,7 @@ registerDevice cwd name volRoot deviceName' relPath u = do
         Device.Physical -> Device.getHardwareSerial volRoot
         Device.Network -> pure Nothing
     Device.writeDeviceFile cwd deviceName' (Device.DeviceInfo u storeType' mSerial)
-    Device.writeRemoteFile cwd name (Device.TargetDevice deviceName' relPath)
+    Device.writeRemoteFile cwd name Device.RemoteDevice (Just (deviceName' ++ ":" ++ relPath))
     putStrLn $ "Remote '" ++ name ++ "' → " ++ deviceName' ++ ":" ++ relPath
     putStrLn $ "Device '" ++ deviceName' ++ "' registered (" ++ displayStorageType storeType' ++ ")."
 
@@ -139,45 +159,54 @@ remoteShow mRemoteName = do
                     remoteNames <- liftIO $ Dir.listDirectory remotesDir
                     if null remoteNames
                         then liftIO $ putStrLn "No remotes configured. Use 'bit remote add <name> <url>' to add one."
-                        else liftIO $ forM_ remoteNames $ \name -> do
-                            mTarget <- Device.readRemoteFile cwd name
-                            display <- formatRemoteDisplay cwd name mTarget
+                        else liftIO $ forM_ remoteNames $ \rName -> do
+                            mRemote' <- resolveRemote cwd rName
+                            mType' <- Device.readRemoteType cwd rName
+                            display <- case mRemote' of
+                                Just r  -> formatRemoteDisplayByType cwd rName mType' r
+                                Nothing -> do
+                                    mTarget' <- Device.readRemoteFile cwd rName
+                                    formatRemoteDisplay cwd rName mTarget'
                             putStrLn display
         Just name -> do
-            (mRemote, mTarget) <- liftIO $ (,) <$> resolveRemote cwd name <*> Device.readRemoteFile cwd name
-            display <- liftIO $ case mTarget of
-                Just _ -> formatRemoteDisplay cwd name mTarget
-                Nothing -> pure (name ++ " → " ++ maybe "(not configured)" displayRemote mRemote)
+            (mRemote, mType) <- liftIO $ (,) <$> resolveRemote cwd name <*> Device.readRemoteType cwd name
             case mRemote of
                 Nothing -> liftIO $ putStrLn "No remotes configured. Use 'bit remote add <name> <url>' to add one."
                 Just remote -> do
+                    -- Display the remote line
+                    display <- liftIO $ formatRemoteDisplayByType cwd name mType remote
                     liftIO $ do
                         putStrLn display
                         putStrLn ""
-                    let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
-                    hasBundle <- liftIO $ Dir.doesFileExist fetchedPath
-                    if hasBundle
-                        then liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
+                    -- Show status: ref-based for filesystem/device, bundle-based for cloud
+                    let isFs = maybe False Device.isFilesystemType mType
+                    if isFs
+                        then liftIO $ showRefBasedRemoteStatus name (remoteUrl remote)
                         else do
-                            maybeBundlePath <- liftIO $ Fetch.fetchRemoteBundle remote
-                            case maybeBundlePath of
-                                Just bPath -> do
-                                    outcome <- liftIO $ Fetch.saveFetchedBundle remote (Just bPath)
-                                    case outcome of
-                                        Fetch.FetchError err -> liftIO $ hPutStrLn stderr $ "Warning: " ++ err
-                                        _ -> pure ()  -- No need to render fetch output in remote show
-                                    liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
-                                Nothing -> liftIO $ do
-                                    putStrLn $ "  Fetch URL: " ++ remoteUrl remote
-                                    putStrLn $ "  Push  URL: " ++ remoteUrl remote
-                                    putStrLn ""
-                                    putStrLn "  HEAD branch: (unknown)"
-                                    putStrLn ""
-                                    putStrLn "  Local branch configured for 'bit pull':"
-                                    putStrLn "    main merges with remote (unknown)"
-                                    putStrLn ""
-                                    putStrLn "  Local refs configured for 'bit push':"
-                                    putStrLn "    main pushes to main (unknown)"
+                            let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
+                            hasBundle <- liftIO $ Dir.doesFileExist fetchedPath
+                            if hasBundle
+                                then liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
+                                else do
+                                    maybeBundlePath <- liftIO $ Fetch.fetchRemoteBundle remote
+                                    case maybeBundlePath of
+                                        Just bPath -> do
+                                            outcome <- liftIO $ Fetch.saveFetchedBundle remote (Just bPath)
+                                            case outcome of
+                                                Fetch.FetchError err -> liftIO $ hPutStrLn stderr $ "Warning: " ++ err
+                                                _ -> pure ()
+                                            liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
+                                        Nothing -> liftIO $ do
+                                            putStrLn $ "  Fetch URL: " ++ remoteUrl remote
+                                            putStrLn $ "  Push  URL: " ++ remoteUrl remote
+                                            putStrLn ""
+                                            putStrLn "  HEAD branch: (unknown)"
+                                            putStrLn ""
+                                            putStrLn "  Local branch configured for 'bit pull':"
+                                            putStrLn "    main merges with remote (unknown)"
+                                            putStrLn ""
+                                            putStrLn "  Local refs configured for 'bit push':"
+                                            putStrLn "    main pushes to main (unknown)"
 
 -- ============================================================================
 -- Remote repair
@@ -215,8 +244,8 @@ remoteRepair mName concurrency = do
             putStrLn ""
 
             -- Determine if filesystem or cloud remote
-            mTarget <- getRemoteTargetType cwd (remoteName remote)
-            let isFilesystem = maybe False Device.isFilesystemTarget mTarget
+            mType <- getRemoteType cwd (remoteName remote)
+            let isFilesystem = maybe False Device.isFilesystemType mType
                 remotePath = remoteUrl remote
 
             if isFilesystem
@@ -450,6 +479,74 @@ formatRemoteDisplay cwd name = maybe (pure (name ++ " → (no target)")) $ \case
             Device.Resolved mount -> pure (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", connected at " ++ mount ++ ")")
             Device.NotConnected _ -> pure (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", NOT CONNECTED)")
     Device.TargetCloud u -> pure (name ++ " → " ++ u ++ " (cloud)")
+
+-- | Format remote display line using RemoteType instead of RemoteTarget.
+formatRemoteDisplayByType :: FilePath -> String -> Maybe Device.RemoteType -> Remote -> IO String
+formatRemoteDisplayByType cwd name mType remote = case mType of
+    Just Device.RemoteFilesystem -> pure (name ++ " → " ++ remoteUrl remote ++ " (filesystem)")
+    Just Device.RemoteDevice -> do
+        -- Read the target to get device info
+        mTarget <- Device.readRemoteFile cwd name
+        case mTarget of
+            Just (Device.TargetDevice dev devPath) -> do
+                mInfo <- Device.readDeviceFile cwd dev
+                let typ = maybe "unknown" (displayStorageType . Device.deviceType) mInfo
+                pure (name ++ " → " ++ dev ++ ":" ++ devPath ++ " (" ++ typ ++ ", connected at " ++ remoteUrl remote ++ ")")
+            _ -> pure (name ++ " → " ++ displayRemote remote ++ " (device)")
+    Just Device.RemoteCloud -> pure (name ++ " → " ++ remoteUrl remote ++ " (cloud)")
+    Nothing -> pure (name ++ " → " ++ displayRemote remote)
+
+-- | Show remote status using git tracking refs (for filesystem/device remotes).
+-- No bundle needed — reads directly from refs/remotes/<name>/main.
+showRefBasedRemoteStatus :: String -> String -> IO ()
+showRefBasedRemoteStatus name url = do
+    maybeLocal <- Git.getLocalHead
+    (refCode, refOut, _) <- Git.runGitWithOutput ["rev-parse", Git.remoteTrackingRef name]
+    let maybeRemote = case refCode of
+            ExitSuccess -> Just (filter (/= '\n') refOut)
+            _ -> Nothing
+    putStrLn $ "* remote " ++ name
+    putStrLn $ "  Fetch URL: " ++ url
+    putStrLn $ "  Push  URL: " ++ url
+    putStrLn ""
+    case (maybeLocal, maybeRemote) of
+        (Nothing, Just _) -> do
+            putStrLn "  HEAD branch: (unknown)"
+            putStrLn ""
+            putStrLn "  Local branch configured for 'bit pull':"
+            putStrLn "    main merges with remote (unknown)"
+            putStrLn ""
+            putStrLn "  Local refs configured for 'bit push':"
+            putStrLn "    main pushes to main (local out of date)"
+        (Just lHash, Just rHash) -> do
+            putStrLn "  HEAD branch: main"
+            putStrLn ""
+            if lHash == rHash
+                then do
+                    putStrLn "  Local branch configured for 'bit pull':"
+                    putStrLn "    main merges with remote main"
+                    putStrLn ""
+                    putStrLn "  Local refs configured for 'bit push':"
+                    putStrLn "    main pushes to main (up to date)"
+                else do
+                    status <- classifyPushStatus lHash rHash
+                    putStrLn "  Local branch configured for 'bit pull':"
+                    putStrLn "    main merges with remote main"
+                    putStrLn ""
+                    putStrLn "  Local refs configured for 'bit push':"
+                    case status of
+                        PushRefFastForwardable -> putStrLn "    main pushes to main (fast-forwardable)"
+                        PushRefLocalOutOfDate  -> putStrLn "    main pushes to main (local out of date)"
+                        PushRefDiverged       -> putStrLn "    main pushes to main (diverged)"
+                        PushRefUpToDate       -> putStrLn "    main pushes to main (up to date)"
+        _ -> do
+            putStrLn "  HEAD branch: (unknown)"
+            putStrLn ""
+            putStrLn "  Local branch configured for 'bit pull':"
+            putStrLn "    main merges with remote (unknown)"
+            putStrLn ""
+            putStrLn "  Local refs configured for 'bit push':"
+            putStrLn "    main pushes to main (unknown)"
 
 showRemoteStatusFromBundle :: String -> Maybe String -> IO ()
 showRemoteStatusFromBundle name mUrl = do

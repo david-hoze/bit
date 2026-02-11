@@ -25,7 +25,7 @@ import Internal.Config (fetchedBundle)
 import Bit.Progress (reportProgress, clearProgress)
 
 import qualified Bit.Device as Device
-import Bit.Core.Helpers (withRemote, printVerifyIssue, getRemoteTargetType)
+import Bit.Core.Helpers (withRemote, printVerifyIssue, getRemoteType)
 import Bit.Remote (Remote, remoteName, remoteUrl)
 
 -- | Whether to verify local working tree or remote.
@@ -36,8 +36,8 @@ verify :: VerifyTarget -> Concurrency -> BitM ()
 verify target concurrency = case target of
   VerifyRemote -> withRemote $ \remote -> do
       cwd <- asks envCwd
-      mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
-      let isFilesystem = maybe False Device.isFilesystemTarget mTarget
+      mType <- liftIO $ getRemoteType cwd (remoteName remote)
+      let isFilesystem = maybe False Device.isFilesystemType mType
       if isFilesystem
         then verifyFilesystemRemote (remoteUrl remote) concurrency
         else verifyCloudRemote cwd remote concurrency

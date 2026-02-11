@@ -43,7 +43,7 @@ import Control.Concurrent (getNumCapabilities)
 import System.IO (stderr, hPutStrLn)
 import Bit.Utils (toPosix)
 import Bit.Plan (RcloneAction(..))
-import Bit.Remote (Remote)
+import Bit.Remote (Remote, remoteName)
 import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -476,13 +476,14 @@ getFileSizeFromIndex localRoot filePath = do
 
 -- | Sync binaries after a successful merge commit
 syncBinariesAfterMerge :: FileTransport -> Remote -> Maybe String -> BitM ()
-syncBinariesAfterMerge transport _remote oldHead = do
+syncBinariesAfterMerge transport remote oldHead = do
     cwd <- asks envCwd
+    let name = remoteName remote
     liftIO $ putStrLn "Syncing binaries... done."
     -- Apply diff-based sync or full sync depending on whether we have an old HEAD
     liftIO $ maybe (transportSyncAllFiles transport cwd) (applyMergeToWorkingDir transport cwd) oldHead
     maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
-    liftIO $ traverse_ (void . Git.updateRemoteTrackingBranchToHash) maybeRemoteHash
+    liftIO $ traverse_ (void . Git.updateRemoteTrackingBranchToHash name) maybeRemoteHash
 
 -- | Executes/Prints the command to be run in the shell (push: local -> remote).
 executeCommand :: FilePath -> Remote -> RcloneAction -> IO ()

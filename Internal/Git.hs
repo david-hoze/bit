@@ -19,20 +19,15 @@ module Internal.Git
     , restore
     , checkout
     , status
-    , setupRemote
     , addRemote
     , getRemoteUrl
     , getTrackedRemoteName
-    , fetchFromBundle
     , updateRemoteTrackingBranch
     , updateRemoteTrackingBranchToHead
     , updateRemoteTrackingBranchToHash
     , setupBranchTracking
     , setupBranchTrackingFor
     , unsetBranchUpstream
-    , mergeOriginMain
-    , mergeNoCommit
-    , mergeNoCommitAllowUnrelated
     , mergeAbort
     , isMergeInProgress
     , checkoutRemoteAsMain
@@ -285,45 +280,29 @@ getTrackedRemoteName = do
         ExitSuccess -> filter (/= '\n') out
         _ -> "origin"
 
--- | Set up a git remote named "origin" pointing to the given URL (legacy / internal use)
-setupRemote :: String -> IO ExitCode
-setupRemote url = addRemote "origin" url
+-- | Update the remote tracking branch refs/remotes/<name>/main to point to the hash from the bundle.
+-- Use when the objects are already in the repo (e.g. after push).
+updateRemoteTrackingBranch :: String -> BundleName -> IO ExitCode
+updateRemoteTrackingBranch name bundleName =
+    getHashFromBundle bundleName >>= maybe (pure (ExitFailure 1)) (updateRemoteTrackingBranchToHash name)
 
--- | Pull from a bundle file into the local repo: fetch the bundle's refs so all
--- objects and refs/remotes/origin/main exist in .rgit/index/.git. This is the "real"
--- pull from the fetched bundle; without it, the ref would point to a hash not in the repo.
-fetchFromBundle :: BundleName -> IO ExitCode
-fetchFromBundle bundleName = do
-    let (GitRelPath bundle) = bundleGitRelPath bundleName
-    (code, out, err) <- readProcessWithExitCode "git"
-        (baseFlags ++ ["fetch", bundle, "+refs/heads/main:" ++ remoteTrackingRef "origin"]) ""
-    putStr out
-    hPutStr stderr err
-    pure code
+-- | Set refs/remotes/<name>/main to a specific hash. Use after a successful pull so status shows
+-- "up to date with '<name>/main'" instead of "ahead by N commits".
+updateRemoteTrackingBranchToHash :: String -> String -> IO ExitCode
+updateRemoteTrackingBranchToHash name hash =
+    readProcessWithExitCode "git" (baseFlags ++ ["update-ref", remoteTrackingRef name, hash]) "" >>= \(c, _, _) -> pure c
 
--- | Update the remote tracking branch refs/remotes/origin/main to point to the hash from the bundle.
--- Use when the objects are already in the repo (e.g. after push); for fetch/pull use fetchFromBundle.
-updateRemoteTrackingBranch :: BundleName -> IO ExitCode
-updateRemoteTrackingBranch bundleName =
-    getHashFromBundle bundleName >>= maybe (pure (ExitFailure 1)) updateRemoteTrackingBranchToHash
-
--- | Set refs/remotes/origin/main to a specific hash. Use after a successful pull so status shows
--- "up to date with 'origin/main'" instead of "ahead by N commits".
-updateRemoteTrackingBranchToHash :: String -> IO ExitCode
-updateRemoteTrackingBranchToHash hash =
-    readProcessWithExitCode "git" (baseFlags ++ ["update-ref", remoteTrackingRef "origin", hash]) "" >>= \(c, _, _) -> pure c
-
--- | Set refs/remotes/origin/main to current HEAD.
+-- | Set refs/remotes/<name>/main to current HEAD.
 -- WARNING: Only correct after PUSH (where remote now matches local HEAD).
--- After PULL/MERGE, use updateRemoteTrackingBranchToHash with the bundle hash instead,
+-- After PULL/MERGE, use updateRemoteTrackingBranchToHash with the remote hash instead,
 -- because HEAD includes local merge commits the remote doesn't have.
 -- See: "Tracking Ref Invariant" in docs/spec.md.
-updateRemoteTrackingBranchToHead :: IO ExitCode
-updateRemoteTrackingBranchToHead = do
+updateRemoteTrackingBranchToHead :: String -> IO ExitCode
+updateRemoteTrackingBranchToHead name = do
     (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["rev-parse", "HEAD"]) ""
     case filter (/= '\n') out of
         hash | code == ExitSuccess && not (null hash) ->
-            updateRemoteTrackingBranchToHash hash
+            updateRemoteTrackingBranchToHash name hash
         _ -> pure (ExitFailure 1)
 
 -- | Set up the local branch to track a specific remote
@@ -349,24 +328,11 @@ unsetBranchUpstream = do
     (code, _, _) <- readProcessWithExitCode "git" (baseFlags ++ ["branch", "--unset-upstream"]) ""
     pure code
 
--- | Merge refs/remotes/origin/main into the current branch (HEAD).
--- Used by rgit pull after fetching the remote bundle.
-mergeOriginMain :: IO ExitCode
-mergeOriginMain = runGitRaw ["merge", remoteTrackingRef "origin", "--no-edit"]
-
 -- | Run git with baseFlags; returns (exitCode, stdout, stderr). Does not rewrite hints.
 runGitWithOutput :: [String] -> IO (ExitCode, String, String)
 runGitWithOutput args = do
   let fullArgs = baseFlags ++ ["-c", "color.ui=never"] ++ args
   readProcessWithExitCode "git" fullArgs ""
-
--- | Merge without committing (for pull flow). Returns (exitCode, stdout, stderr).
-mergeNoCommit :: IO (ExitCode, String, String)
-mergeNoCommit = runGitWithOutput ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
-
--- | Like mergeNoCommit but allows merging unrelated histories (e.g. first pull into a fresh init).
-mergeNoCommitAllowUnrelated :: IO (ExitCode, String, String)
-mergeNoCommitAllowUnrelated = runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", remoteTrackingRef "origin"]
 
 -- | Abort an in-progress merge.
 mergeAbort :: IO ExitCode
@@ -382,7 +348,7 @@ isMergeInProgress = do
   (code, _, _) <- runGitWithOutput ["rev-parse", "--verify", "MERGE_HEAD"]
   pure (code == ExitSuccess)
 
--- | Checkout refs/remotes/origin/main as the local main branch.
+-- | Checkout refs/remotes/<name>/main as the local main branch.
 -- Used on first pull when there are no local commits (unborn branch).
 -- This avoids the need for merge and gives us the remote's history directly.
 --
@@ -391,12 +357,12 @@ isMergeInProgress = do
 -- Callers who need tracking must call setupBranchTrackingFor explicitly.
 --
 -- Uses -f (force) to overwrite any local files created during init.
-checkoutRemoteAsMain :: IO ExitCode
-checkoutRemoteAsMain = do
+checkoutRemoteAsMain :: String -> IO ExitCode
+checkoutRemoteAsMain name = do
   -- Use checkout -B to create/reset branch and checkout in one step
   -- Use -f to force overwrite of any local files (like .gitattributes from init)
   -- Use --no-track to prevent auto-setting branch.main.remote (git-standard: require explicit -u)
-  (code, _, _) <- runGitWithOutput ["checkout", "-f", "-B", "main", "--no-track", remoteTrackingRef "origin"]
+  (code, _, _) <- runGitWithOutput ["checkout", "-f", "-B", "main", "--no-track", remoteTrackingRef name]
   pure code
 
 -- | Paths relative to work tree (index/...) that are unmerged.

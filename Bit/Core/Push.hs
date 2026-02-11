@@ -20,7 +20,6 @@ import System.FilePath ((</>))
 import Control.Monad (when, unless, void)
 import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
-import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (fetchedBundle, BundleName(..), bundleCwdPath, fromCwdPath)
@@ -43,7 +42,7 @@ import Bit.Concurrency (Concurrency(..))
 import qualified Bit.Device as Device
 import System.Directory (copyFile)
 import Bit.Core.Helpers
-    ( getRemoteTargetType
+    ( getRemoteType
     , withRemote
     , getLocalHeadE
     , checkIsAheadE
@@ -78,9 +77,9 @@ push = withRemote $ \remote -> do
             exitWith (ExitFailure 1)
 
     -- Determine if this is a filesystem or cloud remote
-    mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
-    case mTarget of
-        Just t | Device.isFilesystemTarget t -> liftIO $ filesystemPush cwd remote
+    mType <- liftIO $ getRemoteType cwd (remoteName remote)
+    case mType of
+        Just t | Device.isFilesystemType t -> liftIO $ filesystemPush cwd remote
         _ -> cloudPush remote  -- Cloud remote or no target info (use cloud flow)
 
 -- | Push to a cloud remote (original flow, unchanged).
@@ -145,38 +144,38 @@ filesystemPush cwd remote = do
         putStrLn "First push: initializing bit repo at remote..."
         initializeRepoAt remotePath
     
-    -- 2. Fetch local into remote
+    -- 2. Fetch local into remote (at the remote, "origin" is the local side)
     let localIndexGit = cwd </> ".bit" </> "index" </> ".git"
     let remoteIndex = remotePath </> ".bit" </> "index"
-    
+
     putStrLn "Fetching local commits into remote..."
-    (fetchCode, _fetchOut, fetchErr) <- Git.runGitAt remoteIndex 
-        ["fetch", localIndexGit, "main:" ++ remoteTrackingRef "origin"]
-    
+    (fetchCode, _fetchOut, fetchErr) <- Git.runGitAt remoteIndex
+        ["fetch", localIndexGit, "main:" ++ Git.remoteTrackingRef "origin"]
+
     when (fetchCode /= ExitSuccess) $ do
         hPutStrLn stderr $ "Error fetching into remote: " ++ fetchErr
         exitWith fetchCode
-    
+
     -- 3. Capture remote HEAD before merge
     (oldHeadCode, oldHeadOut, _) <- Git.runGitAt remoteIndex ["rev-parse", "HEAD"]
     let mOldHead = case oldHeadCode of
             ExitSuccess -> Just (trimGitOutput oldHeadOut)
             _ -> Nothing
-    
+
     -- 4. Check if remote HEAD is ancestor of what we're pushing (fast-forward check)
     traverse_ (const $ do
-        (checkCode, _, _) <- Git.runGitAt remoteIndex 
-            ["merge-base", "--is-ancestor", "HEAD", remoteTrackingRef "origin"]
+        (checkCode, _, _) <- Git.runGitAt remoteIndex
+            ["merge-base", "--is-ancestor", "HEAD", Git.remoteTrackingRef "origin"]
         when (checkCode /= ExitSuccess) $ do
             hPutStrLn stderr "error: Remote has local commits that you don't have."
             hPutStrLn stderr "hint: Run 'bit pull' to merge remote changes first, then push again."
             exitWith (ExitFailure 1)
         ) mOldHead
-    
+
     -- 5. Merge at remote (ff-only)
     putStrLn "Merging at remote (fast-forward only)..."
-    (mergeCode, _mergeOut, mergeErr) <- Git.runGitAt remoteIndex 
-        ["merge", "--ff-only", remoteTrackingRef "origin"]
+    (mergeCode, _mergeOut, mergeErr) <- Git.runGitAt remoteIndex
+        ["merge", "--ff-only", Git.remoteTrackingRef "origin"]
     
     case mergeCode of
         ExitSuccess -> do
@@ -201,7 +200,7 @@ filesystemPush cwd remote = do
             
             -- 8. Update local tracking ref
             putStrLn "Updating local tracking ref..."
-            void $ Git.updateRemoteTrackingBranchToHead
+            void $ Git.updateRemoteTrackingBranchToHead (remoteName remote)
 
             putStrLn "Push complete."
         _ -> do
@@ -250,12 +249,15 @@ pushToRemote remote = do
   updateLocalBundleAfterPush
 
 -- | After a successful push, update the local fetched_remote.bundle to current HEAD
--- so rgit status shows up to date instead of "ahead of remote".
+-- so bit status shows up to date instead of "ahead of remote".
 updateLocalBundleAfterPush :: BitM ()
 updateLocalBundleAfterPush = do
+    mRemote <- asks envRemote
     code <- liftIO $ Git.createBundle fetchedBundle
     case code of
-        ExitSuccess -> void $ liftIO $ Git.updateRemoteTrackingBranch fetchedBundle
+        ExitSuccess -> case mRemote of
+            Just remote -> void $ liftIO $ Git.updateRemoteTrackingBranchToHead (remoteName remote)
+            Nothing     -> pure ()
         _ -> pure ()
 
 syncRemoteFiles :: BitM ()

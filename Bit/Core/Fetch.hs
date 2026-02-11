@@ -15,9 +15,8 @@ module Bit.Core.Fetch
 
 import qualified System.Directory as Dir
 import System.FilePath ((</>))
-import Control.Monad (when)
+import Control.Monad (when, void)
 import System.Exit (ExitCode(..), exitWith)
-import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import System.IO (stderr, hPutStrLn)
@@ -25,11 +24,11 @@ import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(.
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
-import Internal.Config (fromCwdPath, bundleCwdPath, fetchedBundle)
-import Bit.Core.Helpers (getRemoteTargetType, withRemote, safeRemove, checkFilesystemRemoteIsRepo)
+import Internal.Config (fromCwdPath, bundleCwdPath, fetchedBundle, bundleGitRelPath, fromGitRelPath)
+import Bit.Core.Helpers (getRemoteType, withRemote, safeRemove, checkFilesystemRemoteIsRepo)
 import qualified Bit.Device as Device
 import System.Directory (copyFile)
-import Control.Monad (void)
+import Bit.Utils (trimGitOutput)
 
 -- ============================================================================
 -- Types
@@ -49,11 +48,11 @@ data FetchOutcome
 fetch :: BitM ()
 fetch = withRemote $ \remote -> do
     cwd <- asks envCwd
-    
+
     -- Determine if this is a filesystem or cloud remote
-    mTarget <- liftIO $ getRemoteTargetType cwd (remoteName remote)
-    case mTarget of
-        Just t | Device.isFilesystemTarget t -> liftIO $ filesystemFetch cwd remote
+    mType <- liftIO $ getRemoteType cwd (remoteName remote)
+    case mType of
+        Just t | Device.isFilesystemType t -> liftIO $ filesystemFetch cwd remote
         _ -> cloudFetch remote  -- Cloud remote or no target info (use cloud flow)
 
 -- | Fetch from a cloud remote (original flow, unchanged).
@@ -63,29 +62,29 @@ cloudFetch remote = do
     outcome <- liftIO $ saveFetchedBundle remote mb
     liftIO $ renderFetchOutcome remote outcome
 
--- | Fetch from a filesystem remote. Fetches commits without merging or syncing files.
+-- | Fetch from a filesystem remote using named git remote.
 filesystemFetch :: FilePath -> Remote -> IO ()
 filesystemFetch _cwd remote = do
-    let remotePath = remoteUrl remote
+    let name = remoteName remote
+        remotePath = remoteUrl remote
     putStrLn $ "Fetching from filesystem remote: " ++ remotePath
-    
+
     -- Check if remote has .bit/ directory
     checkFilesystemRemoteIsRepo remotePath
-    
-    -- Fetch remote into local
-    let remoteIndexGit = remotePath </> ".bit" </> "index" </> ".git"
-    
+
+    -- Ensure git remote URL is current (device may have moved)
+    void $ Git.addRemote name (remotePath </> ".bit" </> "index")
+
+    -- Native git fetch — handles refspec automatically
     putStrLn "Fetching remote commits..."
-    (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput 
-        ["fetch", remoteIndexGit, "main:" ++ remoteTrackingRef "origin"]
-    
+    (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput ["fetch", name]
+
     when (fetchCode /= ExitSuccess) $ do
         hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
         exitWith fetchCode
-    
-    -- Output fetch results similar to cloud fetch
-    hPutStrLn stderr $ "From " ++ remoteName remote
-    hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
+
+    hPutStrLn stderr $ "From " ++ name
+    hPutStrLn stderr $ " * [new branch]      main       -> " ++ name ++ "/main"
 
     putStrLn "Fetch complete."
 
@@ -170,35 +169,51 @@ fetchRemoteBundle remote = do
 saveFetchedBundle :: Remote -> Maybe FilePath -> IO FetchOutcome
 saveFetchedBundle _remote Nothing = pure (FetchError "No bundle to save")
 saveFetchedBundle remote (Just bPath) = do
-    let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
-    hadPrevious <- Dir.doesFileExist fetchedPath
-    maybeOldHash <- if hadPrevious
-        then Git.getHashFromBundle fetchedBundle
-        else pure Nothing
+    let name = remoteName remote
+        fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
+        bundleGitPath = fromGitRelPath (bundleGitRelPath fetchedBundle)
 
-    -- Copy FIRST, then read hash from the correct location
+    -- Read old tracking ref hash (before overwriting)
+    maybeOldHash <- revParseTrackingRef name
+
+    -- Copy bundle to local path
     copyFile bPath fetchedPath
     safeRemove bPath
-    maybeNewHash <- Git.getHashFromBundle fetchedBundle
 
-    -- Ensure the internal git remote "origin" points to the right URL.
-    -- This is the git-internal remote used for fetching refs from bundles,
-    -- NOT the user's configured bit remotes (those are in .bit/remotes/).
-    -- This ensures "git fetch origin/main" works correctly for pull/merge.
-    void $ Git.setupRemote (remoteUrl remote)
+    -- Register bundle as named git remote and fetch objects + refs
+    void $ Git.addRemote name bundleGitPath
+    (fetchCode, _, _) <- Git.runGitWithOutput ["fetch", name]
 
-    -- Update remote tracking branch and determine outcome
-    case (maybeOldHash, maybeNewHash) of
-        -- If we already had a fetched bundle and the hash is unchanged, silent.
-        -- Tests expect `bit fetch` to produce no output in this case.
+    -- Read new tracking ref hash (populated by git fetch)
+    maybeNewHash <- if fetchCode == ExitSuccess
+        then revParseTrackingRef name
+        else Git.getHashFromBundle fetchedBundle  -- fallback
+
+    -- If git fetch didn't update the ref (e.g. bundle has no matching refspec),
+    -- manually set it from the bundle hash
+    when (fetchCode /= ExitSuccess || maybeNewHash == Nothing) $ do
+        mHash <- Git.getHashFromBundle fetchedBundle
+        case mHash of
+            Just h  -> void $ Git.updateRemoteTrackingBranchToHash name h
+            Nothing -> pure ()
+
+    -- Determine outcome
+    let effectiveNewHash = case maybeNewHash of
+            Just h  -> Just h
+            Nothing -> Nothing  -- will be caught below
+    case (maybeOldHash, effectiveNewHash) of
         (Just oldHash, Just newHash) | oldHash == newHash -> pure UpToDate
-        (Just oldHash, Just newHash) -> do
-            void $ Git.updateRemoteTrackingBranch fetchedBundle
-            pure (Updated oldHash newHash)
-        (Nothing, Just newHash) -> do
-            void $ Git.updateRemoteTrackingBranch fetchedBundle
-            pure (FetchedFirst newHash)
+        (Just oldHash, Just newHash) -> pure (Updated oldHash newHash)
+        (Nothing, Just newHash) -> pure (FetchedFirst newHash)
         _ -> pure (FetchError "Could not extract hash from bundle")
+
+-- | Read the tracking ref for a named remote. Returns Nothing if ref doesn't exist.
+revParseTrackingRef :: String -> IO (Maybe String)
+revParseTrackingRef name = do
+    (code, out, _) <- Git.runGitWithOutput ["rev-parse", Git.remoteTrackingRef name]
+    pure $ case code of
+        ExitSuccess -> Just (trimGitOutput out)
+        _ -> Nothing
 
 -- | Render fetch outcome to stdout/stderr.
 renderFetchOutcome :: Remote -> FetchOutcome -> IO ()
