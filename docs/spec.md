@@ -217,6 +217,7 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 | `Remote` | `bit.Remote` | Resolved remote: name + URL. Smart constructor, `remoteUrl` for Transport only |
 | `RemoteState` | `bit.Remote` | Remote classification: Empty, ValidRgit, NonRgitOccupied, Corrupted, NetworkError |
 | `FetchResult` | `bit.Remote` | Bundle fetch result: BundleFound, RemoteEmpty, NetworkError |
+| `FetchOutcome` | `bit.Core.Fetch` | UpToDate, Updated { foOldHash, foNewHash }, FetchedFirst, FetchError |
 | `GitDiff` | `bit.Diff` | Added, Modified, Deleted, Renamed — pure diff result |
 | `RcloneAction` | `bit.Plan` | Copy, Move, Delete, Swap — concrete rclone operations |
 | `FileIndex` | `bit.Diff` | Dual-indexed file map (byPath + byHash) for efficient diff/rename detection |

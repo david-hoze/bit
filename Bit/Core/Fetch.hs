@@ -36,7 +36,7 @@ import Bit.Utils (trimGitOutput)
 
 data FetchOutcome
     = UpToDate
-    | Updated String String  -- old hash -> new hash
+    | Updated { foOldHash :: String, foNewHash :: String }
     | FetchedFirst String    -- new hash
     | FetchError String
     deriving (Show, Eq)
@@ -203,7 +203,7 @@ saveFetchedBundle remote (Just bPath) = do
             Nothing -> Nothing  -- will be caught below
     case (maybeOldHash, effectiveNewHash) of
         (Just oldHash, Just newHash) | oldHash == newHash -> pure UpToDate
-        (Just oldHash, Just newHash) -> pure (Updated oldHash newHash)
+        (Just oldHash, Just newHash) -> pure (Updated { foOldHash = oldHash, foNewHash = newHash })
         (Nothing, Just newHash) -> pure (FetchedFirst newHash)
         _ -> pure (FetchError "Could not extract hash from bundle")
 
@@ -218,9 +218,9 @@ revParseTrackingRef name = do
 -- | Render fetch outcome to stdout/stderr.
 renderFetchOutcome :: Remote -> FetchOutcome -> IO ()
 renderFetchOutcome _remote UpToDate = pure ()  -- Silent on up-to-date
-renderFetchOutcome _remote (Updated oldHash newHash) = do
+renderFetchOutcome _remote (Updated { foOldHash = old, foNewHash = new }) = do
     putStrLn "Scanning remote..."
-    putStrLn $ "Updated: " ++ oldHash ++ " -> " ++ newHash
+    putStrLn $ "Updated: " ++ old ++ " -> " ++ new
     putStrLn "Fetch complete."
 renderFetchOutcome remote (FetchedFirst newHash) = do
     putStrLn "Scanning remote..."
