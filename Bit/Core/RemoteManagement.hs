@@ -76,12 +76,18 @@ addRemoteFilesystem cwd name filePath = do
     exists <- Dir.doesDirectoryExist absPath
     unless exists $ do
         hPutStrLn stderr ("fatal: Path does not exist or is not accessible: " ++ filePath)
+        case filePath of
+            ('\\':_) -> uncHint
+            ('/':'/':_) -> uncHint
+            _ -> pure ()
         exitWith (ExitFailure 1)
     volRoot <- Device.getVolumeRoot absPath
     isFixed <- Device.isFixedDrive volRoot
     if isFixed
         then addRemoteFixed cwd name absPath
         else addRemoteDevice cwd name absPath volRoot
+  where
+    uncHint = hPutStrLn stderr "hint: For UNC paths under Git Bash / MINGW, use forward slashes: //server/share/path"
 
 -- | Add a fixed-drive filesystem remote. Path stored only in git config.
 addRemoteFixed :: FilePath -> String -> FilePath -> IO ()

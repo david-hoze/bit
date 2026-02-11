@@ -435,6 +435,7 @@ bit supports two kinds of remotes:
 
 - **Cloud remotes**: rclone-based (e.g., `gdrive:Projects/foo`). Identified by URL. Uses bundle + rclone sync.
 - **Filesystem remotes**: Local/network paths (USB drives, network shares, local directories). Creates a **full bit repository** at the remote location.
+  - **UNC paths**: Under MINGW / Git Bash, UNC paths must use forward slashes (`//server/share/path`). The shell strips leading backslashes before bit receives the argument. bit normalizes forward-slash UNC paths and displays the canonical backslash form.
 
 The `bit.Device` module handles remote type classification and device resolution:
 - `RemoteType`: `RemoteFilesystem` (fixed paths), `RemoteDevice` (removable/network drives), `RemoteCloud` (rclone-based)

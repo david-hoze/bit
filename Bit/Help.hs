@@ -263,10 +263,14 @@ commandRegistry =
         , cmdSynopsis = "Add a remote"
         , cmdUsage    = "bit remote add <name> <url>"
         , cmdDesc     = [ "Add a named remote pointing to the given URL."
-                        , "Does not set upstream tracking (use 'bit push -u' for that)." ]
+                        , "Does not set upstream tracking (use 'bit push -u' for that)."
+                        , ""
+                        , "For network shares under Git Bash / MINGW, use forward slashes:"
+                        , "  //server/share/path   (not \\\\server\\share\\path)" ]
         , cmdOptions  = []
         , cmdExamples = [ HelpItem "bit remote add origin gdrive:Projects/foo" "Add a cloud remote"
-                        , HelpItem "bit remote add backup /mnt/usb/myproject" "Add a filesystem remote" ]
+                        , HelpItem "bit remote add backup /mnt/usb/myproject" "Add a filesystem remote"
+                        , HelpItem "bit remote add nas //server/share/project", "Add a network share" ]
         }
     , CommandHelp
         { cmdName     = "remote show"

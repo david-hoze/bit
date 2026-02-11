@@ -214,6 +214,13 @@ bit remote add backup E:\Backup
 bit push    # Just works — bit finds My_Passport on F:
 ```
 
+Network shares work the same way. Under Git Bash / MINGW, use forward slashes for UNC paths (the shell mangles backslashes before bit sees them):
+
+```bash
+bit remote add nas //server/share/project
+# bit normalizes and displays: \\server\share\project
+```
+
 ---
 
 ## How it compares to Git
