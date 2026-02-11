@@ -37,6 +37,7 @@ Key types and conventions used throughout this codebase:
 | `DeletedSide` | `DeletedInOurs` / `DeletedInTheirs` — which side deleted in modify/delete conflict | `Bit.Conflict` |
 | `ConflictInfo` | `ContentConflict` / `ModifyDelete path DeletedSide` / `AddAdd` — conflict type from git ls-files -u | `Bit.Conflict` |
 | `NameStatusChange` | `Added` / `Deleted` / `Modified` / `Renamed` / `Copied` — parsed `git diff --name-status` output | `Internal.Git` |
+| `DivergentFile` | Record: dfPath, dfExpectedHash, dfActualHash, dfExpectedSize, dfActualSize — remote divergence | `Bit.Core.Pull` |
 | `VerifyTarget` | `VerifyLocal` / `VerifyRemote` — whether `bit verify` checks local or remote | `Bit.Core.Verify` |
 | `BundleName` | `newtype` over `String` — logical bundle name, not a path | `Internal.Config` |
 | `GitRelPath` | `newtype` — path relative to `.bit/index/` (for git commands) | `Internal.Config` |

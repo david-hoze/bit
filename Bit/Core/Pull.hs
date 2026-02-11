@@ -16,6 +16,7 @@ module Bit.Core.Pull
     , pullManualMergeImpl
     , pullWithCleanup
     , pullLogic
+    , DivergentFile(..)
     , findDivergentFiles
     , createConflictDirectories
     , printConflictList
@@ -452,74 +453,84 @@ pullLogic transport remote _opts = do
                             void $ Git.updateRemoteTrackingBranchToHash name newHash
 
 -- ============================================================================
--- Helper functions
+-- Helper types and functions
 -- ============================================================================
 
+-- | A file where remote actual content doesn't match remote metadata.
+-- Prevents transposition bugs vs bare (FilePath, Hash, Hash, Integer, Integer) tuple.
+data DivergentFile = DivergentFile
+    { dfPath         :: FilePath
+    , dfExpectedHash :: Hash 'MD5
+    , dfActualHash   :: Hash 'MD5
+    , dfExpectedSize :: Integer
+    , dfActualSize   :: Integer
+    }
+    deriving (Show, Eq)
+
 -- | Find files where remote actual files don't match remote metadata.
-findDivergentFiles :: Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> [(FilePath, Hash 'MD5, Hash 'MD5, Integer, Integer)]
+findDivergentFiles :: Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> [DivergentFile]
 findDivergentFiles remoteFileMap remoteMetaMap _localMetaMap =
     Map.foldlWithKey (\acc filePath (expectedHash, expectedSize) ->
         let normalizedPath = normalise filePath
         in case Map.lookup normalizedPath remoteFileMap of
-            Nothing -> acc  -- File missing on remote, skip
+            Nothing -> acc
             Just (actualHash, entryKind) ->
                 case entryKind of
                     File _ actualSize _ ->
                         if actualHash == expectedHash && actualSize == expectedSize
-                            then acc  -- Matches, no divergence
-                            else (filePath, expectedHash, actualHash, expectedSize, actualSize) : acc  -- Divergence!
+                            then acc
+                            else DivergentFile filePath expectedHash actualHash expectedSize actualSize : acc
                     _ -> acc
         ) [] remoteMetaMap
 
 -- | Create conflict directories for divergent files.
-createConflictDirectories :: Remote -> [(FilePath, Hash 'MD5, Hash 'MD5, Integer, Integer)] -> Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> BitM ()
+createConflictDirectories :: Remote -> [DivergentFile] -> Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> BitM ()
 createConflictDirectories remote divergentFiles _remoteFileMap _remoteMetaMap localMetaMap = do
     cwd <- asks envCwd
     let conflictsDir = cwd </> ".bit" </> "conflicts"
     lift $ createDirE conflictsDir
 
-    forM_ divergentFiles $ \(filePath, _expectedHash, actualHash, _expectedSize, actualSize) -> do
-        let conflictDir = conflictsDir </> filePath
+    forM_ divergentFiles $ \df -> do
+        let conflictDir = conflictsDir </> df.dfPath
         lift $ createDirE (takeDirectory conflictDir)
 
-        let localPath = cwd </> filePath
+        let localPath = cwd </> df.dfPath
         localExists <- lift $ fileExistsE localPath
         when localExists $ lift $ copyFileE localPath (conflictDir </> "LOCAL")
 
-        code <- liftIO $ Transport.copyFromRemote remote (toPosix filePath) (conflictDir </> "REMOTE")
-        when (code /= ExitSuccess) $ lift $ tellErr $ "Warning: Could not download remote file: " ++ filePath
+        code <- liftIO $ Transport.copyFromRemote remote (toPosix df.dfPath) (conflictDir </> "REMOTE")
+        when (code /= ExitSuccess) $ lift $ tellErr $ "Warning: Could not download remote file: " ++ df.dfPath
 
-        lift $ case Map.lookup (normalise filePath) localMetaMap of
+        lift $ case Map.lookup (normalise df.dfPath) localMetaMap of
             Just (localHash, localSize) ->
                 writeFileAtomicE (conflictDir </> "METADATA_LOCAL") $
                     serializeMetadata (MetaContent localHash localSize)
             Nothing -> writeFileAtomicE (conflictDir </> "METADATA_LOCAL") "hash: (not tracked)\nsize: 0\n"
 
         lift $ writeFileAtomicE (conflictDir </> "METADATA_REMOTE") $
-            serializeMetadata (MetaContent actualHash actualSize)
+            serializeMetadata (MetaContent df.dfActualHash df.dfActualSize)
 
 -- | Print conflict list in spec format.
-printConflictList :: [(FilePath, Hash 'MD5, Hash 'MD5, Integer, Integer)] -> Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> IO ()
+printConflictList :: [DivergentFile] -> Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> IO ()
 printConflictList divergentFiles _remoteFileMap _remoteMetaMap localMetaMap = do
     putStrLn ""
     putStrLn "✗ Remote divergence detected:"
     putStrLn ""
-    
-    forM_ divergentFiles $ \(filePath, expectedHash, remoteHash, expectedSize, remoteSize) -> do
-        putStrLn $ "  " ++ toPosix filePath ++ ":"
-        
-        -- Get local metadata (use displayHash for Hash 'MD5 values)
-        let localInfo = case Map.lookup (normalise filePath) localMetaMap of
+
+    forM_ divergentFiles $ \df -> do
+        putStrLn $ "  " ++ toPosix df.dfPath ++ ":"
+
+        let localInfo = case Map.lookup (normalise df.dfPath) localMetaMap of
                 Just (localHash, localSize) -> (displayHash localHash, show localSize)
                 Nothing -> ("(not tracked)", "0")
-        
+
         putStrLn $ "    Local:           " ++ fst localInfo ++ " (" ++ snd localInfo ++ " bytes)"
-        putStrLn $ "    Remote actual:   " ++ displayHash remoteHash ++ " (" ++ show remoteSize ++ " bytes)"
-        putStrLn $ "    Remote metadata: " ++ displayHash expectedHash ++ " (" ++ show expectedSize ++ " bytes)"
+        putStrLn $ "    Remote actual:   " ++ displayHash df.dfActualHash ++ " (" ++ show df.dfActualSize ++ " bytes)"
+        putStrLn $ "    Remote metadata: " ++ displayHash df.dfExpectedHash ++ " (" ++ show df.dfExpectedSize ++ " bytes)"
         putStrLn $ ""
-        putStrLn $ "    Files saved to: .bit/conflicts/" ++ toPosix filePath ++ "/"
+        putStrLn $ "    Files saved to: .bit/conflicts/" ++ toPosix df.dfPath ++ "/"
         putStrLn ""
-    
+
     putStrLn "This can happen when:"
     putStrLn "  - Files were modified directly on the remote (not via bit)"
     putStrLn "  - A partial push from another client"
