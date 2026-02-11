@@ -12,6 +12,7 @@ executable bit
     other-modules:    Bit.AtomicWrite,
                       Bit.Commands,
                       Bit.Help,
+                      Bit.Path,
                       Bit.Platform,
                       Bit.Concurrency,
                       Bit.Conflict,

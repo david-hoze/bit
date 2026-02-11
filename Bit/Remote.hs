@@ -3,16 +3,19 @@ module Bit.Remote
   , mkRemote        -- smart constructor
   , remoteName      -- only the name is public
   , remoteUrl       -- for Transport only (should import from Internal)
+  , remoteFilePath  -- typed accessor for filesystem remote paths
   , displayRemote   -- for user-facing messages
   , resolveRemote
   , getDefaultRemote
   , RemoteState(..) -- remote state classification
   , FetchResult(..) -- bundle fetch result
+  , RemotePath(..)  -- re-export for convenience
   ) where
 
 import qualified Internal.Git as Git
 import qualified Bit.Device as Device
 import Data.List (isSuffixOf)
+import Bit.Path (RemotePath(..))
 
 -- | A resolved remote. Bit.hs works with this; only Transport sees the url.
 data Remote = Remote
@@ -31,6 +34,12 @@ remoteUrl = _remoteUrl
 -- | For user-facing display only. Never use this to construct paths.
 displayRemote :: Remote -> String
 displayRemote r = _remoteName r ++ " (" ++ _remoteUrl r ++ ")"
+
+-- | Typed accessor for filesystem remote paths.
+-- Use this instead of 'remoteUrl' when constructing filesystem paths
+-- to a remote, so that downstream code must go through 'Bit.Platform'.
+remoteFilePath :: Remote -> RemotePath
+remoteFilePath = RemotePath . _remoteUrl
 
 -- | Smart constructor
 mkRemote :: String -> String -> Remote

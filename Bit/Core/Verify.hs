@@ -26,7 +26,7 @@ import Internal.Config (fetchedBundle)
 import Bit.Progress (reportProgress, clearProgress)
 
 import Bit.Core.Helpers (withRemote, printVerifyIssue, isFilesystemRemote)
-import Bit.Remote (Remote, remoteUrl)
+import Bit.Remote (Remote, remoteUrl, RemotePath(..))
 
 -- | Whether to verify local working tree or remote.
 data VerifyTarget = VerifyLocal | VerifyRemote
@@ -38,7 +38,7 @@ verify target concurrency = case target of
       cwd <- asks envCwd
       isFs <- isFilesystemRemote remote
       if isFs
-        then verifyFilesystemRemote (remoteUrl remote) concurrency
+        then verifyFilesystemRemote (RemotePath (remoteUrl remote)) concurrency
         else verifyCloudRemote cwd remote concurrency
 
   VerifyLocal -> do
@@ -70,8 +70,8 @@ verify target concurrency = case target of
           printVerifyResult truncateHash " Run 'bit status' for details." result
 
 -- | Verify a filesystem remote by scanning its working directory.
-verifyFilesystemRemote :: FilePath -> Concurrency -> BitM ()
-verifyFilesystemRemote remotePath concurrency = liftIO $ do
+verifyFilesystemRemote :: RemotePath -> Concurrency -> BitM ()
+verifyFilesystemRemote (RemotePath remotePath) concurrency = liftIO $ do
     putStrLn "Verifying remote files..."
     result <- Verify.verifyLocalAt remotePath Nothing concurrency
     printVerifyResult truncateHash "" result

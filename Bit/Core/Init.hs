@@ -4,6 +4,7 @@
 module Bit.Core.Init
     ( init
     , initializeRepoAt
+    , initializeRemoteRepoAt
     ) where
 
 import Prelude hiding (init)
@@ -14,6 +15,7 @@ import Control.Monad (unless, void)
 import qualified Internal.Git as Git
 import System.Process (readProcessWithExitCode)
 import Bit.Utils (atomicWriteFileStr, toPosix)
+import Bit.Path (RemotePath(..))
 
 init :: IO ()
 init = initializeRepo
@@ -85,3 +87,9 @@ initializeRepoAt targetDir = do
     void $ Git.runGitAt targetBitIndexPath ["config", "merge.bit-metadata.driver", "false"]
     Platform.createDirectoryIfMissing True (targetBitGitDir </> "info")
     atomicWriteFileStr (targetBitGitDir </> "info" </> "attributes") "* merge=bit-metadata -text\n"
+
+-- | Initialize a bit repository at a remote filesystem location.
+-- Typed wrapper around 'initializeRepoAt' that accepts 'RemotePath'
+-- to enforce that callers use 'Bit.Platform' for remote paths.
+initializeRemoteRepoAt :: RemotePath -> IO ()
+initializeRemoteRepoAt (RemotePath p) = initializeRepoAt p

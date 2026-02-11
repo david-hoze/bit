@@ -12,6 +12,7 @@ module Bit.Platform
     ( createDirectoryIfMissing
     , doesDirectoryExist
     , doesFileExist
+    , getFileSize
     , copyFile
     , removeFile
     , listDirectory
@@ -56,14 +57,22 @@ doesFileExist p
     | isUncPath p = maybe False (not . isDirectory) <$> getAttrs p
     | otherwise   = Dir.doesFileExist p
 
+-- | Get file size without the @\\\\?\\@ prefix.
+-- Uses Win32 getFileAttributesExStandard for UNC paths.
+getFileSize :: FilePath -> IO Integer
+getFileSize p
+    | isUncPath p = fromIntegral . Win32.fadFileSize <$> Win32.getFileAttributesExStandard p
+    | otherwise   = Dir.getFileSize p
+
 -- | Recursive directory creation for UNC paths.
 -- Stops at the UNC root (\\\\server\\share) — cannot create above that.
+-- Filters empty components to handle trailing separators safely.
 createDirectoryIfMissing :: Bool -> FilePath -> IO ()
 createDirectoryIfMissing recursive p
     | not (isUncPath p) = Dir.createDirectoryIfMissing recursive p
     | not recursive     = Win32.createDirectory p Nothing
     | otherwise         = do
-        let parts = splitDirectories p
+        let parts = filter (not . null) $ splitDirectories p
             -- UNC root is \\server\share (first 2 components); skip those
             ancestors = drop 2 $ tail $
                 scanl (\acc d -> joinPath [acc, d]) (head parts) (tail parts)
@@ -133,6 +142,9 @@ doesDirectoryExist = Dir.doesDirectoryExist
 
 doesFileExist :: FilePath -> IO Bool
 doesFileExist = Dir.doesFileExist
+
+getFileSize :: FilePath -> IO Integer
+getFileSize = Dir.getFileSize
 
 createDirectoryIfMissing :: Bool -> FilePath -> IO ()
 createDirectoryIfMissing = Dir.createDirectoryIfMissing

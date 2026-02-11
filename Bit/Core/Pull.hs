@@ -40,7 +40,7 @@ import System.IO (stderr, hPutStrLn)
 import Control.Exception (try, SomeException, throwIO)
 import Bit.Utils (toPosix, filterOutBitPaths, trimGitOutput, shortRefDisplay)
 import Data.Maybe (maybeToList)
-import Bit.Remote (Remote, remoteName, remoteUrl)
+import Bit.Remote (Remote, remoteName, remoteUrl, RemotePath(..))
 import Bit.Types (BitM, BitEnv(..), ForceMode(..), Hash, HashAlgo(..), EntryKind(..), syncHash, runBitM, unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -111,11 +111,12 @@ cloudPull remote opts =
 filesystemPull :: FilePath -> Remote -> PullOptions -> IO ()
 filesystemPull cwd remote opts = do
     let name = remoteName remote
-        remotePath = remoteUrl remote
+        rp = RemotePath (remoteUrl remote)
+        remotePath = unRemotePath rp
     putStrLn $ "Pulling from filesystem remote: " ++ remotePath
 
     -- Check if remote has .bit/ directory
-    checkFilesystemRemoteIsRepo remotePath
+    checkFilesystemRemoteIsRepo rp
 
     -- 1. Ensure git remote URL is current and fetch
     void $ Git.addRemote name (remotePath </> ".bit" </> "index")
@@ -149,7 +150,7 @@ filesystemPull cwd remote opts = do
                 dieRemoteVerifyFailed "hint: Run 'bit verify' in the remote repo to see all mismatches."
     
     -- 4. Build transport and delegate to unified pull logic
-    let transport = mkFilesystemTransport remotePath
+    let transport = mkFilesystemTransport rp
     
     -- Create a minimal BitEnv to call the shared logic
     localFiles <- Scan.scanWorkingDir cwd

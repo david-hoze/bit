@@ -27,7 +27,7 @@ module Bit.Core.Transport
 
 import qualified System.Directory as Dir
 import qualified Bit.Platform as Platform
-import Bit.Platform (copyFile, createDirectoryIfMissing)
+import Bit.Platform (copyFile, createDirectoryIfMissing, getFileSize)
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, void, forM)
 import Data.Foldable (traverse_)
@@ -45,7 +45,7 @@ import Control.Concurrent (getNumCapabilities)
 import System.IO (stderr, hPutStrLn)
 import Bit.Utils (toPosix)
 import Bit.Plan (RcloneAction(..))
-import Bit.Remote (Remote, remoteName, remoteUrl)
+import Bit.Remote (Remote, remoteName, remoteUrl, RemotePath(..))
 import qualified Bit.Device as Device
 import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
@@ -131,7 +131,7 @@ mkCloudTransport remote = FileTransport
   }
 
 -- | Build a filesystem transport that uses direct file copy.
-mkFilesystemTransport :: FilePath -> FileTransport
+mkFilesystemTransport :: RemotePath -> FileTransport
 mkFilesystemTransport remotePath = FileTransport
   { transportDownloadFile = filesystemDownloadOrCopyFromIndex' remotePath
   , transportSyncAllFiles = filesystemSyncRemoteFilesToLocal' remotePath
@@ -148,7 +148,7 @@ mkTransportForRemote :: FilePath -> Remote -> IO FileTransport
 mkTransportForRemote cwd remote = do
   mType <- getRemoteType cwd (remoteName remote)
   pure $ case mType of
-    Just t | Device.isFilesystemType t -> mkFilesystemTransport (remoteUrl remote)
+    Just t | Device.isFilesystemType t -> mkFilesystemTransport (RemotePath (remoteUrl remote))
     _ -> mkCloudTransport remote
 
 -- ============================================================================
@@ -230,8 +230,8 @@ downloadOrCopyFromIndex cwd remote filePath progress = do
 
 -- | Download a file from remote or copy from index for filesystem pull.
 -- Parameter order: localRoot, remotePath, filePath (relative), progress.
-filesystemDownloadOrCopyFromIndex :: FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
-filesystemDownloadOrCopyFromIndex localRoot remotePath filePath progress = do
+filesystemDownloadOrCopyFromIndex :: FilePath -> RemotePath -> FilePath -> SyncProgress -> IO ()
+filesystemDownloadOrCopyFromIndex localRoot (RemotePath remotePath) filePath progress = do
     fromIndex <- isTextFileInIndex localRoot filePath
     if fromIndex
         then copyFromIndexToWorkTree localRoot filePath
@@ -241,15 +241,15 @@ filesystemDownloadOrCopyFromIndex localRoot remotePath filePath progress = do
             let destPath = localRoot </> filePath
             srcExists <- Platform.doesFileExist srcPath
             when srcExists $ do
-                size <- Dir.getFileSize srcPath
+                size <- getFileSize srcPath  -- Platform: srcPath may be UNC
                 writeIORef (CopyProgress.spCurrentFile progress) filePath
                 CopyProgress.copyFileWithProgress srcPath destPath (fromIntegral size) progress
                 CopyProgress.incrementFilesComplete progress
 
 -- | Sync all files from remote to local using current HEAD (after checkout).
 -- This is called after git checkout has updated the index, so we list files from HEAD.
-filesystemSyncRemoteFilesToLocalFromHEAD :: FilePath -> FilePath -> IO ()
-filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
+filesystemSyncRemoteFilesToLocalFromHEAD :: FilePath -> RemotePath -> IO ()
+filesystemSyncRemoteFilesToLocalFromHEAD localRoot (RemotePath remotePath) = do
     let localIndex = localRoot </> ".bit" </> "index"
     -- Use HEAD to list files (after checkout, HEAD points to the remote branch)
     (code, out, _) <- Git.runGitWithOutput ["ls-tree", "-r", "--name-only", "HEAD"]
@@ -266,7 +266,7 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
                     let srcPath = remotePath </> filePath
                     srcExists <- Platform.doesFileExist srcPath
                     if srcExists
-                        then BinaryToSync filePath . fromIntegral <$> Dir.getFileSize srcPath
+                        then BinaryToSync filePath . fromIntegral <$> getFileSize srcPath  -- Platform: srcPath may be UNC
                         else pure (BinaryToSync filePath 0)
 
         let bins = binaryFiles fileInfo
@@ -299,9 +299,8 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
 
 -- | Copy a file from local to remote (handles both text and binary).
 -- Parameter order: localRoot, remotePath, remoteIndex, filePath (relative).
--- TRANSPOSITION NOTE: 4 FilePaths — rely on naming conventions.
-filesystemCopyFileToRemote :: FilePath -> FilePath -> FilePath -> FilePath -> SyncProgress -> IO ()
-filesystemCopyFileToRemote localRoot remotePath remoteIndex filePath progress = do
+filesystemCopyFileToRemote :: FilePath -> RemotePath -> FilePath -> FilePath -> SyncProgress -> IO ()
+filesystemCopyFileToRemote localRoot (RemotePath remotePath) remoteIndex filePath progress = do
     -- Check if it's a text file (content in index) or binary (hash/size in index)
     let metaPath = remoteIndex </> filePath
     isText <- isTextMetadataFile metaPath
@@ -323,15 +322,15 @@ filesystemCopyFileToRemote localRoot remotePath remoteIndex filePath progress = 
                 CopyProgress.incrementFilesComplete progress
 
 -- | Delete a file at the remote working tree.
-filesystemDeleteFileAtRemote :: FilePath -> FilePath -> IO ()
-filesystemDeleteFileAtRemote remotePath filePath = do
+filesystemDeleteFileAtRemote :: RemotePath -> FilePath -> IO ()
+filesystemDeleteFileAtRemote (RemotePath remotePath) filePath = do
     let fullPath = remotePath </> filePath
     exists <- Platform.doesFileExist fullPath
     when exists $ Platform.removeFile fullPath
 
 -- | Sync all files from a commit to the filesystem remote (first push).
-filesystemSyncAllFiles :: FilePath -> FilePath -> String -> IO ()
-filesystemSyncAllFiles localRoot remotePath commitHash = do
+filesystemSyncAllFiles :: FilePath -> RemotePath -> String -> IO ()
+filesystemSyncAllFiles localRoot (RemotePath remotePath) commitHash = do
     let remoteIndex = remotePath </> ".bit" </> "index"
     files <- Git.runGitAt remoteIndex ["ls-tree", "-r", "--name-only", commitHash]
     case files of
@@ -381,8 +380,8 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
 
 -- | Sync only changed files between two commits.
 -- Parameter order: localRoot, remotePath, oldHead (commit hash), newHead (commit hash).
-filesystemSyncChangedFiles :: FilePath -> FilePath -> String -> String -> IO ()
-filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
+filesystemSyncChangedFiles :: FilePath -> RemotePath -> String -> String -> IO ()
+filesystemSyncChangedFiles localRoot (RemotePath remotePath) oldHead newHead = do
     let remoteIndex = remotePath </> ".bit" </> "index"
     changes <- Git.runGitAt remoteIndex ["diff", "--name-status", oldHead, newHead]
     case changes of
@@ -421,14 +420,15 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
             CopyProgress.withSyncProgressReporter progress $ do
                 caps <- getNumCapabilities
                 let concurrency = max 2 (caps * 2)
+                let rp = RemotePath remotePath
                 void $ runConcurrentlyBounded concurrency (\change -> case change of
-                    Added p -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
-                    Modified p -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
-                    Deleted p -> filesystemDeleteFileAtRemote remotePath p
+                    Added p -> filesystemCopyFileToRemote localRoot rp remoteIndex p progress
+                    Modified p -> filesystemCopyFileToRemote localRoot rp remoteIndex p progress
+                    Deleted p -> filesystemDeleteFileAtRemote rp p
                     Renamed oldPath newPath -> do
-                        filesystemDeleteFileAtRemote remotePath oldPath
-                        filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
-                    Copied _ newPath -> filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
+                        filesystemDeleteFileAtRemote rp oldPath
+                        filesystemCopyFileToRemote localRoot rp remoteIndex newPath progress
+                    Copied _ newPath -> filesystemCopyFileToRemote localRoot rp remoteIndex newPath progress
                     ) parsedChanges
         _ -> pure ()
 

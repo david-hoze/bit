@@ -33,7 +33,7 @@ import Bit.Concurrency (runConcurrentlyBounded)
 import Control.Concurrent (getNumCapabilities)
 import System.IO (stderr, hPutStrLn)
 import Control.Exception (bracket)
-import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), displayRemote)
+import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), displayRemote, RemotePath(..))
 import Bit.Types (BitM, BitEnv(..), ForceMode(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -41,7 +41,6 @@ import Control.Monad.Trans.Class (lift)
 import qualified Bit.CopyProgress as CopyProgress
 import qualified Bit.Verify as Verify
 import Bit.Concurrency (Concurrency(..))
-import qualified Bit.Device as Device
 import Bit.Platform (copyFile)
 import Bit.Core.Helpers
     ( AncestorQuery(..)
@@ -55,7 +54,7 @@ import Bit.Core.Helpers
     , printVerifyIssue
     , safeRemove
     )
-import Bit.Core.Init (initializeRepoAt)
+import Bit.Core.Init (initializeRemoteRepoAt)
 import Bit.Core.Transport (executeCommand, filesystemSyncAllFiles, filesystemSyncChangedFiles)
 import Bit.Core.Fetch (classifyRemoteState, fetchBundle)
 
@@ -134,17 +133,18 @@ cloudPush remote = do
 -- | Push to a filesystem remote. Creates a full bit repo at the remote location.
 filesystemPush :: FilePath -> Remote -> IO ()
 filesystemPush cwd remote = do
-    let remotePath = remoteUrl remote
+    let rp = RemotePath (remoteUrl remote)
+        remotePath = unRemotePath rp
     putStrLn $ "Pushing to filesystem remote: " ++ remotePath
-    
+
     -- 1. Check if remote has .bit/ directory (first push vs subsequent)
     let remoteBitDir = remotePath </> ".bit"
     remoteHasBit <- Platform.doesDirectoryExist remoteBitDir
-    
+
     unless remoteHasBit $ do
         putStrLn "First push: initializing bit repo at remote..."
-        initializeRepoAt remotePath
-    
+        initializeRemoteRepoAt rp
+
     -- 2. Fetch local into remote (at the remote, "origin" is the local side)
     let localIndexGit = cwd </> ".bit" </> "index" </> ".git"
     let remoteIndex = remotePath </> ".bit" </> "index"
@@ -177,7 +177,7 @@ filesystemPush cwd remote = do
     putStrLn "Merging at remote (fast-forward only)..."
     (mergeCode, _mergeOut, mergeErr) <- Git.runGitAt remoteIndex
         ["merge", "--ff-only", Git.remoteTrackingRef "origin"]
-    
+
     case mergeCode of
         ExitSuccess -> do
             -- 6. Get new HEAD at remote
@@ -185,20 +185,20 @@ filesystemPush cwd remote = do
             when (newHeadCode /= ExitSuccess) $ do
                 hPutStrLn stderr "Error: Could not get remote HEAD after merge"
                 exitWith (ExitFailure 1)
-            
+
             let newHead = trimGitOutput newHeadOut
-            
+
             -- 7. Sync actual files based on what changed
             case mOldHead of
                 Nothing -> do
                     -- First push: sync all files from new HEAD
                     putStrLn "First push: syncing all files to remote..."
-                    filesystemSyncAllFiles cwd remotePath newHead
+                    filesystemSyncAllFiles cwd rp newHead
                 Just oldHead -> do
                     -- Subsequent push: sync only changed files
                     putStrLn "Syncing changed files to remote..."
-                    filesystemSyncChangedFiles cwd remotePath oldHead newHead
-            
+                    filesystemSyncChangedFiles cwd rp oldHead newHead
+
             -- 8. Update local tracking ref
             putStrLn "Updating local tracking ref..."
             void $ Git.updateRemoteTrackingBranchToHead (remoteName remote)

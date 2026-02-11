@@ -20,7 +20,7 @@ import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import System.IO (stderr, hPutStrLn)
-import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..))
+import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), RemotePath(..))
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -61,11 +61,12 @@ cloudFetch remote = do
 filesystemFetch :: FilePath -> Remote -> IO ()
 filesystemFetch _cwd remote = do
     let name = remoteName remote
-        remotePath = remoteUrl remote
+        rp = RemotePath (remoteUrl remote)
+        remotePath = unRemotePath rp
     putStrLn $ "Fetching from filesystem remote: " ++ remotePath
 
     -- Check if remote has .bit/ directory
-    checkFilesystemRemoteIsRepo remotePath
+    checkFilesystemRemoteIsRepo rp
 
     -- Ensure git remote URL is current (device may have moved)
     void $ Git.addRemote name (remotePath </> ".bit" </> "index")

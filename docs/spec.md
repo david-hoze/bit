@@ -1275,7 +1275,8 @@ Interactive per-file conflict resolution:
 | `bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit.hs` | All business logic |
 | `Internal/Git.hs` | Git command wrapper; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
-| `Bit/Platform.hs` | UNC-safe wrappers for `System.Directory` (CPP: Win32 direct calls for UNC paths, `System.Directory` for local) |
+| `Bit/Path.hs` | `RemotePath` newtype — compile-time enforcement that remote filesystem paths go through `Bit.Platform` |
+| `Bit/Platform.hs` | UNC-safe wrappers for `System.Directory` (CPP: Win32 direct calls for UNC paths, `System.Directory` for local); includes `getFileSize` |
 | `Internal/Transport.hs` | Rclone command wrapper |
 | `Internal/Config.hs` | Path constants |
 | `Internal/ConfigFile.hs` | Config file parsing (strict ByteString) |

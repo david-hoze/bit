@@ -49,7 +49,7 @@ import System.Exit (ExitCode(..), exitWith)
 import Internal.Git (AncestorQuery(..))
 import qualified Internal.Git as Git
 import qualified Bit.Device as Device
-import Bit.Remote (Remote, remoteName)
+import Bit.Remote (Remote, remoteName, RemotePath(..))
 import Data.List (isPrefixOf, foldl')
 import System.IO (stderr, hPutStrLn)
 import Bit.Types (BitM, BitEnv(..), unPath)
@@ -122,8 +122,8 @@ isFilesystemRemote remote = do
 
 -- | Check if a filesystem path is a bit repository. Exits with error if not.
 -- Used by filesystem push, pull, and fetch operations to validate the remote.
-checkFilesystemRemoteIsRepo :: FilePath -> IO ()
-checkFilesystemRemoteIsRepo remotePath = do
+checkFilesystemRemoteIsRepo :: RemotePath -> IO ()
+checkFilesystemRemoteIsRepo (RemotePath remotePath) = do
     let remoteBitDir = remotePath </> ".bit"
     remoteHasBit <- Platform.doesDirectoryExist remoteBitDir
     unless remoteHasBit $ do
