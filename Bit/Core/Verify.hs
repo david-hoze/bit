@@ -66,29 +66,17 @@ verify target concurrency = case target of
               when shouldShowProgress clearProgress
             )
 
-          if null result.vrIssues
-            then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
-            else do
-              mapM_ (printVerifyIssue truncateHash) result.vrIssues
-              putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found. Run 'bit status' for details."
+          printVerifyResult truncateHash " Run 'bit status' for details." result
         else liftIO $ do
           result <- Verify.verifyLocal cwd Nothing concurrency
-          if null result.vrIssues
-            then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
-            else do
-              mapM_ (printVerifyIssue truncateHash) result.vrIssues
-              putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found. Run 'bit status' for details."
+          printVerifyResult truncateHash " Run 'bit status' for details." result
 
 -- | Verify a filesystem remote by scanning its working directory.
 verifyFilesystemRemote :: FilePath -> Concurrency -> BitM ()
 verifyFilesystemRemote remotePath concurrency = liftIO $ do
     putStrLn "Verifying remote files..."
     result <- Verify.verifyLocalAt remotePath Nothing concurrency
-    if null result.vrIssues
-      then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
-      else do
-        mapM_ (printVerifyIssue truncateHash) result.vrIssues
-        putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found."
+    printVerifyResult truncateHash "" result
 
 -- | Verify a cloud remote using the fetched bundle.
 verifyCloudRemote :: FilePath -> Remote -> Concurrency -> BitM ()
@@ -116,18 +104,10 @@ verifyCloudRemote cwd remote concurrency = liftIO $ do
             when shouldShowProgress clearProgress
           )
 
-        if null result.vrIssues
-          then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
-          else do
-            mapM_ (printVerifyIssue truncateHash) result.vrIssues
-            putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found."
+        printVerifyResult truncateHash "" result
       else do
         result <- Verify.verifyRemote cwd remote Nothing concurrency
-        if null result.vrIssues
-          then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
-          else do
-            mapM_ (printVerifyIssue truncateHash) result.vrIssues
-            putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found."
+        printVerifyResult truncateHash "" result
 
 verifyProgressLoop :: IORef Int -> Int -> IO ()
 verifyProgressLoop counter total = go
@@ -142,6 +122,17 @@ verifyProgressLoop counter total = go
 -- | Truncate a hash string to 16 characters with ellipsis.
 truncateHash :: String -> String
 truncateHash s = take 16 s ++ if length s > 16 then "..." else ""
+
+-- | Print VerifyResult: success message or issues plus summary.
+-- hashFn: how to display hashes (e.g. truncateHash or id).
+-- suffix: appended to the failure line (e.g. " Run 'bit status' for details." or "").
+printVerifyResult :: (String -> String) -> String -> Verify.VerifyResult -> IO ()
+printVerifyResult hashFn suffix result =
+  if null result.vrIssues
+    then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
+    else do
+      mapM_ (printVerifyIssue hashFn) result.vrIssues
+      putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found." ++ suffix
 
 fsck :: FilePath -> IO ()
 fsck = Fsck.doFsck
