@@ -32,6 +32,7 @@ module Bit.Core.Helpers
     , safeRemove
     , formatPathList
     , formatVerifyCounts
+    , formatVerifiedRemoteFiles
     , printVerifyIssue
     , readFileMaybe
     , removeDirectoryRecursive
@@ -190,6 +191,10 @@ formatPathList paths
 -- | Format "N files checked, M issues" with leading spaces (for verify/repair output).
 formatVerifyCounts :: Int -> Int -> String
 formatVerifyCounts count numIssues = "  " ++ show count ++ " files checked, " ++ show numIssues ++ " issues"
+
+-- | Format "Verified N remote files." for pull verify success message.
+formatVerifiedRemoteFiles :: Int -> String
+formatVerifiedRemoteFiles n = "Verified " ++ show n ++ " remote files."
 
 printVerifyIssue :: (String -> String) -> Verify.VerifyIssue -> IO ()
 printVerifyIssue fmtHash = \case

@@ -14,6 +14,7 @@ module Bit.Utils
     -- * Formatting utilities
   , formatBytes
   , trimGitOutput
+  , shortRefDisplay
   
     -- * Atomic file writes (re-exported from Bit.AtomicWrite)
   , atomicWriteFile
@@ -81,3 +82,7 @@ formatBytes bytes
 -- Git commands often return commit hashes or refs with trailing newlines.
 trimGitOutput :: String -> String
 trimGitOutput = filter (\c -> c /= ' ' && c /= '\n' && c /= '\r' && c /= '\t')
+
+-- | Abbreviate a ref/hash for display (git-style 7 chars).
+shortRefDisplay :: String -> String
+shortRefDisplay = take 7

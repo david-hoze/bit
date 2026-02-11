@@ -38,7 +38,7 @@ import qualified Data.List as List
 import qualified Data.Map as Map
 import System.IO (stderr, hPutStrLn)
 import Control.Exception (try, SomeException, throwIO)
-import Bit.Utils (toPosix, filterOutBitPaths, trimGitOutput)
+import Bit.Utils (toPosix, filterOutBitPaths, trimGitOutput, shortRefDisplay)
 import Data.Maybe (maybeToList)
 import Bit.Remote (Remote, remoteName, remoteUrl)
 import Bit.Types (BitM, BitEnv(..), ForceMode(..), Hash, HashAlgo(..), EntryKind(..), syncHash, runBitM, unPath)
@@ -64,6 +64,7 @@ import Bit.Core.Helpers
     , copyFileE
     , writeFileAtomicE
     , printVerifyIssue
+    , formatVerifiedRemoteFiles
     , checkFilesystemRemoteIsRepo
     )
 import Bit.Core.Transport
@@ -78,6 +79,16 @@ import Bit.Core.Fetch (fetchRemoteBundle, saveFetchedBundle, FetchOutcome(..), p
 -- ============================================================================
 -- Pull operations
 -- ============================================================================
+
+hintPullAcceptRemote :: String
+hintPullAcceptRemote = "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
+
+-- | Print verify hint, pull-accept-remote hint, and exit with failure.
+dieRemoteVerifyFailed :: String -> IO ()
+dieRemoteVerifyFailed hintVerify = do
+    hPutStrLn stderr hintVerify
+    hPutStrLn stderr hintPullAcceptRemote
+    exitWith (ExitFailure 1)
 
 pull :: PullOptions -> BitM ()
 pull opts = withRemote $ \remote -> do
@@ -131,13 +142,11 @@ filesystemPull cwd remote opts = do
         putStrLn "Verifying remote repository..."
         result <- Verify.verifyLocalAt remotePath Nothing (Parallel 0)
         if null result.vrIssues
-            then putStrLn $ "Verified " ++ show result.vrCount ++ " remote files."
+            then putStrLn $ formatVerifiedRemoteFiles result.vrCount
             else do
                 hPutStrLn stderr $ "error: Remote working tree does not match remote metadata (" ++ show (length result.vrIssues) ++ " issues)."
                 mapM_ (printVerifyIssue id) result.vrIssues
-                hPutStrLn stderr "hint: Run 'bit verify' in the remote repo to see all mismatches."
-                hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
-                exitWith (ExitFailure 1)
+                dieRemoteVerifyFailed "hint: Run 'bit verify' in the remote repo to see all mismatches."
     
     -- 4. Build transport and delegate to unified pull logic
     let transport = mkFilesystemTransport remotePath
@@ -160,7 +169,7 @@ filesystemPullLogicImpl transport remote remoteHash = do
 
     case oldHash of
         Nothing -> do
-            lift $ putStrLn $ "Checking out " ++ take 7 remoteHash ++ " (first pull)"
+            lift $ putStrLn $ "Checking out " ++ shortRefDisplay remoteHash ++ " (first pull)"
             checkoutCode <- lift $ Git.checkoutRemoteAsMain name
             case checkoutCode of
                 ExitSuccess -> lift $ do
@@ -182,7 +191,7 @@ filesystemPullLogicImpl transport remote remoteHash = do
 
             case finalMergeCode of
                 ExitSuccess -> do
-                    lift $ putStrLn $ "Updating " ++ take 7 localHash ++ ".." ++ take 7 remoteHash
+                    lift $ putStrLn $ "Updating " ++ shortRefDisplay localHash ++ ".." ++ shortRefDisplay remoteHash
                     lift $ putStrLn "Merge made by the 'recursive' strategy."
                     hasChanges <- lift hasStagedChangesE
                     when hasChanges $ lift $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
@@ -379,13 +388,11 @@ pullLogic transport remote _opts = do
             lift $ putStrLn "Verifying remote files..."
             result <- lift $ Verify.verifyRemote cwd remote Nothing (Parallel 0)
             if null result.vrIssues
-                then lift $ putStrLn $ "Verified " ++ show result.vrCount ++ " remote files."
+                then lift $ putStrLn $ formatVerifiedRemoteFiles result.vrCount
                 else lift $ do
                     hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length result.vrIssues) ++ " issues)."
                     mapM_ (printVerifyIssue id) result.vrIssues
-                    hPutStrLn stderr "hint: Run 'bit verify --remote' to see all mismatches."
-                    hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
-                    exitWith (ExitFailure 1)
+                    dieRemoteVerifyFailed "hint: Run 'bit verify --remote' to see all mismatches."
 
             oldHash <- lift getLocalHeadE
             (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", Git.remoteTrackingRef name]
@@ -393,7 +400,7 @@ pullLogic transport remote _opts = do
 
             case oldHash of
                 Nothing -> do
-                    lift $ tell $ "Checking out " ++ take 7 newHash ++ " (first pull)"
+                    lift $ tell $ "Checking out " ++ shortRefDisplay newHash ++ " (first pull)"
                     checkoutCode <- lift $ Git.checkoutRemoteAsMain name
                     case checkoutCode of
                         ExitSuccess -> lift $ do
@@ -412,7 +419,7 @@ pullLogic transport remote _opts = do
                     case finalMergeCode of
                       ExitSuccess -> do
                         lift $ do
-                            tell $ "Updating " ++ take 7 localHead ++ ".." ++ take 7 newHash
+                            tell $ "Updating " ++ shortRefDisplay localHead ++ ".." ++ shortRefDisplay newHash
                             tell "Merge made by the 'recursive' strategy."
                         hasChanges <- lift hasStagedChangesE
                         when hasChanges $ lift $ void $ gitRaw ["commit", "-m", "Merge remote"]

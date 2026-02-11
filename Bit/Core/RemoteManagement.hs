@@ -510,6 +510,13 @@ printRemoteUrls url = do
     putStrLn $ "  Fetch URL: " ++ url
     putStrLn $ "  Push  URL: " ++ url
 
+-- | Print "* remote <name>", Fetch/Push URL lines, and blank line (remote show banner).
+printRemoteShowBanner :: String -> String -> IO ()
+printRemoteShowBanner name url = do
+    putStrLn $ "* remote " ++ name
+    printRemoteUrls url
+    putStrLn ""
+
 -- | Show remote status using git tracking refs (for filesystem/device remotes).
 -- No bundle needed — reads directly from refs/remotes/<name>/main.
 showRefBasedRemoteStatus :: String -> String -> IO ()
@@ -519,9 +526,7 @@ showRefBasedRemoteStatus name url = do
     let maybeRemote = case refCode of
             ExitSuccess -> Just (filter (/= '\n') refOut)
             _ -> Nothing
-    putStrLn $ "* remote " ++ name
-    printRemoteUrls url
-    putStrLn ""
+    printRemoteShowBanner name url
     case (maybeLocal, maybeRemote) of
         (Nothing, Just _) -> do
             putStrLn "  HEAD branch: (unknown)"
@@ -565,9 +570,7 @@ showRemoteStatusFromBundle :: String -> Maybe String -> IO ()
 showRemoteStatusFromBundle name mUrl = do
     maybeLocal <- Git.getLocalHead
     let url = fromMaybe "?" mUrl
-    putStrLn $ "* remote " ++ name
-    printRemoteUrls url
-    putStrLn ""
+    printRemoteShowBanner name url
     compareHistory maybeLocal fetchedBundle
 
 -- | Status of local ref relative to remote (for 'bit remote show' push message).
