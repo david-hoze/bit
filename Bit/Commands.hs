@@ -158,6 +158,7 @@ runCommand args = do
           | hasForce          = Force
           | hasForceWithLease = ForceWithLease
           | otherwise         = NoForce
+    let concurrency = if isSequential then Sequential else Parallel 0
     let cmd = filter (`notElem` ["--force", "-f", "--force-with-lease", "--sequential", "-h", "--help"]) args
 
     -- Help intercept (before repo check — help works without a repo)
@@ -202,6 +203,9 @@ runCommand args = do
             env <- baseEnv
             mNamedRemote <- resolveRemote cwd name
             runBitM env { envRemote = mNamedRemote } action
+    let runPushWithUpstream name = scannedEnv >>= \env -> pushWithUpstream env cwd name
+    let optsAcceptRemote = Bit.PullOptions Bit.PullAcceptRemote
+    let optsManualMerge = Bit.PullOptions Bit.PullManualMerge
 
     case cmd of
         -- ── No env needed ────────────────────────────────────
@@ -216,10 +220,10 @@ runCommand args = do
         ("ls-files":rest)               -> Bit.lsFiles rest >>= exitWith
         ["remote", "show"]              -> runBase $ Bit.remoteShow Nothing
         ["remote", "show", name]        -> runBaseWithRemote name $ Bit.remoteShow (Just name)
-        ["remote", "repair"]             -> runBase $ Bit.remoteRepair Nothing (if isSequential then Sequential else Parallel 0)
-        ["remote", "repair", name]      -> runBaseWithRemote name $ Bit.remoteRepair (Just name) (if isSequential then Sequential else Parallel 0)
-        ["verify"]                      -> runBase $ Bit.verify Bit.VerifyLocal (if isSequential then Sequential else Parallel 0)
-        ["verify", "--remote"]          -> runBase $ Bit.verify Bit.VerifyRemote (if isSequential then Sequential else Parallel 0)
+        ["remote", "repair"]             -> runBase $ Bit.remoteRepair Nothing concurrency
+        ["remote", "repair", name]      -> runBaseWithRemote name $ Bit.remoteRepair (Just name) concurrency
+        ["verify"]                      -> runBase $ Bit.verify Bit.VerifyLocal concurrency
+        ["verify", "--remote"]          -> runBase $ Bit.verify Bit.VerifyRemote concurrency
 
         ("rm":rest)                     -> runBase (Bit.rm rest) >>= exitWith
 
@@ -239,19 +243,19 @@ runCommand args = do
         
         -- push
         ["push"]                        -> runScanned Bit.push
-        ["push", "-u", name]            -> scannedEnv >>= \env -> pushWithUpstream env cwd name
-        ["push", "--set-upstream", name] -> scannedEnv >>= \env -> pushWithUpstream env cwd name
+        ["push", "-u", name]            -> runPushWithUpstream name
+        ["push", "--set-upstream", name] -> runPushWithUpstream name
         ["push", name]                  -> runScannedWithRemote name Bit.push
         
         -- pull
         ["pull"]                        -> runScanned $ Bit.pull Bit.defaultPullOptions
         ["pull", name]                  -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions
-        ["pull", "--accept-remote"]     -> runScanned $ Bit.pull (Bit.PullOptions Bit.PullAcceptRemote)
-        ["pull", "--manual-merge"]      -> runScanned $ Bit.pull (Bit.PullOptions Bit.PullManualMerge)
-        ["pull", name, "--accept-remote"] -> runScannedWithRemote name $ Bit.pull (Bit.PullOptions Bit.PullAcceptRemote)
-        ["pull", "--accept-remote", name] -> runScannedWithRemote name $ Bit.pull (Bit.PullOptions Bit.PullAcceptRemote)
-        ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull (Bit.PullOptions Bit.PullManualMerge)
-        ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull (Bit.PullOptions Bit.PullManualMerge)
+        ["pull", "--accept-remote"]     -> runScanned $ Bit.pull optsAcceptRemote
+        ["pull", "--manual-merge"]      -> runScanned $ Bit.pull optsManualMerge
+        ["pull", name, "--accept-remote"] -> runScannedWithRemote name $ Bit.pull optsAcceptRemote
+        ["pull", "--accept-remote", name] -> runScannedWithRemote name $ Bit.pull optsAcceptRemote
+        ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull optsManualMerge
+        ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull optsManualMerge
         
         -- fetch
         ["fetch"]                       -> runScanned Bit.fetch
