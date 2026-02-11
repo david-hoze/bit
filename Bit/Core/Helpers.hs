@@ -30,7 +30,6 @@ module Bit.Core.Helpers
     , safeRemove
     , formatPathList
     , printVerifyIssue
-    , parseFilesystemDiffOutput
     , readFileMaybe
     , removeDirectoryRecursive
     , restoreCheckoutPaths
@@ -47,7 +46,6 @@ import qualified Bit.Device as Device
 import Bit.Remote (Remote)
 import Data.List (isPrefixOf, foldl')
 import System.IO (stderr, hPutStrLn)
-import Data.Maybe (mapMaybe)
 import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -187,22 +185,6 @@ printVerifyIssue fmtHash = \case
     hPutStrLn stderr $ "  Actual:   " ++ fmtHash actualHash
   Verify.Missing filePath ->
     hPutStrLn stderr $ "[ERROR] Missing: " ++ toPosix (unPath filePath)
-
-parseFilesystemDiffOutput :: String -> [(Char, FilePath, Maybe FilePath)]
-parseFilesystemDiffOutput = mapMaybe parseLine . lines
-  where
-    parseLine line = case line of
-        (fileStatus:rest)
-            | fileStatus == 'R' || fileStatus == 'C' ->
-                case words (dropWhile (\c -> c /= '\t' && c /= ' ') rest) of
-                    (old:new:_) -> Just (fileStatus, old, Just new)
-                    _ -> Nothing
-            | fileStatus `elem` ("ADM" :: String) ->
-                case words rest of
-                    (filePath:_) -> Just (fileStatus, filePath, Nothing)
-                    _ -> Nothing
-            | otherwise -> Nothing
-        _ -> Nothing
 
 readFileMaybe :: FilePath -> IO (Maybe String)
 readFileMaybe filePath = do

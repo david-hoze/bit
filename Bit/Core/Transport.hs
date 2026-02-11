@@ -29,9 +29,9 @@ import System.Directory (copyFile, createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, void, forM)
 import Data.Foldable (traverse_)
-import Data.Maybe (maybeToList)
 import System.Exit (ExitCode(..))
 import qualified Internal.Git as Git
+import Internal.Git (NameStatusChange(Added, Deleted, Modified, Renamed, Copied))
 import qualified Internal.Transport as Transport
 import Internal.Config (bitIndexPath, fetchedBundle)
 import qualified Bit.Scan as Scan
@@ -57,7 +57,6 @@ import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8')
 import Bit.Core.Helpers
     ( getLocalHeadE
-    , parseFilesystemDiffOutput
     , readFileMaybe
     )
 
@@ -146,11 +145,12 @@ applyMergeToWorkingDir transport cwd oldHead = do
             then putStrLn "Working tree already up to date with remote."
             else do
                 -- First pass: collect paths that will be copied and their sizes
-                filesToCopy <- fmap concat $ forM changes $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
-                    'A' -> pure [filePath]
-                    'M' -> pure [filePath]
-                    'R' -> pure (maybeToList mNewPath)
-                    _ -> pure []
+                filesToCopy <- fmap concat $ forM changes $ \change -> case change of
+                    Added p -> pure [p]
+                    Modified p -> pure [p]
+                    Renamed _ newPath -> pure [newPath]
+                    Copied _ newPath -> pure [newPath]
+                    Deleted _ -> pure []
                 
                 -- Gather file sizes for binary files (for progress tracking)
                 fileInfo <- forM filesToCopy $ \filePath -> do
@@ -174,15 +174,14 @@ applyMergeToWorkingDir transport cwd oldHead = do
                     -- Use lower concurrency for file operations to avoid thrashing
                     caps <- getNumCapabilities
                     let concurrency = max 2 (caps * 2)
-                    void $ runConcurrentlyBounded concurrency (\(fileStatus, filePath, mNewPath) -> case fileStatus of
-                        'A' -> (transportDownloadFile transport) cwd filePath progress
-                        'M' -> (transportDownloadFile transport) cwd filePath progress
-                        'D' -> safeDeleteWorkFile cwd filePath
-                        'R' -> traverse_ (\newPath -> do
-                            safeDeleteWorkFile cwd filePath
+                    void $ runConcurrentlyBounded concurrency (\change -> case change of
+                        Added p -> (transportDownloadFile transport) cwd p progress
+                        Modified p -> (transportDownloadFile transport) cwd p progress
+                        Deleted p -> safeDeleteWorkFile cwd p
+                        Renamed oldPath newPath -> do
+                            safeDeleteWorkFile cwd oldPath
                             (transportDownloadFile transport) cwd newPath progress
-                            ) mNewPath
-                        _ -> pure ()
+                        Copied _ newPath -> (transportDownloadFile transport) cwd newPath progress
                         ) changes
         ) newHead
 
@@ -375,14 +374,15 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
     changes <- Git.runGitAt remoteIndex ["diff", "--name-status", oldHead, newHead]
     case changes of
         (ExitSuccess, out, _) -> do
-            let parsedChanges = parseFilesystemDiffOutput out
+            let parsedChanges = Git.parseNameStatusOutput out
             
             -- First pass: collect paths that will be copied and their sizes
-            filesToCopy <- fmap concat $ forM parsedChanges $ \(fileStatus, filePath, mNewPath) -> case fileStatus of
-                'A' -> pure [filePath]
-                'M' -> pure [filePath]
-                'R' -> pure (maybeToList mNewPath)
-                _ -> pure []
+            filesToCopy <- fmap concat $ forM parsedChanges $ \change -> case change of
+                Added p -> pure [p]
+                Modified p -> pure [p]
+                Renamed _ newPath -> pure [newPath]
+                Copied _ newPath -> pure [newPath]
+                Deleted _ -> pure []
             
             -- Gather file sizes for binary files
             fileInfo <- forM filesToCopy $ \p -> do
@@ -411,15 +411,14 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
                 -- Use lower concurrency for file copies to avoid disk thrashing
                 caps <- getNumCapabilities
                 let concurrency = max 2 (caps * 2)
-                void $ runConcurrentlyBounded concurrency (\(st, p, mNewPath) -> case st of
-                    'A' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
-                    'M' -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
-                    'D' -> filesystemDeleteFileAtRemote remotePath p
-                    'R' -> traverse_ (\newPath -> do
-                        filesystemDeleteFileAtRemote remotePath p
+                void $ runConcurrentlyBounded concurrency (\change -> case change of
+                    Added p -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
+                    Modified p -> filesystemCopyFileToRemote localRoot remotePath remoteIndex p progress
+                    Deleted p -> filesystemDeleteFileAtRemote remotePath p
+                    Renamed oldPath newPath -> do
+                        filesystemDeleteFileAtRemote remotePath oldPath
                         filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
-                        ) mNewPath
-                    _ -> pure ()
+                    Copied _ newPath -> filesystemCopyFileToRemote localRoot remotePath remoteIndex newPath progress
                     ) parsedChanges
         _ -> pure ()
 

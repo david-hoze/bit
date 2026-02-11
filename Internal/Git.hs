@@ -48,6 +48,8 @@ module Internal.Git
     , getDiffNameStatus
     , getFilesAtCommit
     , remoteTrackingRef
+    , NameStatusChange(..)
+    , parseNameStatusOutput
     ) where
 
 import Data.Maybe (mapMaybe, listToMaybe)
@@ -447,32 +449,44 @@ hasStagedChanges = do
   (code, _, _) <- runGitWithOutput ["diff", "--cached", "--quiet"]
   pure (code == ExitFailure 1)  -- git diff --cached --quiet exits with 1 if there are changes
 
--- | Get the list of file changes between two commits.
--- Returns list of (status, path, maybe-new-path-for-renames).
--- Status: 'A' = added, 'D' = deleted, 'M' = modified, 'R' = renamed.
-getDiffNameStatus :: String -> String -> IO [(Char, FilePath, Maybe FilePath)]
-getDiffNameStatus oldHead newHead = do
-    (code, out, _) <- runGitWithOutput ["diff", "--name-status", oldHead, newHead]
-    pure $ case code of
-        ExitSuccess -> parseNameStatus out
-        _ -> []
+-- | Parsed line from `git diff --name-status` output.
+-- Makes invalid states unrepresentable (no bare Char + Maybe tuple).
+data NameStatusChange
+    = Added FilePath
+    | Deleted FilePath
+    | Modified FilePath
+    | Renamed FilePath FilePath  -- ^ old path, new path
+    | Copied FilePath FilePath   -- ^ old path, new path
+    deriving (Show, Eq)
 
-parseNameStatus :: String -> [(Char, FilePath, Maybe FilePath)]
-parseNameStatus = mapMaybe parseLine . lines
+-- | Parse raw `git diff --name-status` output into structured changes.
+parseNameStatusOutput :: String -> [NameStatusChange]
+parseNameStatusOutput = mapMaybe parseLine . lines
   where
     parseLine line = case line of
         (fileStatus:rest)
             | fileStatus == 'R' || fileStatus == 'C' ->
-                -- R100\told\tnew or Rnnn old new (tab-separated)
                 case words (dropWhile (\c -> c /= '\t' && c /= ' ') rest) of
-                    (old:new:_) -> Just (fileStatus, old, Just new)
+                    (old:new:_) -> Just $ case fileStatus of
+                        'R' -> Renamed old new
+                        _  -> Copied old new
                     _ -> Nothing
-            | fileStatus `elem` "ADM" ->
-                case words rest of
-                    (path:_) -> Just (fileStatus, path, Nothing)
-                    _ -> Nothing
+            | fileStatus == 'A' ->
+                case words rest of (path:_) -> Just (Added path); _ -> Nothing
+            | fileStatus == 'D' ->
+                case words rest of (path:_) -> Just (Deleted path); _ -> Nothing
+            | fileStatus == 'M' ->
+                case words rest of (path:_) -> Just (Modified path); _ -> Nothing
             | otherwise -> Nothing
         _ -> Nothing
+
+-- | Get the list of file changes between two commits.
+getDiffNameStatus :: String -> String -> IO [NameStatusChange]
+getDiffNameStatus oldHead newHead = do
+    (code, out, _) <- runGitWithOutput ["diff", "--name-status", oldHead, newHead]
+    pure $ case code of
+        ExitSuccess -> parseNameStatusOutput out
+        _ -> []
 
 -- | Get all file paths at a given commit. Used when there's no old HEAD to diff against.
 getFilesAtCommit :: String -> IO [FilePath]
