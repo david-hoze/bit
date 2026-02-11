@@ -38,7 +38,7 @@ Key types and conventions used throughout this codebase:
 | `DeletedSide` | `DeletedInOurs` / `DeletedInTheirs` — which side deleted in modify/delete conflict | `Internal.Git`, re-exported by `Bit.Conflict` |
 | `ConflictInfo` | `ContentConflict` / `ModifyDelete path DeletedSide` / `AddAdd` — conflict type from git ls-files -u | `Bit.Conflict` |
 | `NameStatusChange` | `Added` / `Deleted` / `Modified` / `Renamed` / `Copied` — parsed `git diff --name-status` output | `Internal.Git` |
-| `DivergentFile` | Record: dfPath, dfExpectedHash, dfActualHash, dfExpectedSize, dfActualSize — remote divergence | `Bit.Core.Pull` |
+| `DivergentFile` | Record: dfPath, dfExpectedHash, dfActualHash, dfExpectedSize, dfActualSize — remote divergence; `findDivergentFiles` takes remoteFileMap and remoteMetaMap only | `Bit.Core.Pull` |
 | `ScannedEntry` | `ScannedFile` / `ScannedDir` — internal scan pass, replaces (FilePath, Bool) | `Bit.Scan` |
 | `readMetadataFile` / `getFileHashAndSize` | Return `Maybe MetaContent` (canonical hash+size type) | `Bit.Scan` |
 | `FileToSync` | `TextToSync` / `BinaryToSync` — text has no size, binary carries byte count | `Bit.Core.Transport` |
@@ -50,6 +50,7 @@ Key types and conventions used throughout this codebase:
 | `CwdPath` | `newtype` — path relative to CWD (for filesystem operations) | `Internal.Config` |
 | `fetchedBundle` | Constant `BundleName "fetched_remote"` | `Internal.Config` |
 | `DangerousPattern` | Record: dpPattern, dpReason, dpFix — test lint patterns, replaces (String, String, String) | `test/LintTestFiles.hs` |
+| `HelpItem` | Record: hiItem, hiDescription — option/example in command help, replaces (String, String) | `Bit.Help` |
 
 ### Architecture patterns
 - **`BitM` actions** use `asks envCwd` to get the working directory, `asks envRemote` for the remote, etc.

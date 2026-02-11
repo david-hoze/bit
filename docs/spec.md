@@ -1265,6 +1265,7 @@ Interactive per-file conflict resolution:
 | Module | Role |
 |--------|------|
 | `bit/Commands.hs` | CLI dispatch, env setup |
+| `bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit.hs` | All business logic |
 | `Internal/Git.hs` | Git command wrapper (`runGitAt`/`runGitRawAt` for arbitrary paths) |
 | `Internal/Transport.hs` | Rclone command wrapper |

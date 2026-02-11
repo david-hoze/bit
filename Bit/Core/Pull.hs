@@ -319,7 +319,7 @@ pullManualMergeImpl remote = do
                         localMetaMap = Map.fromList [(normalise (unPath m.bfmPath), (m.bfmHash, m.bfmSize)) | m <- localMeta]
 
                     lift $ tell "Comparing..."
-                    let divergentFiles = findDivergentFiles remoteFileMap remoteMetaMap localMetaMap
+                    let divergentFiles = findDivergentFiles remoteFileMap remoteMetaMap
 
                     if null divergentFiles
                         then do
@@ -468,8 +468,8 @@ data DivergentFile = DivergentFile
     deriving (Show, Eq)
 
 -- | Find files where remote actual files don't match remote metadata.
-findDivergentFiles :: Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> Map.Map FilePath (Hash 'MD5, Integer) -> [DivergentFile]
-findDivergentFiles remoteFileMap remoteMetaMap _localMetaMap =
+findDivergentFiles :: Map.Map FilePath (Hash 'MD5, EntryKind) -> Map.Map FilePath (Hash 'MD5, Integer) -> [DivergentFile]
+findDivergentFiles remoteFileMap remoteMetaMap =
     Map.foldlWithKey (\acc filePath (expectedHash, expectedSize) ->
         let normalizedPath = normalise filePath
         in case Map.lookup normalizedPath remoteFileMap of
