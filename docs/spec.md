@@ -219,7 +219,7 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 | `FetchResult` | `bit.Remote` | Bundle fetch result: BundleFound, RemoteEmpty, NetworkError |
 | `FetchOutcome` | `bit.Core.Fetch` | UpToDate, Updated { foOldHash, foNewHash }, FetchedFirst, FetchError |
 | `GitDiff` | `bit.Diff` | Added, Modified, Deleted, Renamed — pure diff result |
-| `RcloneAction` | `bit.Plan` | Copy, Move, Delete, Swap — concrete rclone operations |
+| `RcloneAction` | `bit.Plan` | Copy, Move, Delete, Swap — concrete rclone operations. Swap is produced by `resolveSwaps` (not `planAction`). |
 | `FileIndex` | `bit.Diff` | Dual-indexed file map (byPath + byHash) for efficient diff/rename detection |
 | `Resolution` | `bit.Conflict` | KeepLocal or TakeRemote — conflict resolution choice |
 | `DeletedSide` | `Internal.Git` (re-exported by `bit.Conflict`) | DeletedInOurs or DeletedInTheirs — which side deleted in modify/delete conflict |
@@ -239,13 +239,15 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 The sync pipeline is composed as pure function composition with effectful endpoints:
 
 ```
-scan   :: FilePath → IO [FileEntry]        -- effectful (reads filesystem)
-diff   :: FileIndex → FileIndex → [GitDiff]  -- pure!
-plan   :: GitDiff → RcloneAction              -- pure!
-exec   :: RcloneAction → IO ()               -- effectful (calls rclone)
+scan          :: FilePath → IO [FileEntry]              -- effectful (reads filesystem)
+diff          :: FileIndex → FileIndex → [GitDiff]      -- pure!
+plan          :: GitDiff → RcloneAction                  -- pure!
+resolveSwaps  :: [RcloneAction] → [RcloneAction]         -- pure! (detects pairwise path swaps)
+exec          :: RcloneAction → IO ()                    -- effectful (calls rclone)
 ```
 
-The pure middle (`diff >>> plan`) is factored into `bit.Pipeline` and is fully property-testable:
+The pure middle (`diff >>> plan >>> resolveSwaps`) is factored into `bit.Pipeline` and is fully property-testable.
+`resolveSwaps` is a post-pass that detects mirrored `Move` pairs (A→B and B→A) and replaces each pair with a single `Swap` action, preventing the overwrite bug that occurs when sequential Moves clobber each other's source files.
 
 ```haskell
 diffAndPlan :: [FileEntry] -> [FileEntry] -> [RcloneAction]  -- pure core
@@ -1282,8 +1284,8 @@ Interactive per-file conflict resolution:
 | `bit/Scan.hs` | Working directory scanning, hash computation (`hashAndClassifyFile` returns `ContentType`), cache entries use `ContentType`, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO). `readMetadataFile`, `getFileHashAndSize` return `Maybe MetaContent`. |
 | `bit/Concurrency.hs` | Bounded parallelism helpers: concurrency level calculation, sequential/parallel mode switching |
 | `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
-| `bit/Plan.hs` | Pure plan: GitDiff → RcloneAction |
-| `bit/Pipeline.hs` | Composed pipeline: diffAndPlan, pushSyncFiles, pullSyncFiles |
+| `bit/Plan.hs` | Pure plan: `planAction` (GitDiff → RcloneAction), `resolveSwaps` (detects pairwise Move swaps → Swap) |
+| `bit/Pipeline.hs` | Composed pipeline: diffAndPlan (applies resolveSwaps), pushSyncFiles, pullSyncFiles |
 | `bit/Verify.hs` | Local and remote verification; scan + git diff approach for local (compares against committed metadata); unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
 | `bit/Fsck.hs` | Passthrough to `git fsck` on `.bit/index` metadata repository |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |

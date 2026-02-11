@@ -113,7 +113,9 @@ mkCloudTransport remote = FileTransport
               sizes <- forM actions $ \a -> case a of
                   Copy _ dest -> getFileSizeFromIndex cwd (unPath dest)
                   Move src _  -> getFileSizeFromIndex cwd (unPath src)
-                  _           -> pure 0
+                  Swap _ src dest -> (+) <$> getFileSizeFromIndex cwd (unPath src)
+                                        <*> getFileSizeFromIndex cwd (unPath dest)
+                  Delete _    -> pure 0
               let totalBytes = sum sizes
 
               -- Create progress tracker with byte totals
@@ -505,7 +507,10 @@ executeCommand localRoot remote action = case action of
         Delete p ->
             void $ Transport.deleteRemote remote (toPosix (unPath p))
 
-        Swap _ _ _ -> pure ()  -- not produced by planAction; future-proofing
+        Swap tmp src dest -> do
+            void $ Transport.moveRemote remote (toPosix (unPath src)) (toPosix (unPath tmp))
+            void $ Transport.moveRemote remote (toPosix (unPath dest)) (toPosix (unPath src))
+            void $ Transport.moveRemote remote (toPosix (unPath tmp)) (toPosix (unPath dest))
 
 -- | Execute a single pull action: copy from remote to local or delete local file.
 -- Text files are already in the git bundle (index); copy from index to work dir instead of rclone.
@@ -545,4 +550,33 @@ executePullCommand localRoot remote progress action = case action of
             let localPath = localRoot </> unPath filePath
             exists <- Dir.doesFileExist localPath
             when exists $ Dir.removeFile localPath
-        Swap _ _ _ -> pure ()
+        Swap tmp src dest -> do
+            -- For pull, swap files on the local filesystem.
+            -- Text files: copy fresh from index (index has correct post-merge content).
+            -- Binary files: three-step rename via temp file.
+            srcIsText <- isTextFileInIndex localRoot (unPath src)
+            destIsText <- isTextFileInIndex localRoot (unPath dest)
+            case (srcIsText, destIsText) of
+                (True, True) -> do
+                    copyFromIndexToWorkTree localRoot (unPath src)
+                    copyFromIndexToWorkTree localRoot (unPath dest)
+                (False, False) -> do
+                    let tmpPath = localRoot </> unPath tmp
+                        srcPath = localRoot </> unPath src
+                        destPath = localRoot </> unPath dest
+                    Dir.renameFile srcPath tmpPath
+                    Dir.renameFile destPath srcPath
+                    Dir.renameFile tmpPath destPath
+                (True, False) -> do
+                    -- src is text (from index), dest is binary (swap via temp)
+                    let tmpPath = localRoot </> unPath tmp
+                        destPath = localRoot </> unPath dest
+                    Dir.renameFile destPath tmpPath
+                    copyFromIndexToWorkTree localRoot (unPath src)
+                    Dir.renameFile tmpPath destPath
+                (False, True) -> do
+                    let tmpPath = localRoot </> unPath tmp
+                        srcPath = localRoot </> unPath src
+                    Dir.renameFile srcPath tmpPath
+                    copyFromIndexToWorkTree localRoot (unPath dest)
+                    Dir.renameFile tmpPath srcPath

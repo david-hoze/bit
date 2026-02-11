@@ -1,0 +1,96 @@
+# =============================================================================
+# Swap Files - Test that cross-renames (A->B, B->A) work correctly
+#
+# When two files swap paths, bit should use the Swap action to avoid
+# the overwrite bug where sequential moves clobber each other's source.
+# Prerequisites: none (filesystem remote only)
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_swap_a 2>nul & rmdir /s /q test\cli\output\fs_remote_swap 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_swap_a & mkdir test\cli\output\fs_remote_swap
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_swap_a & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_swap_a & bit remote add origin ..\fs_remote_swap
+<<<
+>>> /Remote 'origin' added/
+>>>= 0
+
+# Create two files with distinct content
+cd test\cli\output\work_swap_a & echo content-of-alpha> alpha.txt & echo content-of-beta> beta.txt & bit add alpha.txt beta.txt & bit commit -m "Add two files"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_swap_a & bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Verify initial state at remote
+cd test\cli\output\fs_remote_swap & type alpha.txt
+<<<
+>>> /content-of-alpha/
+>>>= 0
+
+cd test\cli\output\fs_remote_swap & type beta.txt
+<<<
+>>> /content-of-beta/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: SWAP THE FILES
+# ======================================================================
+
+# Swap alpha.txt <-> beta.txt using a temp file
+cd test\cli\output\work_swap_a & move alpha.txt tmp_swap.txt >nul & move beta.txt alpha.txt >nul & move tmp_swap.txt beta.txt >nul & bit add alpha.txt beta.txt & bit commit -m "Swap alpha and beta"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_swap_a & bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: VERIFY SWAP AT REMOTE
+# ======================================================================
+
+# alpha.txt should now have beta's original content
+cd test\cli\output\fs_remote_swap & type alpha.txt
+<<<
+>>> /content-of-beta/
+>>>= 0
+
+# beta.txt should now have alpha's original content
+cd test\cli\output\fs_remote_swap & type beta.txt
+<<<
+>>> /content-of-alpha/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_swap_a 2>nul & rmdir /s /q test\cli\output\fs_remote_swap 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

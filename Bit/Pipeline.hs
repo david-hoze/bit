@@ -10,7 +10,7 @@ module Bit.Pipeline
 
 import Bit.Types
 import Bit.Diff (buildIndexFromFileEntries, computeDiff)
-import Bit.Plan (RcloneAction(..), planAction)
+import Bit.Plan (RcloneAction(..), planAction, resolveSwaps)
 import Bit.Utils (filterOutBitPaths)
 
 -- | Pure core: given source-of-truth files and current target files,
@@ -23,7 +23,7 @@ diffAndPlan sourceFiles targetFiles =
   let sourceIndex = buildIndexFromFileEntries sourceFiles
       targetIndex = buildIndexFromFileEntries targetFiles
       diffs = computeDiff sourceIndex targetIndex
-  in  map planAction diffs
+  in  resolveSwaps (map planAction diffs)
 
 -- | Push pipeline: compute actions to make remote match local.
 -- Takes pre-scanned local and remote file lists, returns planned actions.
