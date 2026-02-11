@@ -133,12 +133,12 @@ filesystemPull cwd remote opts = do
     -- Proof of possession — always verify filesystem remote before pulling
     unless (pullMode opts == PullAcceptRemote) $ do
         putStrLn "Verifying remote repository..."
-        (remoteCount, remoteIssues) <- Verify.verifyLocalAt remotePath Nothing (Parallel 0)
-        if null remoteIssues
-            then putStrLn $ "Verified " ++ show remoteCount ++ " remote files."
+        result <- Verify.verifyLocalAt remotePath Nothing (Parallel 0)
+        if null result.vrIssues
+            then putStrLn $ "Verified " ++ show result.vrCount ++ " remote files."
             else do
-                hPutStrLn stderr $ "error: Remote working tree does not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
-                mapM_ (printVerifyIssue id) remoteIssues
+                hPutStrLn stderr $ "error: Remote working tree does not match remote metadata (" ++ show (length result.vrIssues) ++ " issues)."
+                mapM_ (printVerifyIssue id) result.vrIssues
                 hPutStrLn stderr "hint: Run 'bit verify' in the remote repo to see all mismatches."
                 hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
                 exitWith (ExitFailure 1)
@@ -381,12 +381,12 @@ pullLogic transport remote _opts = do
 
             -- Proof of possession — always verify remote before pulling
             lift $ putStrLn "Verifying remote files..."
-            (remoteFileCount, remoteIssues) <- lift $ Verify.verifyRemote cwd remote Nothing (Parallel 0)
-            if null remoteIssues
-                then lift $ putStrLn $ "Verified " ++ show remoteFileCount ++ " remote files."
+            result <- lift $ Verify.verifyRemote cwd remote Nothing (Parallel 0)
+            if null result.vrIssues
+                then lift $ putStrLn $ "Verified " ++ show result.vrCount ++ " remote files."
                 else lift $ do
-                    hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length remoteIssues) ++ " issues)."
-                    mapM_ (printVerifyIssue id) remoteIssues
+                    hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length result.vrIssues) ++ " issues)."
+                    mapM_ (printVerifyIssue id) result.vrIssues
                     hPutStrLn stderr "hint: Run 'bit verify --remote' to see all mismatches."
                     hPutStrLn stderr "hint: Run 'bit pull --accept-remote' to accept the remote's actual state."
                     exitWith (ExitFailure 1)

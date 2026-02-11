@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module Bit.Core.Push
     ( push
@@ -66,12 +67,12 @@ push = withRemote $ \remote -> do
 
     -- Proof of possession — always verify local before pushing
     liftIO $ putStrLn "Verifying local files..."
-    (fileCount, issues) <- liftIO $ Verify.verifyLocal cwd Nothing (Parallel 0)
-    if null issues
-        then liftIO $ putStrLn $ "Verified " ++ show fileCount ++ " files. All match metadata."
+    result <- liftIO $ Verify.verifyLocal cwd Nothing (Parallel 0)
+    if null result.vrIssues
+        then liftIO $ putStrLn $ "Verified " ++ show result.vrCount ++ " files. All match metadata."
         else liftIO $ do
-            hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length issues) ++ " issues)."
-            mapM_ (printVerifyIssue id) issues  -- full hash, no truncation
+            hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length result.vrIssues) ++ " issues)."
+            mapM_ (printVerifyIssue id) result.vrIssues  -- full hash, no truncation
             hPutStrLn stderr "hint: Run 'bit verify' to see all mismatches."
             hPutStrLn stderr "hint: Run 'bit add' to update metadata, or 'bit restore' to restore files."
             exitWith (ExitFailure 1)

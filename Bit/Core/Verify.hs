@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module Bit.Core.Verify
     ( VerifyTarget(..)
@@ -58,36 +59,36 @@ verify target concurrency = case target of
             then Just <$> forkIO (verifyProgressLoop counter fileCount)
             else pure Nothing
 
-          (actualCount, issues) <- finally
+          result <- finally
             (Verify.verifyLocal cwd (Just counter) concurrency)
             (do
               traverse_ killThread reporterThread
               when shouldShowProgress clearProgress
             )
 
-          if null issues
-            then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+          if null result.vrIssues
+            then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
             else do
-              mapM_ (printVerifyIssue truncateHash) issues
-              putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found. Run 'bit status' for details."
+              mapM_ (printVerifyIssue truncateHash) result.vrIssues
+              putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found. Run 'bit status' for details."
         else liftIO $ do
-          (actualCount, issues) <- Verify.verifyLocal cwd Nothing concurrency
-          if null issues
-            then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+          result <- Verify.verifyLocal cwd Nothing concurrency
+          if null result.vrIssues
+            then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
             else do
-              mapM_ (printVerifyIssue truncateHash) issues
-              putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found. Run 'bit status' for details."
+              mapM_ (printVerifyIssue truncateHash) result.vrIssues
+              putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found. Run 'bit status' for details."
 
 -- | Verify a filesystem remote by scanning its working directory.
 verifyFilesystemRemote :: FilePath -> Concurrency -> BitM ()
 verifyFilesystemRemote remotePath concurrency = liftIO $ do
     putStrLn "Verifying remote files..."
-    (actualCount, issues) <- Verify.verifyLocalAt remotePath Nothing concurrency
-    if null issues
-      then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+    result <- Verify.verifyLocalAt remotePath Nothing concurrency
+    if null result.vrIssues
+      then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
       else do
-        mapM_ (printVerifyIssue truncateHash) issues
-        putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
+        mapM_ (printVerifyIssue truncateHash) result.vrIssues
+        putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found."
 
 -- | Verify a cloud remote using the fetched bundle.
 verifyCloudRemote :: FilePath -> Remote -> Concurrency -> BitM ()
@@ -108,25 +109,25 @@ verifyCloudRemote cwd remote concurrency = liftIO $ do
           then Just <$> forkIO (verifyProgressLoop counter fileCount)
           else pure Nothing
 
-        (actualCount, issues) <- finally
+        result <- finally
           (Verify.verifyRemote cwd remote (Just counter) concurrency)
           (do
             traverse_ killThread reporterThread
             when shouldShowProgress clearProgress
           )
 
-        if null issues
-          then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+        if null result.vrIssues
+          then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
           else do
-            mapM_ (printVerifyIssue truncateHash) issues
-            putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
+            mapM_ (printVerifyIssue truncateHash) result.vrIssues
+            putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found."
       else do
-        (actualCount, issues) <- Verify.verifyRemote cwd remote Nothing concurrency
-        if null issues
-          then putStrLn $ "[OK] All " ++ show actualCount ++ " files match metadata."
+        result <- Verify.verifyRemote cwd remote Nothing concurrency
+        if null result.vrIssues
+          then putStrLn $ "[OK] All " ++ show result.vrCount ++ " files match metadata."
           else do
-            mapM_ (printVerifyIssue truncateHash) issues
-            putStrLn $ "Checked " ++ show actualCount ++ " files. " ++ show (length issues) ++ " issues found."
+            mapM_ (printVerifyIssue truncateHash) result.vrIssues
+            putStrLn $ "Checked " ++ show result.vrCount ++ " files. " ++ show (length result.vrIssues) ++ " issues found."
 
 verifyProgressLoop :: IORef Int -> Int -> IO ()
 verifyProgressLoop counter total = go

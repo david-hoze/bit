@@ -8,6 +8,7 @@ module Bit.Verify
   , verifyLocalAt
   , verifyRemote
   , VerifyIssue(..)
+  , VerifyResult(..)
   , BinaryFileMeta(..)
   , loadBinaryMetadata
   , loadCommittedBinaryMetadata
@@ -51,6 +52,14 @@ import qualified Bit.Scan as Scan
 data VerifyIssue
   = HashMismatch Path String String Integer Integer  -- path, expectedHash, actualHash, expectedSize, actualSize
   | Missing Path                                      -- path (in metadata but no actual file)
+  deriving (Show, Eq)
+
+-- | Result of a verification run: count of files checked and list of issues.
+-- Replaces bare (Int, [VerifyIssue]) tuple to prevent transposition.
+data VerifyResult = VerifyResult
+  { vrCount :: Int
+  , vrIssues :: [VerifyIssue]
+  }
   deriving (Show, Eq)
 
 -- | A metadata entry loaded from any source.
@@ -192,7 +201,7 @@ loadCommittedBinaryMetadata indexDir = do
 -- git diff to find files whose metadata changed from the committed state.
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
-verifyLocalAt :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
+verifyLocalAt :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
 verifyLocalAt root mCounter _concurrency = do
   let indexDir = root </> bitIndexPath
 
@@ -234,7 +243,7 @@ verifyLocalAt root mCounter _concurrency = do
   -- Update counter
   traverse_ (\ref -> atomicModifyIORef' ref (\_ -> (totalChecked, ()))) mCounter
 
-  pure (totalChecked, allIssues)
+  pure (VerifyResult totalChecked allIssues)
   where
     checkChanged indexDir relPath = do
       (showCode, committedContent, _) <- Git.runGitAt indexDir ["show", "HEAD:" ++ relPath]
@@ -277,7 +286,7 @@ verifyLocalAt root mCounter _concurrency = do
 -- | Verify local working tree against committed metadata in .bit/index.
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
-verifyLocal :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
+verifyLocal :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
 verifyLocal cwd = verifyLocalAt cwd
 
 -- | Extract metadata from a bundle's HEAD commit.
@@ -313,7 +322,7 @@ loadMetadataFromBundle bundleName = do
 -- git diff to find all mismatches.
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
-verifyRemote :: FilePath -> Bit.Remote.Remote -> Maybe (IORef Int) -> Concurrency -> IO (Int, [VerifyIssue])
+verifyRemote :: FilePath -> Bit.Remote.Remote -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
 verifyRemote cwd remote mCounter _concurrency = do
   -- 1. Fetch the remote bundle if needed
   let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
@@ -331,7 +340,7 @@ verifyRemote cwd remote mCounter _concurrency = do
 
   bundleExistsNow <- doesFileExist fetchedPath
   if not bundleExistsNow
-    then pure (0, [])
+    then pure (VerifyResult 0 [])
     else do
       -- 2. Load metadata from bundle (classifies entries; fetches bundle into .bit/index)
       entries <- loadMetadataFromBundle fetchedBundle
@@ -339,7 +348,7 @@ verifyRemote cwd remote mCounter _concurrency = do
 
       -- 3. Fetch remote file list via rclone ls
       Remote.Scan.fetchRemoteFiles remote >>= either
-        (const $ hPutStrLn stderr "Error: Could not fetch remote file list." >> pure (0, []))
+        (const $ hPutStrLn stderr "Error: Could not fetch remote file list." >> pure (VerifyResult 0 []))
         (\remoteFiles -> do
           let filteredRemoteFiles = filterOutBitPaths remoteFiles
               remoteFileMap = Map.fromList
@@ -394,7 +403,7 @@ verifyRemote cwd remote mCounter _concurrency = do
           -- 8. Clean up (.git/objects are read-only, need forceRemoveDir)
           forceRemoveDir vremoteDir
 
-          pure (length entries, issues ++ extraIssues))
+          pure (VerifyResult (length entries) (issues ++ extraIssues)))
   where
     parseDiffLine entryMap remoteFileMap line =
       let (status, rest) = break (== '\t') line

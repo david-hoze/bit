@@ -228,6 +228,7 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 | `ScannedEntry` | `bit.Scan` | ScannedFile / ScannedDir — internal type for scan pass, replaces (FilePath, Bool) |
 | `FileToSync` | `bit.Core.Transport` | TextToSync / BinaryToSync — text has no size, binary carries byte count |
 | `BinaryFileMeta` | `bit.Verify` | Record: bfmPath, bfmHash, bfmSize — replaces bare (Path, Hash, Integer) tuple |
+| `VerifyResult` | `bit.Verify` | Record: vrCount, vrIssues — replaces bare (Int, [VerifyIssue]) tuple |
 | `VerifyTarget` | `bit.Core.Verify` | VerifyLocal or VerifyRemote — whether verify checks local or remote |
 | `DeviceInfo` | `bit.Device` | UUID + storage type + optional hardware serial |
 | `RemoteType` | `bit.Device` | RemoteFilesystem, RemoteDevice, RemoteCloud |

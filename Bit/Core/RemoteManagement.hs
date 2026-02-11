@@ -264,14 +264,14 @@ repairFilesystem cwd _remote remotePath concurrency = do
 
     -- Verify both sides
     putStrLn "Verifying local files..."
-    (localCount, localIssues) <- Verify.verifyLocal cwd Nothing concurrency
-    putStrLn $ "  " ++ show localCount ++ " files checked, " ++ show (length localIssues) ++ " issues"
+    localResult <- Verify.verifyLocal cwd Nothing concurrency
+    putStrLn $ "  " ++ show localResult.vrCount ++ " files checked, " ++ show (length localResult.vrIssues) ++ " issues"
 
     putStrLn "Verifying remote files..."
-    (remoteCount, remoteIssues) <- Verify.verifyLocalAt remotePath Nothing concurrency
-    putStrLn $ "  " ++ show remoteCount ++ " files checked, " ++ show (length remoteIssues) ++ " issues"
+    remoteResult <- Verify.verifyLocalAt remotePath Nothing concurrency
+    putStrLn $ "  " ++ show remoteResult.vrCount ++ " files checked, " ++ show (length remoteResult.vrIssues) ++ " issues"
 
-    runRepairLogic localMeta remoteMeta localIssues remoteIssues
+    runRepairLogic localMeta remoteMeta localResult.vrIssues remoteResult.vrIssues
         (executeFilesystemRepair cwd remotePath)
 
 -- | Repair against a cloud remote (bundle-based, uses rclone).
@@ -299,14 +299,14 @@ repairCloud cwd remote concurrency = do
 
     -- Verify both sides
     putStrLn "Verifying local files..."
-    (localCount, localIssues) <- Verify.verifyLocal cwd Nothing concurrency
-    putStrLn $ "  " ++ show localCount ++ " files checked, " ++ show (length localIssues) ++ " issues"
+    localResult <- Verify.verifyLocal cwd Nothing concurrency
+    putStrLn $ "  " ++ show localResult.vrCount ++ " files checked, " ++ show (length localResult.vrIssues) ++ " issues"
 
     putStrLn "Verifying remote files..."
-    (remoteCount, remoteIssues) <- Verify.verifyRemote cwd remote Nothing concurrency
-    putStrLn $ "  " ++ show remoteCount ++ " files checked, " ++ show (length remoteIssues) ++ " issues"
+    remoteResult <- Verify.verifyRemote cwd remote Nothing concurrency
+    putStrLn $ "  " ++ show remoteResult.vrCount ++ " files checked, " ++ show (length remoteResult.vrIssues) ++ " issues"
 
-    runRepairLogic localMeta remoteMeta localIssues remoteIssues
+    runRepairLogic localMeta remoteMeta localResult.vrIssues remoteResult.vrIssues
         (executeRepair cwd remote)
 
 -- | Common repair logic shared between filesystem and cloud remotes.
