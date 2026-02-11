@@ -22,11 +22,11 @@ import Bit.Types (BitM, BitEnv(..))
 import Bit.Concurrency (Concurrency)
 import qualified Bit.Verify as Verify
 import qualified Bit.Fsck as Fsck
-import Internal.Config (fetchedBundle)
+import Internal.Config (bundleForRemote)
 import Bit.Progress (reportProgress, clearProgress)
 
 import Bit.Core.Helpers (withRemote, printVerifyIssue, isFilesystemRemote)
-import Bit.Remote (Remote, remoteUrl, RemotePath(..))
+import Bit.Remote (Remote, remoteName, remoteUrl, RemotePath(..))
 
 -- | Whether to verify local working tree or remote.
 data VerifyTarget = VerifyLocal | VerifyRemote
@@ -82,7 +82,7 @@ verifyCloudRemote cwd remote concurrency = liftIO $ do
     putStrLn "Fetching remote metadata..."
     putStrLn "Scanning remote files..."
 
-    entries <- Verify.loadMetadataFromBundle fetchedBundle
+    entries <- Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
     let fileCount = length entries
 
     if fileCount > 5

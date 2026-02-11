@@ -14,7 +14,7 @@ module Bit.Core.Fetch
     , printFetchBanner
     ) where
 
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, void)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
@@ -24,9 +24,9 @@ import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(.
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
-import Internal.Config (fromCwdPath, bundleCwdPath, fetchedBundle, bundleGitRelPath, fromGitRelPath)
+import Internal.Config (fromCwdPath, bundleCwdPath, bundleForRemote, bundleGitRelPath, fromGitRelPath)
 import Bit.Core.Helpers (isFilesystemRemote, withRemote, safeRemove, checkFilesystemRemoteIsRepo)
-import System.Directory (copyFile)
+import System.Directory (copyFile, createDirectoryIfMissing)
 import Bit.Utils (trimGitOutput)
 
 -- ============================================================================
@@ -170,29 +170,33 @@ saveFetchedBundle :: Remote -> Maybe FilePath -> IO FetchOutcome
 saveFetchedBundle _remote Nothing = pure (FetchError "No bundle to save")
 saveFetchedBundle remote (Just bPath) = do
     let name = remoteName remote
-        fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
-        bundleGitPath = fromGitRelPath (bundleGitRelPath fetchedBundle)
+        bundleName = bundleForRemote name
+        fetchedPath = fromCwdPath (bundleCwdPath bundleName)
+        bundleGitPath = fromGitRelPath (bundleGitRelPath bundleName)
+
+    -- Ensure .git/bundles exists
+    createDirectoryIfMissing True (takeDirectory fetchedPath)
 
     -- Read old tracking ref hash (before overwriting)
     maybeOldHash <- revParseTrackingRef name
 
-    -- Copy bundle to local path
+    -- Copy bundle to per-remote path
     copyFile bPath fetchedPath
     safeRemove bPath
 
-    -- Register bundle as named git remote and fetch objects + refs
+    -- Register bundle as named git remote and fetch objects + refs into refs/remotes/<name>/main
     void $ Git.addRemote name bundleGitPath
     (fetchCode, _, _) <- Git.runGitWithOutput ["fetch", name]
 
     -- Read new tracking ref hash (populated by git fetch)
     maybeNewHash <- if fetchCode == ExitSuccess
         then revParseTrackingRef name
-        else Git.getHashFromBundle fetchedBundle  -- fallback
+        else Git.getHashFromBundle bundleName  -- fallback
 
     -- If git fetch didn't update the ref (e.g. bundle has no matching refspec),
     -- manually set it from the bundle hash
     when (fetchCode /= ExitSuccess || maybeNewHash == Nothing) $ do
-        mHash <- Git.getHashFromBundle fetchedBundle
+        mHash <- Git.getHashFromBundle bundleName
         case mHash of
             Just h  -> void $ Git.updateRemoteTrackingBranchToHash name h
             Nothing -> pure ()
@@ -224,7 +228,7 @@ renderFetchOutcome _remote (Updated { foOldHash = old, foNewHash = new }) = do
     putStrLn "Fetch complete."
 renderFetchOutcome remote (FetchedFirst newHash) = do
     putStrLn "Scanning remote..."
-    printFetchBanner (remoteName remote) "origin/main"
+    printFetchBanner (remoteName remote) (remoteName remote ++ "/main")
     putStrLn $ "Fetched: " ++ newHash
     putStrLn "Fetch complete."
 renderFetchOutcome _remote (FetchError err) = do

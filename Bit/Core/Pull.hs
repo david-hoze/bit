@@ -29,7 +29,7 @@ import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
-import Internal.Config (bitIndexPath, fetchedBundle)
+import Internal.Config (bitIndexPath, bundleForRemote)
 import qualified Bit.Scan as Scan
 import qualified Bit.Verify as Verify
 import qualified Bit.Conflict as Conflict
@@ -278,7 +278,7 @@ pullAcceptRemoteImpl remote = do
                           (\oh -> lift $ applyMergeToWorkingDir remoteRoot cwd oh) oldHead
 
                     -- 5. Update tracking ref
-                    maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
+                    maybeRemoteHash <- lift $ Git.getHashFromBundle (bundleForRemote name)
                     lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash name) maybeRemoteHash
 
                     lift $ tell "Pull with --accept-remote completed."
@@ -300,7 +300,7 @@ pullManualMergeImpl remote = do
                 FetchError err -> lift $ tellErr $ "Error: " ++ err
                 _ -> pure ()  -- No need to render fetch output during pull
 
-            entries <- lift $ Verify.loadMetadataFromBundle fetchedBundle
+            entries <- lift $ Verify.loadMetadataFromBundle (bundleForRemote name)
             let remoteMeta = Verify.binaryEntries entries
             lift $ tell "Scanning remote files... done."
             result <- lift $ Remote.Scan.fetchRemoteFiles remote
@@ -421,7 +421,7 @@ pullLogic remote _opts = do
                         lift $ do
                             applyMergeToWorkingDir remoteRoot cwd localHead
                             tell "Syncing binaries... done."
-                        maybeRemoteHash <- lift $ Git.getHashFromBundle fetchedBundle
+                        maybeRemoteHash <- lift $ Git.getHashFromBundle (bundleForRemote name)
                         lift $ traverse_ (void . Git.updateRemoteTrackingBranchToHash name) maybeRemoteHash
                       _ -> do
                         lift $ do

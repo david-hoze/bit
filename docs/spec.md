@@ -448,9 +448,11 @@ The `bit.Device` module handles remote type classification and device resolution
   - `type: device\ntarget: black_usb:Backup` (device identity for resolution)
 
 All remote types get a **named git remote** inside `.bit/index/.git`:
-- Filesystem: `git remote add dok1 /path/to/remote/.bit/index`
-- Cloud: `git remote add backup .git/fetched_remote.bundle` (bundle as URL)
-- Device: `git remote add usb1 /mnt/usb/.bit/index` (URL updated at operation time)
+- Filesystem: `git remote add dok1 /path/to/remote/.bit/index` — Git talks directly to the remote repo.
+- Cloud: `git remote add backup .git/bundles/backup.bundle` — Per-remote bundle; rclone downloads from `.bit/remotes/<name>` (rclone URL) first, then git fetches from the local bundle. Cloud has extra indirection: rclone → local bundle → git.
+- Device: `git remote add usb1 /mnt/usb/.bit/index` (URL updated at operation time) — Same as filesystem once resolved.
+
+**Cloud vs filesystem/device**: For cloud, the git remote URL and bit's actual target serve different purposes. The git remote points to a local bundle file (`.git/bundles/<name>.bundle`); bit's rclone target is in `.bit/remotes/<name>`. Rclone downloads the remote's bundle to the local file; then git fetches from that file. For filesystem/device, git talks directly to the remote repo — no bundle staging.
 
 The `bit.Remote` module provides type-aware resolution via `resolveRemote`:
 ```
@@ -489,6 +491,8 @@ For filesystem remotes, bit creates a **complete bit repository** at the remote:
 
 **Key insight**: Bundles exist to serialize git history over dumb transports that can only copy files. With filesystem access, git speaks its native protocol.
 
+**Filesystem remote receives pushes via direct path**: The remote side does not need a named git remote pointing back. Different machines with different local paths can push to the same filesystem remote; the pusher passes its path directly to `git fetch`.
+
 #### Filesystem Push Flow
 
 ```
@@ -496,7 +500,7 @@ filesystemPush :: FilePath -> Remote -> IO ()
 ```
 
 1. **First push (no `.bit/` at remote)**: Initialize a bit repo at the remote via `initializeRepoAt`
-2. **Fetch local into remote**: `git -C remote/.bit/index fetch local/.bit/index/.git main:refs/remotes/origin/main`
+2. **Fetch local into remote**: `git -C remote/.bit/index fetch local/.bit/index/.git main:refs/remotes/origin/main` — Uses direct path, no named remote at the remote. From the remote's perspective, whoever pushes is its origin; `refs/remotes/origin/main` means "what was last pushed here," not "a remote named origin" (same model as a bare git repo).
 3. **Fast-forward check**: Verify remote HEAD is ancestor of what we're pushing (`git merge-base --is-ancestor`)
 4. **Merge at remote**: `git -C remote/.bit/index merge --ff-only refs/remotes/origin/main`
 5. **Sync files**: Copy changed files from local working tree to remote working tree

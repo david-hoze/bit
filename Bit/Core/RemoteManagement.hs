@@ -34,7 +34,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
-import Internal.Config (bitDevicesDir, bitRemotesDir, fetchedBundle, bundleCwdPath, fromCwdPath, BundleName(..), bitIndexPath, bundleGitRelPath, fromGitRelPath)
+import Internal.Config (bitDevicesDir, bitRemotesDir, bundleForRemote, bundleCwdPath, fromCwdPath, BundleName(..), bitIndexPath, bundleGitRelPath, fromGitRelPath)
 import Bit.Types (BitM, BitEnv(..), Path(..), Hash(..), HashAlgo(..), hashToText)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -63,7 +63,7 @@ addRemote name pathOrUrl = do
         Device.CloudRemote url -> do
             Device.writeRemoteFile cwd name Device.RemoteCloud (Just url)
             -- Register bundle path as named git remote (bundle may not exist yet)
-            let bundleGitPath = fromGitRelPath (bundleGitRelPath fetchedBundle)
+            let bundleGitPath = fromGitRelPath (bundleGitRelPath (bundleForRemote name))
             void $ Git.addRemote name bundleGitPath
             putStrLn $ "Remote '" ++ name ++ "' added (" ++ url ++ ")."
         Device.FilesystemPath filePath -> addRemoteFilesystem cwd name filePath
@@ -192,7 +192,7 @@ remoteShow mRemoteName = do
                     if isFs
                         then liftIO $ showRefBasedRemoteStatus name (remoteUrl remote)
                         else do
-                            let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
+                            let fetchedPath = fromCwdPath (bundleCwdPath (bundleForRemote name))
                             hasBundle <- liftIO $ Dir.doesFileExist fetchedPath
                             if hasBundle
                                 then liftIO $ showRemoteStatusFromBundle name (Just (remoteUrl remote))
@@ -302,7 +302,7 @@ repairCloud cwd remote concurrency = do
     -- Load committed metadata (immune to scan updates)
     let localIndexDir = cwd </> bitIndexPath
     localMeta <- Verify.loadCommittedBinaryMetadata localIndexDir
-    entries <- Verify.loadMetadataFromBundle fetchedBundle
+    entries <- Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
     let remoteMeta = Verify.binaryEntries entries
 
     -- Verify both sides
@@ -565,7 +565,7 @@ showRemoteStatusFromBundle name mUrl = do
     maybeLocal <- Git.getLocalHead
     let url = fromMaybe "?" mUrl
     printRemoteShowBanner name url
-    compareHistory maybeLocal fetchedBundle
+    compareHistory maybeLocal (bundleForRemote name)
 
 -- | Status of local ref relative to remote (for 'bit remote show' push message).
 data PushRefStatus

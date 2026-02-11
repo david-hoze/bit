@@ -36,7 +36,7 @@ import Bit.Internal.Metadata (MetaContent(..), parseMetadata, parseMetadataFile,
 import qualified Bit.Remote.Scan as Remote.Scan
 import qualified Bit.Remote
 import qualified Internal.Transport as Transport
-import Internal.Config (fetchedBundle, bitIndexPath, bundleCwdPath, fromCwdPath, BundleName)
+import Internal.Config (bundleForRemote, bitIndexPath, bundleCwdPath, fromCwdPath, BundleName)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
@@ -324,14 +324,16 @@ loadMetadataFromBundle bundleName = do
 -- If an IORef counter is provided, it will be incremented after each file is checked.
 verifyRemote :: FilePath -> Bit.Remote.Remote -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
 verifyRemote cwd remote mCounter _concurrency = do
-  -- 1. Fetch the remote bundle if needed
-  let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
+  -- 1. Fetch the remote bundle if needed (per-remote bundle path)
+  let bundleName = bundleForRemote (Bit.Remote.remoteName remote)
+      fetchedPath = fromCwdPath (bundleCwdPath bundleName)
   bundleExists <- doesFileExist fetchedPath
   unless bundleExists $ do
     let localDest = ".bit/temp_remote.bundle"
     fetchResult <- Transport.copyFromRemoteDetailed remote ".bit/bit.bundle" localDest
     case fetchResult of
       Transport.CopySuccess -> do
+        createDirectoryIfMissing True (takeDirectory fetchedPath)
         BS.readFile localDest >>= BS.writeFile fetchedPath
         when (localDest /= fetchedPath) $ safeRemove localDest
       _ -> do
@@ -343,7 +345,7 @@ verifyRemote cwd remote mCounter _concurrency = do
     then pure (VerifyResult 0 [])
     else do
       -- 2. Load metadata from bundle (classifies entries; fetches bundle into .bit/index)
-      entries <- loadMetadataFromBundle fetchedBundle
+      entries <- loadMetadataFromBundle bundleName
       let allKnownPaths = allEntryPaths entries
 
       -- 3. Fetch remote file list via rclone ls

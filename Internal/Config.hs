@@ -20,17 +20,14 @@ bitRemotesDir    = bitDir </> "remotes"
 bitIndexPath     = bitDir </> "index"
 bitGitDir        = bitIndexPath </> ".git"
 
--- | The logical name of the fetched remote bundle
-fetchedBundle :: BundleName
-fetchedBundle = BundleName "fetched_remote"
+-- | Per-remote bundle for cloud remotes. Each remote gets its own bundle at .git/bundles/<name>.bundle
+-- so sequential fetches (e.g. bit fetch gdrive; bit fetch backup) don't clobber each other.
+bundleForRemote :: String -> BundleName
+bundleForRemote name = BundleName ("bundles/" ++ sanitizeRemoteName name)
 
--- | Legacy string name for gradual migration
-fetchedBundleName :: FilePath
-fetchedBundleName = "fetched_remote"
-
--- | Legacy CWD path for gradual migration
-fetchedBundlePath :: FilePath
-fetchedBundlePath = bitIndexPath </> ".git" </> (fetchedBundleName ++ ".bundle")
+-- | Sanitize remote name for use in file paths (replace path separators and colons).
+sanitizeRemoteName :: String -> String
+sanitizeRemoteName = map (\c -> if c `elem` ['/','\\',':'] then '_' else c)
 
 -- | Convert a bundle name to a path relative to git working directory (.bit/index/)
 -- Use this for git commands that run with -C .bit/index

@@ -18,13 +18,13 @@ module Bit.Core.Push
 
 import qualified System.Directory as Dir
 import qualified Bit.Platform as Platform
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, unless, void, forM_)
 import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
-import Internal.Config (fetchedBundle, BundleName(..), bundleCwdPath, fromCwdPath)
+import Internal.Config (bundleForRemote, BundleName(..), bundleCwdPath, fromCwdPath)
 import Bit.Utils (trimGitOutput, toPosix)
 import qualified Bit.Pipeline as Pipeline
 import qualified Bit.Remote.Scan as Remote.Scan
@@ -94,7 +94,7 @@ cloudPush remote = do
             liftIO $ putStrLn "Remote is empty. Initializing..."
             syncRemoteFiles
             liftIO $ pushBundle remote
-            updateLocalBundleAfterPush
+            updateLocalBundleAfterPush remote
 
         StateValidRgit -> do
             fetchResult <- liftIO $ do
@@ -102,11 +102,13 @@ cloudPush remote = do
                 fetchBundle remote
             case fetchResult of
                 BundleFound bPath -> do
-                    let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
+                    let bundleName = bundleForRemote (remoteName remote)
+                        fetchedPath = fromCwdPath (bundleCwdPath bundleName)
                     liftIO $ do
+                        Dir.createDirectoryIfMissing True (takeDirectory fetchedPath)
                         copyFile bPath fetchedPath
                         safeRemove bPath
-                    processExistingRemote
+                    processExistingRemote remote
                 _ -> liftIO $ hPutStrLn stderr "Error: Remote .bit found but metadata is missing."
 
         StateNonRgitOccupied samples ->
@@ -115,7 +117,7 @@ cloudPush remote = do
                     liftIO $ hPutStrLn stderr "Warning: --force used. Overwriting non-bit remote..."
                     syncRemoteFiles
                     liftIO $ pushBundle remote
-                    updateLocalBundleAfterPush
+                    updateLocalBundleAfterPush remote
                 _ -> liftIO $ do
                     hPutStrLn stderr "-------------------------------------------------------"
                     hPutStrLn stderr "[!] STOP: Remote is NOT a bit repository!"
@@ -246,18 +248,16 @@ pushToRemote :: Remote -> BitM ()
 pushToRemote remote = do
   syncRemoteFiles
   liftIO $ pushBundle remote
-  updateLocalBundleAfterPush
+  updateLocalBundleAfterPush remote
 
--- | After a successful push, update the local fetched_remote.bundle to current HEAD
+-- | After a successful push, update the local bundle for this remote to current HEAD
 -- so bit status shows up to date instead of "ahead of remote".
-updateLocalBundleAfterPush :: BitM ()
-updateLocalBundleAfterPush = do
-    mRemote <- asks envRemote
-    code <- liftIO $ Git.createBundle fetchedBundle
+updateLocalBundleAfterPush :: Remote -> BitM ()
+updateLocalBundleAfterPush remote = do
+    let bundleName = bundleForRemote (remoteName remote)
+    code <- liftIO $ Git.createBundle bundleName
     case code of
-        ExitSuccess -> case mRemote of
-            Just remote -> void $ liftIO $ Git.updateRemoteTrackingBranchToHead (remoteName remote)
-            Nothing     -> pure ()
+        ExitSuccess -> void $ liftIO $ Git.updateRemoteTrackingBranchToHead (remoteName remote)
         _ -> pure ()
 
 syncRemoteFiles :: BitM ()
@@ -290,26 +290,26 @@ syncRemoteFiles = withRemote $ \remote -> do
     isCopy (Copy _ _) = True
     isCopy _          = False
 
-processExistingRemote :: BitM ()
-processExistingRemote = do
+processExistingRemote :: Remote -> BitM ()
+processExistingRemote remote = do
     fMode <- asks envForceMode
-    mRemote <- asks envRemote
+    let bundleName = bundleForRemote (remoteName remote)
     case fMode of
       Force -> do
             lift $ tellErr "Warning: --force used. Overwriting remote history..."
-            maybe (lift $ tellErr "Error: No remote configured.") pushToRemote mRemote
+            pushToRemote remote
       ForceWithLease -> do
-                    maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
-                    let fetchedPath = fromCwdPath (bundleCwdPath fetchedBundle)
+                    maybeRemoteHash <- liftIO $ Git.getHashFromBundle bundleName
+                    let fetchedPath = fromCwdPath (bundleCwdPath bundleName)
                     hasFetchedBundle <- lift $ fileExistsE fetchedPath
 
                     case (maybeRemoteHash, hasFetchedBundle) of
                         (Just rHash, True) -> do
-                            maybeFetchedHash <- liftIO $ Git.getHashFromBundle fetchedBundle
+                            maybeFetchedHash <- liftIO $ Git.getHashFromBundle bundleName
                             case maybeFetchedHash of
                                 Just fileHash | rHash == fileHash -> do
                                     lift $ tell "Remote check passed (--force-with-lease). Proceeding with push..."
-                                    maybe (lift $ tellErr "Error: No remote configured.") pushToRemote mRemote
+                                    pushToRemote remote
                                 Just _fHash -> lift $ do
                                     tellErr "---------------------------------------------------"
                                     tellErr "ERROR: Remote has changed since last fetch!"
@@ -319,10 +319,10 @@ processExistingRemote = do
                                 Nothing -> lift $ tellErr "Error: Could not extract hash from fetched bundle."
                         (Just _, False) -> do
                             lift $ tellErr "Warning: No local fetched bundle found. Proceeding with push (--force-with-lease)..."
-                            maybe (lift $ tellErr "Error: No remote configured.") pushToRemote mRemote
+                            pushToRemote remote
                         (Nothing, _) -> lift $ tellErr "Error: Could not extract hash from remote bundle."
       NoForce -> do
-                    maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
+                    maybeRemoteHash <- liftIO $ Git.getHashFromBundle bundleName
                     maybeLocalHash <- lift getLocalHeadE
 
                     case (maybeLocalHash, maybeRemoteHash) of
@@ -332,7 +332,7 @@ processExistingRemote = do
                             if isAhead
                                 then do
                                     lift $ tell "Remote check passed. Proceeding with push..."
-                                    maybe (lift $ tellErr "Error: No remote configured.") pushToRemote mRemote
+                                    pushToRemote remote
                                 else lift $ do
                                     tellErr "---------------------------------------------------"
                                     tellErr "ERROR: Remote history has diverged or is ahead!"

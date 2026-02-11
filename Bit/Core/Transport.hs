@@ -26,7 +26,7 @@ import System.Exit (ExitCode(..))
 import qualified Internal.Git as Git
 import Internal.Git (NameStatusChange(Added, Deleted, Modified, Renamed, Copied))
 import qualified Internal.Transport as Transport
-import Internal.Config (bitIndexPath, fetchedBundle)
+import Internal.Config (bitIndexPath, bundleForRemote)
 import Data.List (isPrefixOf)
 import Bit.Utils (toPosix)
 import Bit.Plan (RcloneAction(..))
@@ -306,7 +306,7 @@ syncBinariesAfterMerge remote oldHead = do
     liftIO $ putStrLn "Syncing binaries... done."
     -- Apply diff-based sync or full sync depending on whether we have an old HEAD
     liftIO $ maybe (syncAllFilesFromHEAD remoteRoot cwd) (applyMergeToWorkingDir remoteRoot cwd) oldHead
-    maybeRemoteHash <- liftIO $ Git.getHashFromBundle fetchedBundle
+    maybeRemoteHash <- liftIO $ Git.getHashFromBundle (bundleForRemote (remoteName remote))
     liftIO $ traverse_ (void . Git.updateRemoteTrackingBranchToHash name) maybeRemoteHash
 
 -- | Execute a non-copy rclone action (push: local -> remote).

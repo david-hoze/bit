@@ -49,7 +49,7 @@ Key types and conventions used throughout this codebase:
 | `BundleName` | `newtype` over `String` — logical bundle name, not a path | `Internal.Config` |
 | `GitRelPath` | `newtype` — path relative to `.bit/index/` (for git commands) | `Internal.Config` |
 | `CwdPath` | `newtype` — path relative to CWD (for filesystem operations) | `Internal.Config` |
-| `fetchedBundle` | Constant `BundleName "fetched_remote"` | `Internal.Config` |
+| `bundleForRemote` | `String -> BundleName` — per-remote bundle at `.git/bundles/<name>.bundle` | `Internal.Config` |
 | `DangerousPattern` | Record: dpPattern, dpReason, dpFix — test lint patterns, replaces (String, String, String) | `test/LintTestFiles.hs` |
 | `HelpItem` | Record: hiItem, hiDescription — option/example in command help, replaces (String, String) | `Bit.Help` |
 
