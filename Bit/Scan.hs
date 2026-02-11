@@ -26,7 +26,7 @@ import System.Directory
       copyFileWithMetadata,
       getModificationTime )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, stderr)
-import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf, partition)
+import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf)
 import Data.Either (isRight)
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
@@ -52,6 +52,10 @@ import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]
 binaryExtensions = [".mp4", ".zip", ".bin", ".exe", ".dll", ".so", ".dylib", ".jpg", ".jpeg", ".png", ".gif", ".pdf", ".gz", ".bz2", ".xz", ".tar", ".rar", ".7z", ".iso", ".img", ".dmg", ".deb", ".rpm", ".msi"]
+
+-- | Internal: scanned path before hashing. Distinguishes dirs from files without boolean blindness.
+data ScannedEntry = ScannedFile FilePath | ScannedDir FilePath
+  deriving (Show, Eq)
 
 -- | Single-pass file hash and classification. Returns (hash, contentType).
 -- For large files or binary extensions: streams hash only, returns BinaryContent.
@@ -242,15 +246,14 @@ scanWorkingDir root = do
     
       -- First pass: collect all paths (without hashing)
       allPaths <- collectPaths root
-    
+
       -- Filter through git check-ignore
-      let filePaths = [p | (p, False) <- allPaths]  -- Only check files, not directories
+      let filePaths = [p | ScannedFile p <- allPaths]
       ignoredSet <- checkIgnoredFiles root filePaths
-    
+
       -- Separate directories from files to hash
-      let (dirs, _files) = partition snd allPaths
-          dirEntries = [FileEntry { path = Path rel, kind = Directory } | (rel, _) <- dirs]
-          filesToHash = [(rel, root </> rel) | (rel, False) <- allPaths
+      let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
+          filesToHash = [(rel, root </> rel) | ScannedFile rel <- allPaths
                                              , not (Set.member (normalizePath rel) ignoredSet)]
     
       -- Setup progress tracking
@@ -301,7 +304,7 @@ scanWorkingDir root = do
     
       pure $ dirEntries ++ fileEntries
   where
-    collectPaths :: FilePath -> IO [(FilePath, Bool)]
+    collectPaths :: FilePath -> IO [ScannedEntry]
     collectPaths path = do
       isDir <- doesDirectoryExist path
       let rel = makeRelative root path
@@ -317,8 +320,8 @@ scanWorkingDir root = do
             names <- listDirectory path
             let children = map (path </>) names
             childPaths <- concat <$> mapM collectPaths children
-            pure ((rel, True) : childPaths)
-        else pure [(rel, False)]
+            pure (ScannedDir rel : childPaths)
+        else pure [ScannedFile rel]
 
 writeMetadataFiles :: FilePath -> [FileEntry] -> IO ()
 writeMetadataFiles root entries = do
