@@ -1,42 +1,42 @@
 # Setup: clean environment and initialize repo
-rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init
+rmdir /s /q test\cli\output\work_initcfg 2>nul & mkdir test\cli\output\work_initcfg & cd test\cli\output\work_initcfg & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Verify init.defaultBranch was set to "main"
-cd test\cli\output\work & git -C .bit\index config --get init.defaultBranch
+cd test\cli\output\work_initcfg & git -C .bit\index config --get init.defaultBranch
 <<<
 >>>
 main
 >>>= 0
 
 # Verify core.quotePath was set to "false" (for Unicode filename support)
-cd test\cli\output\work & git -C .bit\index config --get core.quotePath
+cd test\cli\output\work_initcfg & git -C .bit\index config --get core.quotePath
 <<<
 >>>
 false
 >>>= 0
 
 # Verify merge driver was configured
-cd test\cli\output\work & git -C .bit\index config --get merge.bit-metadata.driver
+cd test\cli\output\work_initcfg & git -C .bit\index config --get merge.bit-metadata.driver
 <<<
 >>>
 false
 >>>= 0
 
 # Verify bit status works after init (proves git commands work)
-cd test\cli\output\work & bit status
+cd test\cli\output\work_initcfg & bit status
 <<<
 >>>= 0
 
 # Verify bit add works after init
-cd test\cli\output\work & echo test> file.txt & bit add file.txt
+cd test\cli\output\work_initcfg & echo test> file.txt & bit add file.txt
 <<<
 >>>= 0
 
 # Verify bit commit works after init
-cd test\cli\output\work & bit commit -m "test commit"
+cd test\cli\output\work_initcfg & bit commit -m "test commit"
 <<<
 >>> /\[main|master|file/
 >>>= 0

@@ -158,9 +158,8 @@ mergeContinue = do
                     liftIO $ do
                         void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
                         putStrLn "Merge complete."
-                    traverse_ (\remote -> do
-                            transport <- liftIO $ Transport.mkTransportForRemote cwd remote
-                            Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
+                    traverse_ (\remote ->
+                            Transport.syncBinariesAfterMerge remote oldHead) mRemote
                 _ -> liftIO dieNoMergeInProgress
        | otherwise -> do
                 invalid <- liftIO $ Metadata.validateMetadataDir (cwd </> bitIndexPath)
@@ -183,9 +182,8 @@ mergeContinue = do
                     removeDirectoryRecursive conflictsDir
                     putStrLn "Conflict directories cleaned up."
 
-                traverse_ (\remote -> do
-                        transport <- liftIO $ Transport.mkTransportForRemote cwd remote
-                        Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
+                traverse_ (\remote ->
+                        Transport.syncBinariesAfterMerge remote oldHead) mRemote
 
 mergeAbort :: IO ()
 mergeAbort = doMergeAbort

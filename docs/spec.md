@@ -285,37 +285,30 @@ This is used consistently across:
 - `mergeContinue`
 
 The only exception is **first pull** (`oldHead = Nothing`): there is no
-previous HEAD to diff against, so `transportSyncAllFiles` (full sync from
+previous HEAD to diff against, so `syncAllFilesFromHEAD` (full sync from
 current HEAD after checkout) is used as fallback.
 
-### File Transport Abstraction
+### Unified File Transfer via rclone
 
-To eliminate duplication between cloud and filesystem pull paths, the merge
-orchestration logic is now unified with a `FileTransport` abstraction that
-captures the differences in how files are copied:
+All file transfers (cloud and filesystem) use `rcloneCopyFiles` as the universal
+transfer primitive. One `rclone copy --files-from` subprocess per sync operation,
+regardless of whether the destination is local or cloud. Text files (content
+stored in index metadata) are copied individually from the index; only binary
+files go through the rclone batch.
 
-```haskell
-data FileTransport = FileTransport
-  { transportDownloadFile :: FilePath -> FilePath -> SyncProgress -> IO ()
-  , transportSyncAllFiles :: FilePath -> IO ()
-  }
-```
+**Key functions** (Bit.Core.Transport):
+- `syncAllFilesFromHEAD`: First pull — lists files from HEAD, classifies text/binary, copies text from index, batches binary via `rcloneCopyFiles`
+- `applyMergeToWorkingDir`: Merge pull — diffs oldHead..newHead, processes deletions, copies text from index, batches binary via `rcloneCopyFiles`
 
-**Cloud transport** (rclone-based):
-- `transportDownloadFile`: Downloads a single file via `rclone copyto`, or copies text from index
-- `transportSyncAllFiles`: Scans remote via `rclone lsjson`, diffs against local, syncs files
+**Push** (Bit.Core.Push):
+- `syncRemoteFiles`: Partitions Copy actions from Move/Delete/Swap. Copies are batched into a single `rcloneCopyFiles` call; non-copies are executed individually.
+- `filesystemSyncAllFiles`/`filesystemSyncChangedFiles`: Same pattern for filesystem push.
 
-**Filesystem transport** (direct file copy):
-- `transportDownloadFile`: Copies a single file directly, or copies text from index
-- `transportSyncAllFiles`: Uses `git ls-tree HEAD` after checkout, copies files from remote working tree
-
-The unified `pullLogic` and `pullAcceptRemoteImpl` now accept a `FileTransport`
-parameter. Both cloud and filesystem paths use the same merge orchestration,
-`oldHead` capture pattern, conflict resolution (`Conflict.resolveAll`), and
-tracking ref updates. The only difference is the transport used to copy files.
-Push, pull, fetch, and verify dispatch on remote type via `isFilesystemRemote`
-(Bit.Core.Helpers). Building the appropriate transport is centralized in
-`mkTransportForRemote` (Bit.Core.Transport), used by pull and merge flows.
+Both cloud and filesystem paths use the same functions parameterized by a remote
+root string (`remoteUrl remote`). rclone handles both local-to-local and
+local-to-cloud transfers transparently. Pull, push, and merge orchestration share
+the same `oldHead` capture pattern, conflict resolution (`Conflict.resolveAll`),
+and tracking ref updates.
 
 ### Conflict Resolution
 
@@ -525,23 +518,19 @@ filesystemPull :: FilePath -> Remote -> PullOptions -> IO ()
 
 1. **Fetch remote into local**: `git -C local/.bit/index fetch remote/.bit/index/.git main:refs/remotes/origin/main`
 2. **Proof of possession**: Verify remote working tree matches remote metadata (unless `--accept-remote`)
-3. **Build filesystem transport**: Create a `FileTransport` that copies files directly from remote working tree
-4. **Merge locally**: Delegate to unified `pullLogic` or `pullAcceptRemoteImpl`
+3. **Merge locally**: Delegate to unified `pullLogic` or `pullAcceptRemoteImpl`
    - Note: Upstream tracking (`branch.main.remote`) is NOT auto-set; user must use `bit push -u <remote>`
 5. **Sync files**: The unified logic uses the filesystem transport to copy files
    - Text files: Copy from local index (git merged the content there)
    - Binary files: Copy from remote working tree
 6. **Update tracking ref**: Set `refs/remotes/origin/main` to the remote's HEAD hash
 
-**Key change**: Filesystem pull now uses the same merge orchestration as cloud pull,
-just with a different `FileTransport`. The merge follows the same patterns:
-- First pull (unborn branch): `checkoutRemoteAsMain` (with `--no-track` to prevent auto-setting upstream) then `transportSyncAllFiles`
-- Normal: `git merge --no-commit --no-ff` then `applyMergeToWorkingDir transport cwd oldHead`
+**Key change**: Filesystem pull uses the same merge orchestration as cloud pull,
+parameterized by a remote root string (`remoteUrl remote`). The merge follows the same patterns:
+- First pull (unborn branch): `checkoutRemoteAsMain` (with `--no-track` to prevent auto-setting upstream) then `syncAllFilesFromHEAD`
+- Normal: `git merge --no-commit --no-ff` then `applyMergeToWorkingDir remoteRoot cwd oldHead`
 - Conflicts: Same `Conflict.resolveAll` flow with (l)ocal/(r)emote choices
-- `--accept-remote`: Force-checkout (with `--no-track`) then sync files via transport
-
-This eliminates the previous duplication where `filesystemPullNormal` and
-`filesystemPullAcceptRemote` reimplemented the merge flow separately.
+- `--accept-remote`: Force-checkout (with `--no-track`) then sync files via `syncAllFilesFromHEAD`/`applyMergeToWorkingDir`
 
 #### Text vs Binary File Sync
 
@@ -1144,11 +1133,11 @@ Interactive per-file conflict resolution:
     This split is keyed off `Device.readRemoteType`/`isFilesystemType` and happens
     in `Bit.Core.push` and `Bit.Core.pull`. **Merge orchestration is unified**: Both
     cloud and filesystem pull paths use the same `pullLogic` and
-    `pullAcceptRemoteImpl` functions, parameterized by a `FileTransport` that
-    abstracts how files are copied. The transport is the only difference — all
-    `oldHead` capture, conflict resolution, tracking ref updates, and MERGE_HEAD
-    handling is shared. This eliminates the duplication that previously existed
-    where filesystem pull reimplemented the merge flow separately.
+    `pullAcceptRemoteImpl` functions, parameterized by a remote root string
+    (`remoteUrl remote`). File transfers use `rcloneCopyFiles` (batch via
+    `rclone copy --files-from`) which handles both local and cloud destinations.
+    All `oldHead` capture, conflict resolution, tracking ref updates, and MERGE_HEAD
+    handling is shared.
 
 13. **Filesystem remotes are full repos**: When pushing to a filesystem path,
     bit creates a complete bit repository at the remote (via `initializeRepoAt`).

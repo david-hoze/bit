@@ -19,22 +19,21 @@ module Bit.Core.Push
 import qualified System.Directory as Dir
 import qualified Bit.Platform as Platform
 import System.FilePath ((</>))
-import Control.Monad (when, unless, void)
+import Control.Monad (when, unless, void, forM_)
 import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (fetchedBundle, BundleName(..), bundleCwdPath, fromCwdPath)
-import Bit.Utils (trimGitOutput)
+import Bit.Utils (trimGitOutput, toPosix)
 import qualified Bit.Pipeline as Pipeline
 import qualified Bit.Remote.Scan as Remote.Scan
 import qualified Data.List as List
-import Bit.Concurrency (runConcurrentlyBounded)
-import Control.Concurrent (getNumCapabilities)
 import System.IO (stderr, hPutStrLn)
 import Control.Exception (bracket)
 import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), displayRemote, RemotePath(..))
-import Bit.Types (BitM, BitEnv(..), ForceMode(..))
+import Bit.Plan (RcloneAction(..))
+import Bit.Types (BitM, BitEnv(..), ForceMode(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
@@ -274,17 +273,22 @@ syncRemoteFiles = withRemote $ \remote -> do
             if null actions
                 then liftIO $ putStrLn "Remote is already up to date."
                 else do
-                    -- Create progress tracker for cloud operations (file-count only)
+                    let (copies, others) = List.partition isCopy actions
+                        copyPaths = [toPosix (unPath src) | Copy src _ <- copies]
+                    -- Create progress tracker for all actions
                     progress <- liftIO $ CopyProgress.newSyncProgress (length actions)
                     liftIO $ CopyProgress.withSyncProgressReporter progress $ do
-                        -- Use lower concurrency for network/subprocess operations
-                        caps <- getNumCapabilities
-                        let concurrency = min 8 (max 2 (caps * 2))
-                        void $ runConcurrentlyBounded concurrency (\a -> do
+                        -- Batch all copies into a single rclone subprocess
+                        unless (null copyPaths) $
+                            CopyProgress.rcloneCopyFiles cwd (remoteUrl remote) copyPaths progress
+                        -- Non-copy actions individually
+                        forM_ others $ \a -> do
                             executeCommand cwd remote a
-                            CopyProgress.incrementFilesComplete progress
-                            ) actions)
+                            CopyProgress.incrementFilesComplete progress)
         remoteResult
+  where
+    isCopy (Copy _ _) = True
+    isCopy _          = False
 
 processExistingRemote :: BitM ()
 processExistingRemote = do

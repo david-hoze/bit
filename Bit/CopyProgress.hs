@@ -1,29 +1,37 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | Progress reporting for file copy operations.
--- Provides chunked binary copy with byte-level progress tracking.
+-- Provides rclone-based batch file copy with progress tracking via JSON logs.
 module Bit.CopyProgress
     ( SyncProgress(..)
     , newSyncProgress
-    , copyFileWithProgress
+    , rcloneCopyFiles
     , withSyncProgressReporter
     , incrementFilesComplete
     ) where
 
 import System.IO
-    ( withBinaryFile, IOMode(ReadMode, WriteMode)
-    , hGetBuf, hPutBuf
-    , hIsTerminalDevice, hPutStrLn, stderr
+    ( hIsTerminalDevice, hPutStrLn, hPutStr, stderr
+    , hIsEOF, hClose, Handle
     )
+import System.Process (CreateProcess(..), StdStream(..), proc, createProcess, waitForProcess, terminateProcess)
+import System.Exit (ExitCode(..))
 import Bit.Progress (reportProgress, clearProgress)
-import Bit.Platform (createDirectoryIfMissing, copyFile)
-import System.FilePath (takeDirectory)
-import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
+import Data.IORef (IORef, newIORef, readIORef, writeIORef, atomicModifyIORef')
 import Control.Concurrent (forkIO, threadDelay, killThread)
-import Control.Exception (finally)
-import Control.Monad (when)
-import Foreign.Marshal.Alloc (allocaBytes)
-import Bit.Utils (formatBytes)
+import Control.Concurrent.Async (async, wait)
+import Control.Exception (finally, bracket, try, SomeException, throwIO)
+import Control.Monad (when, void, unless)
+import Bit.Utils (formatBytes, toPosix)
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.IO (openTempFile)
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString as BS
+import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8')
+import GHC.Generics (Generic)
+import Data.Maybe (fromMaybe)
 
 -- | Shared progress state for sync operations (push/pull).
 data SyncProgress = SyncProgress
@@ -51,46 +59,177 @@ newSyncProgress total = do
 
 -- | Increment the files complete counter.
 incrementFilesComplete :: SyncProgress -> IO ()
-incrementFilesComplete progress = 
+incrementFilesComplete progress =
     atomicModifyIORef' (spFilesComplete progress) (\n -> (n + 1, ()))
 
--- | Copy a file with progress reporting. Uses chunked binary copy for large files.
--- For files smaller than the threshold, uses plain copyFile (no progress overhead).
--- Updates the progress counters during copy.
-copyFileWithProgress :: FilePath -> FilePath -> Integer -> SyncProgress -> IO ()
-copyFileWithProgress src dest fileSize progress = do
-    let sizeThreshold = 1024 * 1024  -- 1MB threshold
-    if fileSize < sizeThreshold
-        then do
-            -- Small file: use plain copyFile, no chunked progress
-            createDirectoryIfMissing True (takeDirectory dest)
-            copyFile src dest
-            -- Still update byte counter for aggregate progress
-            atomicModifyIORef' (spBytesCopied progress) (\n -> (n + fileSize, ()))
-        else do
-            -- Large file: chunked copy with progress
-            createDirectoryIfMissing True (takeDirectory dest)
-            copyFileChunked src dest fileSize (spBytesCopied progress)
+-- ============================================================================
+-- rclone batch copy via --files-from
+-- ============================================================================
 
--- | Chunked binary copy with progress updates. Uses strict IO (no lazy ByteString).
--- Chunk size: 64KB (good balance between IO syscalls and memory usage).
-copyFileChunked :: FilePath -> FilePath -> Integer -> IORef Integer -> IO ()
-copyFileChunked src dest _expectedSize bytesRef = do
-    let chunkSize = 64 * 1024  -- 64KB chunks
-    allocaBytes chunkSize $ \buffer ->
-        withBinaryFile src ReadMode $ \hIn ->
-            withBinaryFile dest WriteMode $ \hOut -> do
-                let loop !bytesSoFar = do
-                        count <- hGetBuf hIn buffer chunkSize
-                        if count == 0
-                            then pure ()  -- EOF
-                            else do
-                                hPutBuf hOut buffer count
-                                let newTotal = bytesSoFar + fromIntegral count
-                                -- Update progress counter atomically
-                                atomicModifyIORef' bytesRef (\n -> (n + fromIntegral count, ()))
-                                loop newTotal
-                loop (0 :: Integer)
+-- | JSON log line from rclone --use-json-log output (permissive parsing).
+data RcloneLogLine = RcloneLogLine
+    { rllLevel  :: Maybe String
+    , rllMsg    :: Maybe String
+    , rllObject :: Maybe String
+    , rllSize   :: Maybe Integer
+    , rllStats  :: Maybe RcloneStats
+    } deriving (Show, Generic)
+
+instance Aeson.FromJSON RcloneLogLine where
+    parseJSON = Aeson.withObject "RcloneLogLine" $ \v -> RcloneLogLine
+        <$> v Aeson..:? "level"
+        <*> v Aeson..:? "msg"
+        <*> v Aeson..:? "object"
+        <*> v Aeson..:? "size"
+        <*> v Aeson..:? "stats"
+
+-- | Stats block from rclone JSON log.
+data RcloneStats = RcloneStats
+    { rsBytes          :: Maybe Integer
+    , rsTotalBytes     :: Maybe Integer
+    , rsTransfers      :: Maybe Int
+    , rsTotalTransfers :: Maybe Int
+    } deriving (Show, Generic)
+
+instance Aeson.FromJSON RcloneStats where
+    parseJSON = Aeson.withObject "RcloneStats" $ \v -> RcloneStats
+        <$> v Aeson..:? "bytes"
+        <*> v Aeson..:? "totalBytes"
+        <*> v Aeson..:? "transfers"
+        <*> v Aeson..:? "totalTransfers"
+
+-- | Batch-copy files from src to dst using a single rclone subprocess.
+-- Uses --files-from to pass the list of relative paths. Progress is updated
+-- from rclone's JSON log output on stderr.
+--
+-- src and dst can be local paths or rclone remote specs (e.g. "gdrive:path").
+-- The file paths must be relative to both src and dst roots.
+rcloneCopyFiles :: String -> String -> [FilePath] -> SyncProgress -> IO ()
+rcloneCopyFiles _ _ [] _ = pure ()
+rcloneCopyFiles src dst files progress = do
+    tmpDir <- getTemporaryDirectory
+    bracket (openTempFile tmpDir "bit-files-.txt") cleanupTmpFile $ \(tmpPath, tmpHandle) -> do
+        -- Write one posix-style path per line
+        mapM_ (\f -> hPutStr tmpHandle (toPosix f ++ "\n")) files
+        hClose tmpHandle
+
+        let args = [ "copy"
+                   , toPosix src
+                   , toPosix dst
+                   , "--files-from", tmpPath
+                   , "--use-json-log"
+                   , "--stats", "0.5s"
+                   , "-v"
+                   , "--retries", "3"
+                   , "--low-level-retries", "10"
+                   , "--no-traverse"
+                   ]
+            cp = (proc "rclone" args)
+                   { std_out = NoStream
+                   , std_err = CreatePipe
+                   , std_in  = NoStream
+                   }
+
+        errorsRef <- newIORef ([] :: [String])
+
+        bracket (createProcess cp) cleanupProcess $ \(_, _, mStderr, ph) -> do
+            case mStderr of
+                Just hErr -> do
+                    -- CRITICAL: drain stderr concurrently before waitForProcess
+                    -- to avoid pipe deadlock (same pattern as Internal/Transport.hs:241-249)
+                    asyncDrain <- async (drainStderr hErr progress errorsRef)
+                    wait asyncDrain
+                    code <- waitForProcess ph
+                    case code of
+                        ExitSuccess -> pure ()
+                        ExitFailure n -> do
+                            errors <- readIORef errorsRef
+                            let errMsg = "rclone copy failed (exit code " ++ show n ++ ")"
+                                    ++ if null errors then ""
+                                       else ":\n" ++ unlines errors
+                            throwIO (userError errMsg)
+                Nothing -> do
+                    code <- waitForProcess ph
+                    case code of
+                        ExitSuccess -> pure ()
+                        ExitFailure n ->
+                            throwIO (userError $ "rclone copy failed (exit code " ++ show n ++ ")")
+  where
+    cleanupTmpFile (path, h) = do
+        void (try (hClose h) :: IO (Either SomeException ()))
+        void (try (removeFile path) :: IO (Either SomeException ()))
+
+    cleanupProcess (mIn, _mOut, mErr, ph) = do
+        void (try (traverse_ hClose mIn) :: IO (Either SomeException ()))
+        void (try (traverse_ hClose mErr) :: IO (Either SomeException ()))
+        void (try (terminateProcess ph) :: IO (Either SomeException ()))
+        void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
+
+    traverse_ f = maybe (pure ()) f
+
+-- | Drain rclone stderr, parsing JSON log lines to update progress.
+-- Reads raw ByteString to preserve UTF-8 (non-ASCII filenames in JSON).
+-- Uses delta-based increments so counters compose safely with other writers.
+drainStderr :: Handle -> SyncProgress -> IORef [String] -> IO ()
+drainStderr h progress errorsRef = do
+    -- Track last-reported absolute values to compute deltas
+    lastBytesRef      <- newIORef (0 :: Integer)
+    lastTotalBytesRef <- newIORef (0 :: Integer)
+    lastTransfersRef  <- newIORef (0 :: Int)
+    go lastBytesRef lastTotalBytesRef lastTransfersRef
+  where
+    go lastBytesRef lastTotalBytesRef lastTransfersRef = do
+        eof <- hIsEOF h
+        unless eof $ do
+            lineBytes <- BS.hGetLine h
+            unless (BS.null lineBytes) $
+                parseLine lineBytes lastBytesRef lastTotalBytesRef lastTransfersRef
+            go lastBytesRef lastTotalBytesRef lastTransfersRef
+
+    parseLine lineBytes lastBytesRef lastTotalBytesRef lastTransfersRef =
+        -- decodeStrict expects ByteString and handles UTF-8 correctly
+        case Aeson.decodeStrict lineBytes :: Maybe RcloneLogLine of
+            Just logLine -> do
+                -- Update progress from stats using deltas
+                case rllStats logLine of
+                    Just stats -> do
+                        case rsBytes stats of
+                            Just b -> do
+                                lastB <- readIORef lastBytesRef
+                                let delta = b - lastB
+                                when (delta > 0) $
+                                    atomicModifyIORef' (spBytesCopied progress) (\n -> (n + delta, ()))
+                                writeIORef lastBytesRef b
+                            Nothing -> pure ()
+                        case rsTotalBytes stats of
+                            Just tb -> do
+                                lastTB <- readIORef lastTotalBytesRef
+                                let delta = tb - lastTB
+                                when (delta /= 0) $
+                                    atomicModifyIORef' (spBytesTotal progress) (\n -> (n + delta, ()))
+                                writeIORef lastTotalBytesRef tb
+                            Nothing -> pure ()
+                        case rsTransfers stats of
+                            Just t -> do
+                                lastT <- readIORef lastTransfersRef
+                                let delta = t - lastT
+                                when (delta > 0) $
+                                    atomicModifyIORef' (spFilesComplete progress) (\n -> (n + fromIntegral delta, ()))
+                                writeIORef lastTransfersRef t
+                            Nothing -> pure ()
+                    Nothing -> pure ()
+                -- Accumulate errors
+                case rllLevel logLine of
+                    Just "error" -> do
+                        let msg = fromMaybe (decodeLineUtf8 lineBytes) (rllMsg logLine)
+                        atomicModifyIORef' errorsRef (\es -> (es ++ [msg], ()))
+                    _ -> pure ()
+            Nothing -> pure ()  -- Non-JSON line, ignore
+
+    -- Decode a raw ByteString line to String, with fallback for invalid UTF-8
+    decodeLineUtf8 bs = case decodeUtf8' bs of
+        Right t -> T.unpack t
+        Left _  -> show bs
 
 -- | Start a progress reporter thread and run an action.
 -- Automatically stops the reporter when the action completes.
@@ -124,7 +263,7 @@ syncProgressLoop progress = go
         bytesCopied <- readIORef (spBytesCopied progress)
         totalBytes <- readIORef (spBytesTotal progress)
         _currentFile <- readIORef (spCurrentFile progress)
-        
+
         -- Use bytes for percentage when available, fall back to file count
         let pct = if totalBytes > 0
                   then fromIntegral ((bytesCopied * 100) `div` totalBytes) :: Int
@@ -138,11 +277,11 @@ syncProgressLoop progress = go
                          ++ if totalBytes > 0
                             then " / " ++ formatBytes totalBytes ++ " (" ++ show pct ++ "%)"
                             else ""
-        
+
         reportProgress progressLine
-        
+
         threadDelay 100000  -- 100ms update interval
-        
+
         when (filesCompleted < spFilesTotal progress) go
 
 -- | Run action with per-file print for non-TTY environments.

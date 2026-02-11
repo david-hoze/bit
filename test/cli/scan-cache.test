@@ -1,97 +1,97 @@
 # Test scan cache feature - skip re-hashing unchanged files
 
 # Setup: fresh repo
-rmdir /s /q test\cli\output\work 2>nul & mkdir test\cli\output\work & cd test\cli\output\work & bit init
+rmdir /s /q test\cli\output\work_scancache 2>nul & mkdir test\cli\output\work_scancache & cd test\cli\output\work_scancache & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Create test files and add them
-cd test\cli\output\work & echo test1> file1.txt & echo test2> file2.txt & bit add .
+cd test\cli\output\work_scancache & echo test1> file1.txt & echo test2> file2.txt & bit add .
 <<<
 >>>= 0
 
 # Verify cache directory was created
-if exist "test\cli\output\work\.bit\cache\" (echo cache exists) else (echo missing)
+if exist "test\cli\output\work_scancache\.bit\cache\" (echo cache exists) else (echo missing)
 <<<
 >>>
 cache exists
 >>>= 0
 
 # Verify cache files were created for each file
-if exist "test\cli\output\work\.bit\cache\file1.txt" (echo file1 cached) else (echo missing)
+if exist "test\cli\output\work_scancache\.bit\cache\file1.txt" (echo file1 cached) else (echo missing)
 <<<
 >>>
 file1 cached
 >>>= 0
 
 # Verify cache file format contains expected fields
-findstr /C:"mtime:" test\cli\output\work\.bit\cache\file1.txt >nul
+findstr /C:"mtime:" test\cli\output\work_scancache\.bit\cache\file1.txt >nul
 <<<
 >>>= 0
 
 # Verify cache contains size field
-findstr /C:"size:" test\cli\output\work\.bit\cache\file1.txt >nul
+findstr /C:"size:" test\cli\output\work_scancache\.bit\cache\file1.txt >nul
 <<<
 >>>= 0
 
 # Verify cache contains hash field
-findstr /C:"hash:" test\cli\output\work\.bit\cache\file1.txt >nul
+findstr /C:"hash:" test\cli\output\work_scancache\.bit\cache\file1.txt >nul
 <<<
 >>>= 0
 
 # Verify cache contains isText field
-findstr /C:"isText:" test\cli\output\work\.bit\cache\file1.txt >nul
+findstr /C:"isText:" test\cli\output\work_scancache\.bit\cache\file1.txt >nul
 <<<
 >>>= 0
 
 # Save original hash for comparison
-cd test\cli\output\work & findstr "hash:" .bit\cache\file1.txt
+cd test\cli\output\work_scancache & findstr "hash:" .bit\cache\file1.txt
 <<<
 >>> /hash: md5:[a-f0-9]+/
 >>>= 0
 
 # Run add again without changes - should use cache (no errors)
-cd test\cli\output\work & bit add .
+cd test\cli\output\work_scancache & bit add .
 <<<
 >>>= 0
 
 # Modify file1.txt
-cd test\cli\output\work & echo modified content> file1.txt
+cd test\cli\output\work_scancache & echo modified content> file1.txt
 <<<
 >>>= 0
 
 # Run add after modification - cache should be updated
-cd test\cli\output\work & bit add .
+cd test\cli\output\work_scancache & bit add .
 <<<
 >>>= 0
 
 # Verify cache was updated with new hash (different from original)
-cd test\cli\output\work & findstr "hash:" .bit\cache\file1.txt
+cd test\cli\output\work_scancache & findstr "hash:" .bit\cache\file1.txt
 <<<
 >>> /hash: md5:[a-f0-9]+/
 >>>= 0
 
 # file2.txt cache should still exist (unchanged file)
-if exist "test\cli\output\work\.bit\cache\file2.txt" (echo file2 still cached) else (echo missing)
+if exist "test\cli\output\work_scancache\.bit\cache\file2.txt" (echo file2 still cached) else (echo missing)
 <<<
 >>>
 file2 still cached
 >>>= 0
 
 # Test cache with subdirectory
-cd test\cli\output\work & mkdir subdir & echo subfile> subdir\nested.txt & bit add .
+cd test\cli\output\work_scancache & mkdir subdir & echo subfile> subdir\nested.txt & bit add .
 <<<
 >>>= 0
 
 # Verify cache was created for nested file
-if exist "test\cli\output\work\.bit\cache\subdir\nested.txt" (echo nested cached) else (echo missing)
+if exist "test\cli\output\work_scancache\.bit\cache\subdir\nested.txt" (echo nested cached) else (echo missing)
 <<<
 >>>
 nested cached
 >>>= 0
 
 # Cleanup
-rmdir /s /q test\cli\output\work 2>nul
+rmdir /s /q test\cli\output\work_scancache 2>nul
 <<<
 >>>= 0
