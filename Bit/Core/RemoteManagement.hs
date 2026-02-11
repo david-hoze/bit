@@ -38,7 +38,7 @@ import Internal.Config (bitDevicesDir, bitRemotesDir, fetchedBundle, bundleCwdPa
 import Bit.Types (BitM, BitEnv(..), Path(..), Hash(..), HashAlgo(..), hashToText)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
-import Bit.Remote (Remote, remoteUrl, remoteName, displayRemote, resolveRemote, RemotePath(..))
+import Bit.Remote (Remote, remoteUrl, remoteName, displayRemote, resolveRemote)
 import Bit.Core.Helpers (getRemoteType, formatVerifyCounts)
 import qualified Bit.Core.Fetch as Fetch
 import qualified Bit.Verify as Verify
@@ -254,15 +254,16 @@ remoteRepair mName concurrency = do
             -- Determine if filesystem or cloud remote
             mType <- getRemoteType cwd (remoteName remote)
             let isFilesystem = maybe False Device.isFilesystemType mType
-                remotePath = remoteUrl remote
 
             if isFilesystem
-                then repairFilesystem cwd remote (RemotePath remotePath) concurrency
+                then repairFilesystem cwd remote concurrency
                 else repairCloud cwd remote concurrency
 
--- | Repair against a filesystem remote (direct file access, no rclone).
-repairFilesystem :: FilePath -> Remote -> RemotePath -> Concurrency -> IO ()
-repairFilesystem cwd _remote (RemotePath remotePath) concurrency = do
+-- | Repair against a filesystem remote. Loads metadata from remote's .bit/index,
+-- verifies with verifyLocalAt, then uses rclone (same as cloud) for file copies.
+repairFilesystem :: FilePath -> Remote -> Concurrency -> IO ()
+repairFilesystem cwd remote concurrency = do
+    let remotePath = remoteUrl remote
     -- Load committed metadata from both sides (immune to scan updates)
     let localIndexDir = cwd </> bitIndexPath
         remoteIndexDir = remotePath </> bitIndexPath
@@ -279,7 +280,7 @@ repairFilesystem cwd _remote (RemotePath remotePath) concurrency = do
     putStrLn $ formatVerifyCounts remoteResult.vrCount (length remoteResult.vrIssues)
 
     runRepairLogic localMeta remoteMeta localResult.vrIssues remoteResult.vrIssues
-        (executeFilesystemRepair cwd (RemotePath remotePath))
+        (executeRepairForFilesystem cwd remote)
 
 -- | Repair against a cloud remote (bundle-based, uses rclone).
 repairCloud :: FilePath -> Remote -> Concurrency -> IO ()
@@ -426,7 +427,18 @@ restoreLocalMetadata cwd destPath expectedHash expectedSize = do
     Dir.createDirectoryIfMissing True (takeDirectory metaPath)
     atomicWriteFileStr metaPath (serializeMetadata (MetaContent expectedHash expectedSize))
 
--- | Execute a single repair action for cloud remotes (uses rclone).
+-- | Execute a single repair action. Uses rclone for file copies.
+-- For RepairRemote on filesystem, also restores remote .bit/index/ metadata.
+executeRepairForFilesystem :: FilePath -> Remote -> RepairAction -> IO RepairResult
+executeRepairForFilesystem cwd remote action = case action of
+    RepairRemote _ dest h s -> do
+        r <- executeRepair cwd remote action
+        case r of
+            Repaired _ -> restoreRemoteMetadata remote dest h s
+            _ -> pure ()
+        pure r
+    other -> executeRepair cwd remote other
+
 executeRepair :: FilePath -> Remote -> RepairAction -> IO RepairResult
 executeRepair cwd remote (RepairLocal sourcePath destPath expectedHash expectedSize) = do
     -- Copy from remote to fix local
@@ -448,32 +460,14 @@ executeRepair cwd remote (RepairRemote sourcePath destPath _ _) = do
         ExitSuccess -> Repaired destPath
         _ -> RepairFailed destPath "copy to remote failed"
 
--- | Execute a single repair action for filesystem remotes (direct file copy).
-executeFilesystemRepair :: FilePath -> RemotePath -> RepairAction -> IO RepairResult
-executeFilesystemRepair cwd (RemotePath remotePath) (RepairLocal sourcePath destPath expectedHash expectedSize) = do
-    -- Copy from remote filesystem to fix local
-    let srcFullPath = remotePath </> unPath sourcePath
-        dstFullPath = cwd </> unPath destPath
-    Dir.createDirectoryIfMissing True (takeDirectory dstFullPath)  -- Dir OK: dstFullPath is local
-    result <- try @IOException $ Platform.copyFile srcFullPath dstFullPath
-    case result of
-        Right () -> do
-            restoreLocalMetadata cwd destPath expectedHash expectedSize
-            pure (Repaired destPath)
-        Left e -> pure (RepairFailed destPath (show e))
-executeFilesystemRepair cwd (RemotePath remotePath) (RepairRemote sourcePath destPath expectedHash expectedSize) = do
-    -- Copy from local to fix remote filesystem, also restore remote metadata
-    let srcFullPath = cwd </> unPath sourcePath
-        dstFullPath = remotePath </> unPath destPath
+-- | Restore remote .bit/index/ metadata after repairing a file on a filesystem remote.
+-- Cloud remotes store metadata in the bundle; only filesystem remotes need this.
+restoreRemoteMetadata :: Remote -> Path -> Hash 'MD5 -> Integer -> IO ()
+restoreRemoteMetadata remote destPath expectedHash expectedSize = do
+    let remotePath = remoteUrl remote
         remoteMetaPath = remotePath </> bitIndexPath </> unPath destPath
-    Platform.createDirectoryIfMissing True (takeDirectory dstFullPath)
     Platform.createDirectoryIfMissing True (takeDirectory remoteMetaPath)
-    result <- try @IOException $ do
-        Platform.copyFile srcFullPath dstFullPath
-        atomicWriteFileStr remoteMetaPath (serializeMetadata (MetaContent expectedHash expectedSize))
-    pure $ case result of
-        Right () -> Repaired destPath
-        Left e -> RepairFailed destPath (show e)
+    atomicWriteFileStr remoteMetaPath (serializeMetadata (MetaContent expectedHash expectedSize))
 
 -- | Format remote display line (e.g. "origin → black_usb:Backup (physical, connected at E:\)")
 formatRemoteDisplay :: FilePath -> String -> Maybe Device.RemoteTarget -> IO String

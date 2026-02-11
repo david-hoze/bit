@@ -893,16 +893,11 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 - **Final summary**: `Synced 12 files (18.3 GB).`
 - Human-readable byte formatting: `formatBytes` (B, KB, MB, GB, TB with 1 decimal place)
 
-**Filesystem Remotes** (direct copy):
-- `filesystemSyncAllFiles`, `filesystemSyncChangedFiles` (push)
-- `filesystemSyncRemoteFilesToLocal`, `filesystemApplyMergeToWorkingDir` (pull)
+**All remotes** (cloud and filesystem) use `rcloneCopyFiles` for binary sync:
+- **Push**: `filesystemSyncAllFiles` / `filesystemSyncChangedFiles` (filesystem), `syncRemoteFiles` (cloud)
+- **Pull**: `syncAllFilesFromHEAD`, `applyMergeToWorkingDir` (both, parameterized by remote root)
 - Progress: counts binary files only (text files are small and fast via index copy)
-- Byte progress: sums file sizes from metadata before starting copy loop
-
-**Cloud Remotes** (rclone):
-- `syncRemoteFiles` (push), `syncRemoteFilesToLocal` (pull)
-- Progress: file-count only (number of rclone actions completed / total)
-- Simpler approach: tracks subprocess completion rather than byte-level progress
+- Byte progress: parsed from rclone's `--use-json-log` output on stderr (stats block)
 
 **Design Notes**:
 - Complies with project's strict IO rules: no lazy `ByteString`, no lazy IO
@@ -1018,14 +1013,14 @@ Runs `git fsck` on the internal metadata repository (`.bit/index`). Checks the i
 
 ### `bit remote repair`
 
-Verifies both local and remote files against their respective metadata, then repairs any broken/missing files by copying verified files from the other side using content-addressable lookup.
+Verifies both local and remote files against their respective metadata, then repairs any broken/missing files by copying verified files from the other side using content-addressable lookup. **File copies use rclone for both cloud and filesystem remotes** (cloud: via `Transport.copyToRemote`/`copyFromRemote`; filesystem: same, with `remoteUrl` as the local path).
 
 **Algorithm**:
-1. Resolve remote, load binary metadata from both sides
-2. Verify both sides: `verifyLocal` and `verifyRemote` (or `verifyLocalAt` for filesystem remotes)
+1. Resolve remote, load binary metadata from both sides (filesystem: from remote's `.bit/index`; cloud: from bundle)
+2. Verify both sides: `verifyLocal` and `verifyRemote` (cloud) or `verifyLocalAt` (filesystem remotes)
 3. Build content indexes from verified files (metadata entries not in the issue set)
-4. For each local issue: look up expected (hash, size) in remote verified index, copy from remote
-5. For each remote issue: look up expected (hash, size) in local verified index, copy to remote
+4. For each local issue: look up expected (hash, size) in remote verified index, copy from remote via rclone
+5. For each remote issue: look up expected (hash, size) in local verified index, copy to remote via rclone
 6. Report summary: repaired, failed, unrepairable
 
 **Content-addressable repair**: Files are matched by (hash, size), not by path. If `photos/song.mp3` is corrupted locally but `backup/song_copy.mp3` on the remote has the same hash and size, it will be used as the repair source.

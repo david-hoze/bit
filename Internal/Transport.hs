@@ -28,7 +28,6 @@ import Control.Concurrent.Async (async, wait)
 import Data.List (dropWhileEnd, isInfixOf)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
 import Data.String (fromString)
 import Bit.Remote (Remote, remoteUrl)
@@ -36,10 +35,10 @@ import Data.IORef (IORef, modifyIORef')
 import Control.Exception (bracket, try, SomeException)
 
 -- | Run a process and capture stdout as raw bytes (avoiding locale encoding issues).
--- Returns (ExitCode, ByteString, String) where stdout is raw bytes and stderr is String.
+-- Returns (ExitCode, ByteString, String) where stdout is strict ByteString and stderr is String.
 -- Uses bracket for exception-safe resource cleanup.
 -- Reads stdout and stderr concurrently to avoid pipe deadlocks.
-readProcessBytes :: FilePath -> [String] -> IO (ExitCode, LBS.ByteString, String)
+readProcessBytes :: FilePath -> [String] -> IO (ExitCode, BS.ByteString, String)
 readProcessBytes cmd args = do
     let cp = (proc cmd args)
             { std_out = CreatePipe
@@ -57,7 +56,7 @@ readProcessBytes cmd args = do
                 outBytes <- wait asyncOut
                 errStr   <- wait asyncErr
                 code     <- waitForProcess ph
-                pure (code, LBS.fromStrict outBytes, errStr)
+                pure (code, outBytes, errStr)
             _ -> error "readProcessBytes: failed to create pipes"
   where
     -- Cleanup: close any handles that might still be open and wait for process
@@ -179,8 +178,8 @@ mkdirRemote remote relPath =
     (\(code, _, _) -> code) <$> readProcessWithExitCode "rclone" ["mkdir", remoteFilePath remote relPath] ""
 
 -- | List remote directory as JSON (at remote root)
--- Returns (ExitCode, ByteString, String) where stdout is raw bytes for proper UTF-8 handling
-listRemoteJson :: Remote -> Int -> IO (ExitCode, LBS.ByteString, String)
+-- Returns (ExitCode, ByteString, String) where stdout is strict ByteString for proper UTF-8 handling
+listRemoteJson :: Remote -> Int -> IO (ExitCode, BS.ByteString, String)
 listRemoteJson remote maxDepth =
     readProcessBytes "rclone" ["lsjson", "--max-depth", show maxDepth, remoteUrl remote]
 
@@ -194,13 +193,13 @@ listRemoteItems remote maxDepth = do
             then pure (Right [])  -- Empty directory
             else pure (Left err)  -- Network or other error
         ExitSuccess -> do
-            case Aeson.decode outBytes :: Maybe [RcloneItem] of
+            case Aeson.decodeStrict outBytes :: Maybe [RcloneItem] of
                 Nothing -> pure (Left "Failed to parse rclone JSON output")
                 Just items -> pure (Right [TransportItem (name item) (isDir item) | item <- items])
 
 -- | List remote recursively with hashes
--- Returns (ExitCode, ByteString, String) where stdout is raw bytes for proper UTF-8 handling
-listRemoteJsonWithHash :: Remote -> IO (ExitCode, LBS.ByteString, String)
+-- Returns (ExitCode, ByteString, String) where stdout is strict ByteString for proper UTF-8 handling
+listRemoteJsonWithHash :: Remote -> IO (ExitCode, BS.ByteString, String)
 listRemoteJsonWithHash remote =
     readProcessBytes "rclone" ["lsjson", remoteUrl remote, "--hash", "--recursive"]
 

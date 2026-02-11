@@ -11,7 +11,7 @@ module Bit.Remote.Scan
 import GHC.Generics (Generic)
 import qualified Data.Map as Map
 import Data.Map (Map)
-import Data.Aeson (FromJSON(..), decode, withObject, (.:), (.:?))
+import Data.Aeson (FromJSON(..), decodeStrict, withObject, (.:), (.:?))
 import System.Exit (ExitCode(..))
 import System.FilePath (normalise)
 import Data.Maybe
@@ -40,7 +40,7 @@ fetchRemoteFiles remote = do
         ExitSuccess -> pure $ maybe
             (Left (DecodeFailed "Invalid rclone JSON output"))
             (Right . map rcloneFileToFileEntry . filter (not . rfIsDir))
-            (decode rawBytes :: Maybe [RcloneFile])
+            (decodeStrict rawBytes :: Maybe [RcloneFile])
         _ -> pure (Left RcloneFailed)
 
 ----------------------------------------------------------------------
