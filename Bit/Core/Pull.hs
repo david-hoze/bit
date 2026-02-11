@@ -47,12 +47,11 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
 import Bit.Internal.Metadata (MetaContent(..), serializeMetadata, displayHash, validateMetadataDir)
 import Bit.Concurrency (Concurrency(..))
-import qualified Bit.Device as Device
 import Bit.Core.Helpers
     ( PullMode(..)
     , PullOptions(..)
     , defaultPullOptions
-    , getRemoteType
+    , isFilesystemRemote
     , withRemote
     , getLocalHeadE
     , hasStagedChangesE
@@ -85,10 +84,8 @@ pull opts = withRemote $ \remote -> do
     cwd <- asks envCwd
     
     -- Determine if this is a filesystem or cloud remote
-    mType <- liftIO $ getRemoteType cwd (remoteName remote)
-    case mType of
-        Just t | Device.isFilesystemType t -> liftIO $ filesystemPull cwd remote opts
-        _ -> cloudPull remote opts  -- Cloud remote or no target info (use cloud flow)
+    isFs <- isFilesystemRemote remote
+    if isFs then liftIO $ filesystemPull cwd remote opts else cloudPull remote opts
 
 -- | Pull from a cloud remote (uses unified transport abstraction).
 cloudPull :: Remote -> PullOptions -> BitM ()

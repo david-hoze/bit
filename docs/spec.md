@@ -311,6 +311,9 @@ The unified `pullLogic` and `pullAcceptRemoteImpl` now accept a `FileTransport`
 parameter. Both cloud and filesystem paths use the same merge orchestration,
 `oldHead` capture pattern, conflict resolution (`Conflict.resolveAll`), and
 tracking ref updates. The only difference is the transport used to copy files.
+Push, pull, fetch, and verify dispatch on remote type via `isFilesystemRemote`
+(Bit.Core.Helpers). Building the appropriate transport is centralized in
+`mkTransportForRemote` (Bit.Core.Transport), used by pull and merge flows.
 
 ### Conflict Resolution
 
@@ -1010,7 +1013,7 @@ Verifies local working tree files match their committed metadata. Scans the work
 
 ### `bit verify --remote`
 
-Detects remote type via `getRemoteType`/`Device.isFilesystemType` and routes accordingly:
+Detects remote type via `isFilesystemRemote` (Bit.Core.Helpers) and routes accordingly:
 
 - **Filesystem remotes**: Scans the remote working directory using `Verify.verifyLocalAt`, the same scan + git diff approach as local verification.
 - **Cloud remotes**: Fetches the remote bundle (committed metadata), scans remote files via `rclone lsjson --hash`, and compares.

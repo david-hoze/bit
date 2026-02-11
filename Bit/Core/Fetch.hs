@@ -13,7 +13,6 @@ module Bit.Core.Fetch
     , FetchOutcome(..)
     ) where
 
-import qualified System.Directory as Dir
 import System.FilePath ((</>))
 import Control.Monad (when, void)
 import System.Exit (ExitCode(..), exitWith)
@@ -25,8 +24,7 @@ import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Internal.Config (fromCwdPath, bundleCwdPath, fetchedBundle, bundleGitRelPath, fromGitRelPath)
-import Bit.Core.Helpers (getRemoteType, withRemote, safeRemove, checkFilesystemRemoteIsRepo)
-import qualified Bit.Device as Device
+import Bit.Core.Helpers (isFilesystemRemote, withRemote, safeRemove, checkFilesystemRemoteIsRepo)
 import System.Directory (copyFile)
 import Bit.Utils (trimGitOutput)
 
@@ -48,12 +46,8 @@ data FetchOutcome
 fetch :: BitM ()
 fetch = withRemote $ \remote -> do
     cwd <- asks envCwd
-
-    -- Determine if this is a filesystem or cloud remote
-    mType <- liftIO $ getRemoteType cwd (remoteName remote)
-    case mType of
-        Just t | Device.isFilesystemType t -> liftIO $ filesystemFetch cwd remote
-        _ -> cloudFetch remote  -- Cloud remote or no target info (use cloud flow)
+    isFs <- isFilesystemRemote remote
+    if isFs then liftIO $ filesystemFetch cwd remote else cloudFetch remote
 
 -- | Fetch from a cloud remote (original flow, unchanged).
 cloudFetch :: Remote -> BitM ()

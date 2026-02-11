@@ -6,6 +6,7 @@ module Bit.Core.Transport
       FileTransport(..)
     , mkCloudTransport
     , mkFilesystemTransport
+    , mkTransportForRemote
       -- Working directory sync operations
     , applyMergeToWorkingDir
     , downloadOrCopyFromIndex
@@ -43,7 +44,8 @@ import Control.Concurrent (getNumCapabilities)
 import System.IO (stderr, hPutStrLn)
 import Bit.Utils (toPosix)
 import Bit.Plan (RcloneAction(..))
-import Bit.Remote (Remote, remoteName)
+import Bit.Remote (Remote, remoteName, remoteUrl)
+import qualified Bit.Device as Device
 import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -58,6 +60,7 @@ import Data.Text.Encoding (decodeUtf8')
 import Bit.Core.Helpers
     ( getLocalHeadE
     , readFileMaybe
+    , getRemoteType
     )
 
 -- ============================================================================
@@ -136,6 +139,14 @@ mkFilesystemTransport remotePath = FileTransport
         filesystemDownloadOrCopyFromIndex cwd remPath filePath progress
     filesystemSyncRemoteFilesToLocal' _remPath cwd =
       filesystemSyncRemoteFilesToLocalFromHEAD cwd remotePath
+
+-- | Build the appropriate transport (cloud or filesystem) for the given remote.
+mkTransportForRemote :: FilePath -> Remote -> IO FileTransport
+mkTransportForRemote cwd remote = do
+  mType <- getRemoteType cwd (remoteName remote)
+  pure $ case mType of
+    Just t | Device.isFilesystemType t -> mkFilesystemTransport (remoteUrl remote)
+    _ -> mkCloudTransport remote
 
 -- ============================================================================
 -- Working tree synchronization

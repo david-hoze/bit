@@ -40,11 +40,10 @@ import Control.Monad.Trans.Class (lift)
 import qualified Bit.CopyProgress as CopyProgress
 import qualified Bit.Verify as Verify
 import Bit.Concurrency (Concurrency(..))
-import qualified Bit.Device as Device
 import System.Directory (copyFile)
 import Bit.Core.Helpers
     ( AncestorQuery(..)
-    , getRemoteType
+    , isFilesystemRemote
     , withRemote
     , getLocalHeadE
     , checkIsAheadE
@@ -79,10 +78,8 @@ push = withRemote $ \remote -> do
             exitWith (ExitFailure 1)
 
     -- Determine if this is a filesystem or cloud remote
-    mType <- liftIO $ getRemoteType cwd (remoteName remote)
-    case mType of
-        Just t | Device.isFilesystemType t -> liftIO $ filesystemPush cwd remote
-        _ -> cloudPush remote  -- Cloud remote or no target info (use cloud flow)
+    isFs <- isFilesystemRemote remote
+    if isFs then liftIO $ filesystemPush cwd remote else cloudPush remote
 
 -- | Push to a cloud remote (original flow, unchanged).
 cloudPush :: Remote -> BitM ()

@@ -15,6 +15,7 @@ module Bit.Core.Helpers
     , hasStagedChangesE
     , getRemoteType
     , getRemoteTargetType
+    , isFilesystemRemote
     , checkFilesystemRemoteIsRepo
       -- Monadic helpers
     , withRemote
@@ -45,7 +46,7 @@ import System.Exit (ExitCode(..), exitWith)
 import Internal.Git (AncestorQuery(..))
 import qualified Internal.Git as Git
 import qualified Bit.Device as Device
-import Bit.Remote (Remote)
+import Bit.Remote (Remote, remoteName)
 import Data.List (isPrefixOf, foldl')
 import System.IO (stderr, hPutStrLn)
 import Bit.Types (BitM, BitEnv(..), unPath)
@@ -109,6 +110,12 @@ getRemoteType cwd remName = Device.readRemoteType cwd remName
 -- Returns the RemoteTarget if the remote is configured, Nothing otherwise.
 getRemoteTargetType :: FilePath -> String -> IO (Maybe Device.RemoteTarget)
 getRemoteTargetType cwd remName = Device.readRemoteFile cwd remName
+
+-- | True if the resolved remote is a filesystem (or device) remote; False for cloud or unconfigured.
+isFilesystemRemote :: Remote -> BitM Bool
+isFilesystemRemote remote = do
+    cwd <- asks envCwd
+    liftIO $ fmap (maybe False Device.isFilesystemType) (getRemoteType cwd (remoteName remote))
 
 -- | Check if a filesystem path is a bit repository. Exits with error if not.
 -- Used by filesystem push, pull, and fetch operations to validate the remote.

@@ -44,9 +44,8 @@ import qualified Data.List
 import Control.Monad.IO.Class (liftIO)
 import Data.List (isPrefixOf, foldl')
 import qualified Bit.Conflict as Conflict
-import qualified Bit.Device as Device
 import qualified Bit.Internal.Metadata as Metadata
-import Bit.Remote (remoteName, remoteUrl)
+import Bit.Remote (remoteName)
 import qualified Bit.Core.Transport as Transport
 import Bit.Core.Helpers
     ( fileExistsE
@@ -57,7 +56,6 @@ import Bit.Core.Helpers
     , restoreCheckoutPaths
     , expandPathsToFiles
     , getLocalHeadE
-    , getRemoteType
     )
 
 -- ============================================================================
@@ -161,10 +159,7 @@ mergeContinue = do
                         void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
                         putStrLn "Merge complete."
                     traverse_ (\remote -> do
-                            mType <- liftIO $ getRemoteType cwd (remoteName remote)
-                            let transport = case mType of
-                                  Just t | Device.isFilesystemType t -> Transport.mkFilesystemTransport (remoteUrl remote)
-                                  _ -> Transport.mkCloudTransport remote
+                            transport <- liftIO $ Transport.mkTransportForRemote cwd remote
                             Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
                 _ -> liftIO $ do
                     hPutStrLn stderr "error: no merge in progress."
@@ -191,10 +186,7 @@ mergeContinue = do
                     putStrLn "Conflict directories cleaned up."
 
                 traverse_ (\remote -> do
-                        mType <- liftIO $ getRemoteType cwd (remoteName remote)
-                        let transport = case mType of
-                              Just t | Device.isFilesystemType t -> Transport.mkFilesystemTransport (remoteUrl remote)
-                              _ -> Transport.mkCloudTransport remote
+                        transport <- liftIO $ Transport.mkTransportForRemote cwd remote
                         Transport.syncBinariesAfterMerge transport remote oldHead) mRemote
 
 mergeAbort :: IO ()
