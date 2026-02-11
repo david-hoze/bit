@@ -8,6 +8,7 @@ module Bit.Verify
   , verifyLocalAt
   , verifyRemote
   , VerifyIssue(..)
+  , BinaryFileMeta(..)
   , loadBinaryMetadata
   , loadCommittedBinaryMetadata
   , loadMetadataFromBundle
@@ -72,10 +73,18 @@ entryPath :: MetadataEntry -> Path
 entryPath (BinaryEntry p _ _) = p
 entryPath (TextEntry p) = p
 
+-- | Binary file metadata: path, hash, size. Replaces bare (Path, Hash, Integer) tuple.
+data BinaryFileMeta = BinaryFileMeta
+  { bfmPath :: Path
+  , bfmHash :: Hash 'MD5
+  , bfmSize :: Integer
+  }
+  deriving (Show, Eq)
+
 -- | Extract verifiable (binary) entries only.
-binaryEntries :: [MetadataEntry] -> [(Path, Hash 'MD5, Integer)]
+binaryEntries :: [MetadataEntry] -> [BinaryFileMeta]
 binaryEntries = concatMap go
-  where go (BinaryEntry p h s) = [(p, h, s)]
+  where go (BinaryEntry p h s) = [BinaryFileMeta p h s]
         go (TextEntry _) = []
 
 -- | Extract all known paths (binary + text).
@@ -163,13 +172,13 @@ classifyMetadataFile p filePath =
 
 -- | Load only binary (hash-verifiable) metadata entries from the index.
 -- Text files are excluded. If you need all entries, use 'loadMetadata' directly.
-loadBinaryMetadata :: FilePath -> Concurrency -> IO [(Path, Hash 'MD5, Integer)]
+loadBinaryMetadata :: FilePath -> Concurrency -> IO [BinaryFileMeta]
 loadBinaryMetadata indexDir concurrency =
   binaryEntries <$> loadMetadata (FromFilesystem indexDir) concurrency
 
 -- | Load binary metadata from the committed (HEAD) state of a .bit/index repo.
 -- This returns what the metadata *should* be, immune to scan updates.
-loadCommittedBinaryMetadata :: FilePath -> IO [(Path, Hash 'MD5, Integer)]
+loadCommittedBinaryMetadata :: FilePath -> IO [BinaryFileMeta]
 loadCommittedBinaryMetadata indexDir = do
   (code, out, _) <- Git.runGitAt indexDir ["rev-parse", "HEAD"]
   case code of

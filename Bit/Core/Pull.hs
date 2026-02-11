@@ -315,8 +315,8 @@ pullManualMergeImpl remote = do
                           | e <- filteredRemoteFiles
                           , h <- maybeToList (syncHash e.kind)
                           ]
-                        remoteMetaMap = Map.fromList [(normalise (unPath p), (h, sz)) | (p, h, sz) <- remoteMeta]
-                        localMetaMap = Map.fromList [(normalise (unPath p), (h, sz)) | (p, h, sz) <- localMeta]
+                        remoteMetaMap = Map.fromList [(normalise (unPath m.bfmPath), (m.bfmHash, m.bfmSize)) | m <- remoteMeta]
+                        localMetaMap = Map.fromList [(normalise (unPath m.bfmPath), (m.bfmHash, m.bfmSize)) | m <- localMeta]
 
                     lift $ tell "Comparing..."
                     let divergentFiles = findDivergentFiles remoteFileMap remoteMetaMap localMetaMap

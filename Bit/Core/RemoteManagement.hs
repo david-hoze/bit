@@ -4,6 +4,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module Bit.Core.RemoteManagement
     ( remoteAdd
@@ -309,8 +310,8 @@ repairCloud cwd remote concurrency = do
         (executeRepair cwd remote)
 
 -- | Common repair logic shared between filesystem and cloud remotes.
-runRepairLogic :: [(Path, Hash 'MD5, Integer)]    -- local metadata
-              -> [(Path, Hash 'MD5, Integer)]    -- remote metadata
+runRepairLogic :: [Verify.BinaryFileMeta]    -- local metadata
+              -> [Verify.BinaryFileMeta]    -- remote metadata
               -> [Verify.VerifyIssue]             -- local issues
               -> [Verify.VerifyIssue]             -- remote issues
               -> (RepairAction -> IO RepairResult) -- repair executor
@@ -330,8 +331,8 @@ runRepairLogic localMeta remoteMeta localIssues remoteIssues executeAction =
                 localVerified  = buildContentIndex localMeta localIssueSet
 
             -- Build metadata maps for lookup
-            let localMetaMap = Map.fromList [(p, (h, s)) | (p, h, s) <- localMeta]
-                remoteMetaMap = Map.fromList [(p, (h, s)) | (p, h, s) <- remoteMeta]
+            let localMetaMap = Map.fromList [(m.bfmPath, (m.bfmHash, m.bfmSize)) | m <- localMeta]
+                remoteMetaMap = Map.fromList [(m.bfmPath, (m.bfmHash, m.bfmSize)) | m <- remoteMeta]
 
             -- Plan repairs: use the OTHER side's metadata as source of truth
             -- (local metadata may reflect corrupted state after a scan)
@@ -383,12 +384,12 @@ issuePath (Verify.Missing p) = p
 -- | Build a content-addressable index from verified metadata entries.
 -- Maps (hashString, size) to a Path that is known to be good.
 -- Excludes any paths that are in the issue set (those are broken).
-buildContentIndex :: [(Path, Hash 'MD5, Integer)] -> Set.Set Path -> Map.Map (String, Integer) Path
+buildContentIndex :: [Verify.BinaryFileMeta] -> Set.Set Path -> Map.Map (String, Integer) Path
 buildContentIndex entries issueSet =
     Map.fromList
-        [ ((T.unpack (hashToText h), sz), p)
-        | (p, h, sz) <- entries
-        , not (Set.member p issueSet)
+        [ ((T.unpack (hashToText m.bfmHash), m.bfmSize), m.bfmPath)
+        | m <- entries
+        , not (Set.member m.bfmPath issueSet)
         ]
 
 -- | Plan repair actions for a list of issues.

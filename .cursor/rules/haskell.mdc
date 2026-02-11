@@ -40,6 +40,7 @@ Key types and conventions used throughout this codebase:
 | `DivergentFile` | Record: dfPath, dfExpectedHash, dfActualHash, dfExpectedSize, dfActualSize — remote divergence | `Bit.Core.Pull` |
 | `ScannedEntry` | `ScannedFile` / `ScannedDir` — internal scan pass, replaces (FilePath, Bool) | `Bit.Scan` |
 | `FileToSync` | `TextToSync` / `BinaryToSync` — text has no size, binary carries byte count | `Bit.Core.Transport` |
+| `BinaryFileMeta` | Record: bfmPath, bfmHash, bfmSize — replaces bare (Path, Hash, Integer) tuple | `Bit.Verify` |
 | `VerifyTarget` | `VerifyLocal` / `VerifyRemote` — whether `bit verify` checks local or remote | `Bit.Core.Verify` |
 | `BundleName` | `newtype` over `String` — logical bundle name, not a path | `Internal.Config` |
 | `GitRelPath` | `newtype` — path relative to `.bit/index/` (for git commands) | `Internal.Config` |
