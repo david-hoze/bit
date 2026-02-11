@@ -52,6 +52,7 @@ module Internal.Git
     , hasStagedChanges
     , getDiffNameStatus
     , getFilesAtCommit
+    , remoteTrackingRef
     ) where
 
 import Data.Maybe (mapMaybe, listToMaybe)
@@ -68,6 +69,10 @@ import System.Environment (lookupEnv)
 
 baseFlags :: [String]
 baseFlags = ["-C", bitIndexPath]
+
+-- | Build the tracking ref for a named remote: @refs/remotes/\<name\>/main@
+remoteTrackingRef :: String -> String
+remoteTrackingRef name = "refs/remotes/" ++ name ++ "/main"
 
 -- | Represents the subset of Git functionality rgit uses
 data GitCommand
@@ -291,7 +296,7 @@ fetchFromBundle :: BundleName -> IO ExitCode
 fetchFromBundle bundleName = do
     let (GitRelPath bundle) = bundleGitRelPath bundleName
     (code, out, err) <- readProcessWithExitCode "git"
-        (baseFlags ++ ["fetch", bundle, "+refs/heads/main:refs/remotes/origin/main"]) ""
+        (baseFlags ++ ["fetch", bundle, "+refs/heads/main:" ++ remoteTrackingRef "origin"]) ""
     putStr out
     hPutStr stderr err
     pure code
@@ -306,7 +311,7 @@ updateRemoteTrackingBranch bundleName =
 -- "up to date with 'origin/main'" instead of "ahead by N commits".
 updateRemoteTrackingBranchToHash :: String -> IO ExitCode
 updateRemoteTrackingBranchToHash hash =
-    readProcessWithExitCode "git" (baseFlags ++ ["update-ref", "refs/remotes/origin/main", hash]) "" >>= \(c, _, _) -> pure c
+    readProcessWithExitCode "git" (baseFlags ++ ["update-ref", remoteTrackingRef "origin", hash]) "" >>= \(c, _, _) -> pure c
 
 -- | Set refs/remotes/origin/main to current HEAD.
 -- WARNING: Only correct after PUSH (where remote now matches local HEAD).
@@ -347,7 +352,7 @@ unsetBranchUpstream = do
 -- | Merge refs/remotes/origin/main into the current branch (HEAD).
 -- Used by rgit pull after fetching the remote bundle.
 mergeOriginMain :: IO ExitCode
-mergeOriginMain = runGitRaw ["merge", "refs/remotes/origin/main", "--no-edit"]
+mergeOriginMain = runGitRaw ["merge", remoteTrackingRef "origin", "--no-edit"]
 
 -- | Run git with baseFlags; returns (exitCode, stdout, stderr). Does not rewrite hints.
 runGitWithOutput :: [String] -> IO (ExitCode, String, String)
@@ -357,11 +362,11 @@ runGitWithOutput args = do
 
 -- | Merge without committing (for pull flow). Returns (exitCode, stdout, stderr).
 mergeNoCommit :: IO (ExitCode, String, String)
-mergeNoCommit = runGitWithOutput ["merge", "--no-commit", "--no-ff", "refs/remotes/origin/main"]
+mergeNoCommit = runGitWithOutput ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
 
 -- | Like mergeNoCommit but allows merging unrelated histories (e.g. first pull into a fresh init).
 mergeNoCommitAllowUnrelated :: IO (ExitCode, String, String)
-mergeNoCommitAllowUnrelated = runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
+mergeNoCommitAllowUnrelated = runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", remoteTrackingRef "origin"]
 
 -- | Abort an in-progress merge.
 mergeAbort :: IO ExitCode
@@ -391,7 +396,7 @@ checkoutRemoteAsMain = do
   -- Use checkout -B to create/reset branch and checkout in one step
   -- Use -f to force overwrite of any local files (like .gitattributes from init)
   -- Use --no-track to prevent auto-setting branch.main.remote (git-standard: require explicit -u)
-  (code, _, _) <- runGitWithOutput ["checkout", "-f", "-B", "main", "--no-track", "refs/remotes/origin/main"]
+  (code, _, _) <- runGitWithOutput ["checkout", "-f", "-B", "main", "--no-track", remoteTrackingRef "origin"]
   pure code
 
 -- | Paths relative to work tree (index/...) that are unmerged.

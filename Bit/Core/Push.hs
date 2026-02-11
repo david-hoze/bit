@@ -20,6 +20,7 @@ import System.FilePath ((</>))
 import Control.Monad (when, unless, void)
 import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
+import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (fetchedBundle, BundleName(..), bundleCwdPath, fromCwdPath)
@@ -150,7 +151,7 @@ filesystemPush cwd remote = do
     
     putStrLn "Fetching local commits into remote..."
     (fetchCode, _fetchOut, fetchErr) <- Git.runGitAt remoteIndex 
-        ["fetch", localIndexGit, "main:refs/remotes/origin/main"]
+        ["fetch", localIndexGit, "main:" ++ remoteTrackingRef "origin"]
     
     when (fetchCode /= ExitSuccess) $ do
         hPutStrLn stderr $ "Error fetching into remote: " ++ fetchErr
@@ -165,7 +166,7 @@ filesystemPush cwd remote = do
     -- 4. Check if remote HEAD is ancestor of what we're pushing (fast-forward check)
     traverse_ (const $ do
         (checkCode, _, _) <- Git.runGitAt remoteIndex 
-            ["merge-base", "--is-ancestor", "HEAD", "refs/remotes/origin/main"]
+            ["merge-base", "--is-ancestor", "HEAD", remoteTrackingRef "origin"]
         when (checkCode /= ExitSuccess) $ do
             hPutStrLn stderr "error: Remote has local commits that you don't have."
             hPutStrLn stderr "hint: Run 'bit pull' to merge remote changes first, then push again."
@@ -175,7 +176,7 @@ filesystemPush cwd remote = do
     -- 5. Merge at remote (ff-only)
     putStrLn "Merging at remote (fast-forward only)..."
     (mergeCode, _mergeOut, mergeErr) <- Git.runGitAt remoteIndex 
-        ["merge", "--ff-only", "refs/remotes/origin/main"]
+        ["merge", "--ff-only", remoteTrackingRef "origin"]
     
     case mergeCode of
         ExitSuccess -> do

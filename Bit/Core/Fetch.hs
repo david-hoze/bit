@@ -17,6 +17,7 @@ import qualified System.Directory as Dir
 import System.FilePath ((</>))
 import Control.Monad (when)
 import System.Exit (ExitCode(..), exitWith)
+import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import System.IO (stderr, hPutStrLn)
@@ -76,7 +77,7 @@ filesystemFetch _cwd remote = do
     
     putStrLn "Fetching remote commits..."
     (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput 
-        ["fetch", remoteIndexGit, "main:refs/remotes/origin/main"]
+        ["fetch", remoteIndexGit, "main:" ++ remoteTrackingRef "origin"]
     
     when (fetchCode /= ExitSuccess) $ do
         hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr

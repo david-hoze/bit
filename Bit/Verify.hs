@@ -29,6 +29,7 @@ import Data.List (isPrefixOf)
 import Data.Maybe (maybeToList)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
+import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import Bit.Internal.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, hashFile, serializeMetadata)
 import qualified Bit.Remote.Scan as Remote.Scan
@@ -285,7 +286,7 @@ loadMetadataFromBundle bundleName = do
       (_code, out, _) <- readProcessWithExitCode "git"
         [ "-C", bitIndexPath
         , "rev-parse"
-        , "refs/remotes/origin/main"
+        , remoteTrackingRef "origin"
         ] ""
       case filter (not . isSpace) out of
         [] -> pure []

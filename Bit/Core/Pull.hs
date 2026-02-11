@@ -26,6 +26,7 @@ import System.FilePath ((</>), normalise, takeDirectory)
 import Control.Monad (when, unless, void, forM_)
 import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
+import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (bitIndexPath, fetchedBundle)
@@ -112,7 +113,7 @@ filesystemPull cwd remote opts = do
     
     putStrLn "Fetching remote commits..."
     (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput 
-        ["fetch", remoteIndexGit, "main:refs/remotes/origin/main"]
+        ["fetch", remoteIndexGit, "main:" ++ remoteTrackingRef "origin"]
     
     when (fetchCode /= ExitSuccess) $ do
         hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
@@ -123,7 +124,7 @@ filesystemPull cwd remote opts = do
     hPutStrLn stderr $ " * [new branch]      main       -> origin/main"
     
     -- 3. Get remote HEAD hash
-    (remoteHeadCode, remoteHeadOut, _) <- Git.runGitWithOutput ["rev-parse", "refs/remotes/origin/main"]
+    (remoteHeadCode, remoteHeadOut, _) <- Git.runGitWithOutput ["rev-parse", remoteTrackingRef "origin"]
     when (remoteHeadCode /= ExitSuccess) $ do
         hPutStrLn stderr "Error: Could not get remote HEAD"
         exitWith (ExitFailure 1)
@@ -174,13 +175,13 @@ filesystemPullLogicImpl transport _remote remoteHash = do
         
         Just localHash -> do
             (mergeCode, mergeOut, mergeErr) <- lift $ Git.runGitWithOutput 
-                ["merge", "--no-commit", "--no-ff", "refs/remotes/origin/main"]
+                ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
             
             (finalMergeCode, finalMergeOut, finalMergeErr) <-
                 lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
                 then do
                     putStrLn "Merging unrelated histories..."
-                    Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
+                    Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", remoteTrackingRef "origin"]
                 else pure (mergeCode, mergeOut, mergeErr)
             
             case finalMergeCode of
@@ -272,7 +273,7 @@ pullAcceptRemoteImpl transport remote = do
             case checkoutCode of
                 ExitSuccess -> do
                     -- 4. Sync actual files to working tree based on what changed in git
-                    (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
+                    (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", remoteTrackingRef "origin"]
                     let _newHash = takeWhile (/= '\n') remoteOut
                     maybe (lift $ transportSyncAllFiles transport cwd)  -- First time, no diff available
                           (\oh -> lift $ applyMergeToWorkingDir transport cwd oh) oldHead
@@ -327,12 +328,12 @@ pullManualMergeImpl remote = do
                             pullWithCleanup transport remote defaultPullOptions
                         else do
                             _oldHash <- lift getLocalHeadE
-                            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
+                            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", remoteTrackingRef "origin"]
                             let _newHash = takeWhile (/= '\n') remoteOut
 
-                            (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", "refs/remotes/origin/main"]
+                            (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
                             (_finalMergeCode, _, _) <- lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
-                                then do tell "Merging unrelated histories (e.g. first pull)..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
+                                then do tell "Merging unrelated histories (e.g. first pull)..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", remoteTrackingRef "origin"]
                                 else pure (mergeCode, mergeOut, mergeErr)
 
                             createConflictDirectories remote divergentFiles remoteFileMap remoteMetaMap localMetaMap
@@ -373,7 +374,7 @@ pullLogic transport remote _opts = do
             case outcome of
                 FetchError err -> lift $ tellErr $ "Error: " ++ err
                 _ -> pure ()  -- No need to render fetch output during pull
-            (_, countOut, _) <- lift $ gitQuery ["rev-list", "--count", "refs/remotes/origin/main"]
+            (_, countOut, _) <- lift $ gitQuery ["rev-list", "--count", remoteTrackingRef "origin"]
             let n = takeWhile (`elem` ['0'..'9']) (filter (/= '\n') countOut)
             lift $ tell $ "remote: Counting objects: " ++ (if null n then "0" else n) ++ ", done."
 
@@ -390,7 +391,7 @@ pullLogic transport remote _opts = do
                     exitWith (ExitFailure 1)
 
             oldHash <- lift getLocalHeadE
-            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", "refs/remotes/origin/main"]
+            (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", remoteTrackingRef "origin"]
             let newHash = takeWhile (/= '\n') remoteOut
 
             case oldHash of
@@ -404,11 +405,11 @@ pullLogic transport remote _opts = do
                         _ -> lift $ tellErr "Error: Failed to checkout remote branch."
 
                 Just localHead -> do
-                    (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", "refs/remotes/origin/main"]
+                    (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
 
                     (finalMergeCode, finalMergeOut, finalMergeErr) <-
                         lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
-                        then do tell "Merging unrelated histories..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", "refs/remotes/origin/main"]
+                        then do tell "Merging unrelated histories..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", remoteTrackingRef "origin"]
                         else pure (mergeCode, mergeOut, mergeErr)
 
                     case finalMergeCode of

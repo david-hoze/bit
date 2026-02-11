@@ -35,6 +35,7 @@ import Data.Foldable (traverse_)
 import Control.Monad.Trans.Class (lift)
 import System.Exit (ExitCode(..), exitWith)
 import Control.Exception (throwIO, IOException, catch)
+import Internal.Git (remoteTrackingRef)
 import qualified Internal.Git as Git
 import Internal.Config (bitIndexPath)
 import System.IO (stderr, hPutStrLn, hPutStr)
@@ -178,7 +179,7 @@ mergeContinue = do
                 oldHead <- liftIO getLocalHeadE
                 (code, _, _) <- liftIO $ Git.runGitWithOutput ["rev-parse", "--verify", "MERGE_HEAD"]
                 when (code /= ExitSuccess) $ do
-                    (mergeCode, _, _) <- liftIO $ Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", "refs/remotes/origin/main"]
+                    (mergeCode, _, _) <- liftIO $ Git.runGitWithOutput ["merge", "--no-commit", "--no-ff", remoteTrackingRef "origin"]
                     when (mergeCode /= ExitSuccess) $
                         liftIO $ hPutStrLn stderr "warning: Could not start merge. Proceeding anyway."
 
