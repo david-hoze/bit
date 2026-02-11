@@ -11,6 +11,7 @@ executable bit
         -Wall
     other-modules:    Bit.AtomicWrite,
                       Bit.Commands,
+                      Bit.Help,
                       Bit.Concurrency,
                       Bit.Conflict,
                       Bit.ConcurrentIO,

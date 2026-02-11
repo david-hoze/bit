@@ -11,7 +11,8 @@ import Bit.Utils (atomicWriteFileStr)
 import Bit.Concurrency (Concurrency(..))
 import qualified Bit.RemoteWorkspace as RemoteWorkspace
 import System.Environment (getArgs)
-import System.Exit (ExitCode(..), exitWith)
+import Bit.Help (printMainHelp, printTerseHelp, printCommandHelp)
+import System.Exit (ExitCode(..), exitWith, exitSuccess)
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import Control.Monad (when, unless, void)
@@ -27,42 +28,12 @@ run :: IO ()
 run = do
     args <- getArgs
     case args of
-        [] -> hPutStrLn stderr $ unlines
-            [ "Usage: bit <command> [options]"
-            , ""
-            , "Commands:"
-            , "  init                           Initialize a new bit repository"
-            , "  status                         Show working tree status"
-            , "  add <path>                     Add file contents to metadata"
-            , "  commit -m <msg>                Record changes to the repository"
-            , "  log                            Show commit history"
-            , "  diff                           Show changes"
-            , "  rm [options] <path>            Remove files from tracking"
-            , "  restore [options] [--] <path>  Restore working tree files"
-            , "  checkout [options] -- <path>   Checkout files from index"
-            , ""
-            , "  push [-u|--set-upstream] [<remote>]"
-            , "                                 Push to remote"
-            , "  pull [<remote>] [options]      Pull from remote"
-            , "      --accept-remote            Accept remote state as truth"
-            , "      --manual-merge             Manual conflict resolution"
-            , "  fetch [<remote>]               Fetch metadata from remote"
-            , ""
-            , "  remote add <name> <url>        Add a remote"
-            , "  remote show [<name>]           Show remote information"
-            , "  remote repair [<name>]         Verify and repair files against remote"
-            , ""
-            , "  verify [--remote]              Verify files match committed metadata"
-            , "  fsck                           Check metadata repository integrity"
-            , "  merge --continue|--abort       Continue or abort merge"
-            , "  branch --unset-upstream        Unset upstream tracking"
-            , ""
-            , "Remote-targeted commands:"
-            , "  --remote <name> <cmd>          Target a remote workspace (portable)"
-            , "  @<remote> <cmd>                Shorthand (needs quoting in PowerShell)"
-            , ""
-            , "  Supported: init, add <path>, commit -m <msg>, status, log, ls-files"
-            ]
+        []               -> printMainHelp >> exitSuccess
+        ["help"]         -> printMainHelp >> exitSuccess
+        ["help", cmd]    -> printCommandHelp cmd >> exitSuccess
+        ["help", c1, c2] -> printCommandHelp (c1 ++ " " ++ c2) >> exitSuccess
+        ["-h"]           -> printMainHelp >> exitSuccess
+        ["--help"]       -> printMainHelp >> exitSuccess
         _  -> case extractRemoteTarget args of
             RemoteError msg -> do
                 hPutStrLn stderr $ "fatal: " ++ msg
@@ -161,8 +132,22 @@ syncBitignoreToIndex cwd = do
     trim :: String -> String
     trim = dropWhile (== ' ') . dropWhileEnd (== ' ')
 
+-- | Extract the command key from args for help lookup.
+-- Handles multi-word commands like "remote add", "merge --continue", etc.
+commandKey :: [String] -> String
+commandKey ("remote":sub:_)
+    | sub `elem` ["add", "show", "repair"] = "remote " ++ sub
+commandKey ("merge":sub:_)
+    | sub `elem` ["--continue", "--abort"] = "merge " ++ sub
+commandKey ("branch":sub:_)
+    | sub `elem` ["--unset-upstream"] = "branch " ++ sub
+commandKey (cmd:_) = cmd
+commandKey [] = ""
+
 runCommand :: [String] -> IO ()
 runCommand args = do
+    let hasHelp = "--help" `elem` args
+    let hasTerseHelp = "-h" `elem` args
     let hasForce = "--force" `elem` args || "-f" `elem` args
     let hasForceWithLease = "--force-with-lease" `elem` args
     let isSequential = "--sequential" `elem` args
@@ -173,7 +158,16 @@ runCommand args = do
           | hasForce          = Force
           | hasForceWithLease = ForceWithLease
           | otherwise         = NoForce
-    let cmd = filter (`notElem` ["--force", "-f", "--force-with-lease", "--sequential"]) args
+    let cmd = filter (`notElem` ["--force", "-f", "--force-with-lease", "--sequential", "-h", "--help"]) args
+
+    -- Help intercept (before repo check — help works without a repo)
+    when (hasHelp || hasTerseHelp) $ do
+        let key = commandKey cmd
+        if null key
+            then printMainHelp >> exitSuccess
+            else if hasTerseHelp
+                then printTerseHelp key >> exitSuccess
+                else printCommandHelp key >> exitSuccess
 
     cwd <- Dir.getCurrentDirectory
     bitExists <- Dir.doesDirectoryExist (cwd </> ".bit")
@@ -264,4 +258,6 @@ runCommand args = do
         ["fetch", name]                 -> runScannedWithRemote name Bit.fetch
         
         ["merge", "--continue"]         -> runScanned Bit.mergeContinue
-        _                               -> hPutStrLn stderr "Unknown command."
+        _                               -> do
+            hPutStrLn stderr $ "bit: '" ++ unwords cmd ++ "' is not a bit command. See 'bit help'."
+            exitWith (ExitFailure 1)
