@@ -270,7 +270,7 @@ commandRegistry =
         , cmdOptions  = []
         , cmdExamples = [ HelpItem "bit remote add origin gdrive:Projects/foo" "Add a cloud remote"
                         , HelpItem "bit remote add backup /mnt/usb/myproject" "Add a filesystem remote"
-                        , HelpItem "bit remote add nas //server/share/project", "Add a network share" ]
+                        , HelpItem "bit remote add nas //server/share/project" "Add a network share" ]
         }
     , CommandHelp
         { cmdName     = "remote show"
