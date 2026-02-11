@@ -61,6 +61,20 @@ import Bit.Core.Helpers
     )
 
 -- ============================================================================
+-- Internal types
+-- ============================================================================
+
+-- | File classified for sync. Text has no size; binary carries byte count for progress.
+data FileToSync
+    = TextToSync   FilePath
+    | BinaryToSync FilePath Integer  -- ^ byte count for progress tracking
+    deriving (Show, Eq)
+
+-- | Extract binary files with size > 0 for progress tracking (excludes zero-size).
+binaryFiles :: [FileToSync] -> [(FilePath, Integer)]
+binaryFiles fs = [(p, s) | BinaryToSync p s <- fs, s > 0]
+
+-- ============================================================================
 -- FILE TRANSPORT ABSTRACTION
 -- ============================================================================
 
@@ -156,14 +170,12 @@ applyMergeToWorkingDir transport cwd oldHead = do
                 fileInfo <- forM filesToCopy $ \filePath -> do
                     fromIndex <- isTextFileInIndex cwd filePath
                     if fromIndex
-                        then pure (filePath, True, (0 :: Integer))
-                        else do
-                            size <- getFileSizeFromIndex cwd filePath
-                            pure (filePath, False, size)
-                
-                let binaryFiles = [(p, s) | (p, False, s) <- fileInfo]
-                    totalFiles = length binaryFiles
-                    totalBytes = sum [s | (_, s) <- binaryFiles]
+                        then pure (TextToSync filePath)
+                        else BinaryToSync filePath <$> getFileSizeFromIndex cwd filePath
+
+                let bins = binaryFiles fileInfo
+                    totalFiles = length bins
+                    totalBytes = sum [s | (_, s) <- bins]
 
                 -- Create progress tracker
                 progress <- CopyProgress.newSyncProgress totalFiles
@@ -235,22 +247,19 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
             let metaPath = localIndex </> filePath
             isText <- isTextMetadataFile metaPath
             if isText
-                then pure (filePath, True, 0)
+                then pure (TextToSync filePath)
                 else do
-                    -- Binary file: get size from remote file
                     let srcPath = remotePath </> filePath
                     srcExists <- Dir.doesFileExist srcPath
                     if srcExists
-                        then do
-                            size <- Dir.getFileSize srcPath
-                            pure (filePath, False, fromIntegral size)
-                        else pure (filePath, False, 0)
-        
-        let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
-            totalBytes = sum [s | (_, s) <- binaryFiles]
-        
+                        then BinaryToSync filePath . fromIntegral <$> Dir.getFileSize srcPath
+                        else pure (BinaryToSync filePath 0)
+
+        let bins = binaryFiles fileInfo
+            totalBytes = sum [s | (_, s) <- bins]
+
         -- Create progress tracker
-        progress <- CopyProgress.newSyncProgress (length binaryFiles)
+        progress <- CopyProgress.newSyncProgress (length bins)
         writeIORef (CopyProgress.spBytesTotal progress) totalBytes
         
         -- Second pass: copy files with progress (parallelized)
@@ -258,23 +267,20 @@ filesystemSyncRemoteFilesToLocalFromHEAD localRoot remotePath = do
             -- Use lower concurrency for file copies to avoid disk thrashing
             caps <- getNumCapabilities
             let concurrency = max 2 (caps * 2)
-            void $ runConcurrentlyBounded concurrency (\(filePath, isText, size) -> do
-                let metaPath = localIndex </> filePath
-                if isText
-                    then do
-                        -- Text file: metadata IS the content, copy from local index to working tree
-                        let workPath = localRoot </> filePath
-                        createDirectoryIfMissing True (takeDirectory workPath)
-                        copyFile metaPath workPath
-                    else do
-                        -- Binary file: metadata is hash/size, copy actual file from remote working tree
-                        let srcPath = remotePath </> filePath
-                        let destPath = localRoot </> filePath
-                        srcExists <- Dir.doesFileExist srcPath
-                        when srcExists $ do
-                            writeIORef (CopyProgress.spCurrentFile progress) filePath
-                            CopyProgress.copyFileWithProgress srcPath destPath size progress
-                            CopyProgress.incrementFilesComplete progress
+            void $ runConcurrentlyBounded concurrency (\ft -> case ft of
+                TextToSync filePath -> do
+                    let metaPath = localIndex </> filePath
+                        workPath = localRoot </> filePath
+                    createDirectoryIfMissing True (takeDirectory workPath)
+                    copyFile metaPath workPath
+                BinaryToSync filePath size -> do
+                    let srcPath = remotePath </> filePath
+                        destPath = localRoot </> filePath
+                    srcExists <- Dir.doesFileExist srcPath
+                    when srcExists $ do
+                        writeIORef (CopyProgress.spCurrentFile progress) filePath
+                        CopyProgress.copyFileWithProgress srcPath destPath size progress
+                        CopyProgress.incrementFilesComplete progress
                 ) fileInfo
 
 -- | Copy a file from local to remote (handles both text and binary).
@@ -323,46 +329,39 @@ filesystemSyncAllFiles localRoot remotePath commitHash = do
                 let metaPath = remoteIndex </> filePath
                 isText <- isTextMetadataFile metaPath
                 if isText
-                    then pure (filePath, True, 0)
+                    then pure (TextToSync filePath)
                     else do
-                        -- Binary file: get size from local file
                         let srcPath = localRoot </> filePath
                         srcExists <- Dir.doesFileExist srcPath
                         if srcExists
-                            then do
-                                size <- Dir.getFileSize srcPath
-                                pure (filePath, False, fromIntegral size)
-                            else pure (filePath, False, 0)
-            
-            let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
-                totalBytes = sum [s | (_, s) <- binaryFiles]
-            
+                            then BinaryToSync filePath . fromIntegral <$> Dir.getFileSize srcPath
+                            else pure (BinaryToSync filePath 0)
+
+            let bins = binaryFiles fileInfo
+                totalBytes = sum [s | (_, s) <- bins]
+
             -- Create progress tracker
-            progress <- CopyProgress.newSyncProgress (length binaryFiles)
+            progress <- CopyProgress.newSyncProgress (length bins)
             writeIORef (CopyProgress.spBytesTotal progress) totalBytes
-            
+
             -- Second pass: copy files with progress (parallelized)
             CopyProgress.withSyncProgressReporter progress $ do
-                -- Use lower concurrency for file copies to avoid disk thrashing
                 caps <- getNumCapabilities
                 let concurrency = max 2 (caps * 2)
-                void $ runConcurrentlyBounded concurrency (\(filePath, isText, size) -> do
-                    let metaPath = remoteIndex </> filePath
-                    if isText
-                        then do
-                            -- Text file: metadata IS the content, copy from remote index to working tree
-                            let workPath = remotePath </> filePath
-                            createDirectoryIfMissing True (takeDirectory workPath)
-                            copyFile metaPath workPath
-                        else do
-                            -- Binary file: metadata is hash/size, copy actual file from local working tree
-                            let srcPath = localRoot </> filePath
-                            let destPath = remotePath </> filePath
-                            srcExists <- Dir.doesFileExist srcPath
-                            when srcExists $ do
-                                writeIORef (CopyProgress.spCurrentFile progress) filePath
-                                CopyProgress.copyFileWithProgress srcPath destPath size progress
-                                CopyProgress.incrementFilesComplete progress
+                void $ runConcurrentlyBounded concurrency (\ft -> case ft of
+                    TextToSync filePath -> do
+                        let metaPath = remoteIndex </> filePath
+                            workPath = remotePath </> filePath
+                        createDirectoryIfMissing True (takeDirectory workPath)
+                        copyFile metaPath workPath
+                    BinaryToSync filePath size -> do
+                        let srcPath = localRoot </> filePath
+                            destPath = remotePath </> filePath
+                        srcExists <- Dir.doesFileExist srcPath
+                        when srcExists $ do
+                            writeIORef (CopyProgress.spCurrentFile progress) filePath
+                            CopyProgress.copyFileWithProgress srcPath destPath size progress
+                            CopyProgress.incrementFilesComplete progress
                     ) fileInfo
         _ -> pure ()
 
@@ -389,26 +388,23 @@ filesystemSyncChangedFiles localRoot remotePath oldHead newHead = do
                 let metaPath = remoteIndex </> p
                 isText <- isTextMetadataFile metaPath
                 if isText
-                    then pure (p, True, 0)
+                    then pure (TextToSync p)
                     else do
                         let srcPath = localRoot </> p
                         srcExists <- Dir.doesFileExist srcPath
                         if srcExists
-                            then do
-                                size <- Dir.getFileSize srcPath
-                                pure (p, False, fromIntegral size)
-                            else pure (p, False, 0)
-            
-            let binaryFiles = [(p, s) | (p, False, s) <- fileInfo, s > 0]
-                totalBytes = sum [s | (_, s) <- binaryFiles]
-            
+                            then BinaryToSync p . fromIntegral <$> Dir.getFileSize srcPath
+                            else pure (BinaryToSync p 0)
+
+            let bins = binaryFiles fileInfo
+                totalBytes = sum [s | (_, s) <- bins]
+
             -- Create progress tracker
-            progress <- CopyProgress.newSyncProgress (length binaryFiles)
+            progress <- CopyProgress.newSyncProgress (length bins)
             writeIORef (CopyProgress.spBytesTotal progress) totalBytes
-            
+
             -- Second pass: apply changes with progress (parallelized)
             CopyProgress.withSyncProgressReporter progress $ do
-                -- Use lower concurrency for file copies to avoid disk thrashing
                 caps <- getNumCapabilities
                 let concurrency = max 2 (caps * 2)
                 void $ runConcurrentlyBounded concurrency (\change -> case change of

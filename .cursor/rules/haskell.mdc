@@ -39,6 +39,7 @@ Key types and conventions used throughout this codebase:
 | `NameStatusChange` | `Added` / `Deleted` / `Modified` / `Renamed` / `Copied` — parsed `git diff --name-status` output | `Internal.Git` |
 | `DivergentFile` | Record: dfPath, dfExpectedHash, dfActualHash, dfExpectedSize, dfActualSize — remote divergence | `Bit.Core.Pull` |
 | `ScannedEntry` | `ScannedFile` / `ScannedDir` — internal scan pass, replaces (FilePath, Bool) | `Bit.Scan` |
+| `FileToSync` | `TextToSync` / `BinaryToSync` — text has no size, binary carries byte count | `Bit.Core.Transport` |
 | `VerifyTarget` | `VerifyLocal` / `VerifyRemote` — whether `bit verify` checks local or remote | `Bit.Core.Verify` |
 | `BundleName` | `newtype` over `String` — logical bundle name, not a path | `Internal.Config` |
 | `GitRelPath` | `newtype` — path relative to `.bit/index/` (for git commands) | `Internal.Config` |
