@@ -1,0 +1,21 @@
+{
+    "permissions": {
+      "allow": [
+        "Bash(cabal build:*)",
+        "Bash(cabal install:*)",
+        "Bash(cabal clean:*)",
+        "Bash(bit:*)",
+        "Bash(shelltest:*)",
+        "Bash(git:*)",
+        "Bash(grep:*)",
+        "Bash(ls:*)",
+        "Bash(echo:*)",
+        "Bash(printf:*)",
+        "Bash(tee:*)",
+        "Bash(test:*)",
+        "Bash(ghc -e:*)",
+        "Bash(rclone lsjson:*)"
+      ]
+    }
+  }
+  
