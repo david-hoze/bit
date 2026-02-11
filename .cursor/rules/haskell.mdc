@@ -60,6 +60,14 @@ Key types and conventions used throughout this codebase:
 - **`.bit/index/`** is a git repo tracking metadata. Binary files get hash/size metadata files; text files get actual content.
 - **Transport abstraction**: `FileTransport` is a record of functions, not a typeclass. Cloud remotes use rclone; filesystem remotes use direct copy. Created via `mkCloudTransport` or `mkFilesystemTransport`.
 
+### Types intentionally left as tuples or bare parameters
+
+| Pattern | Why it stays |
+|---|---|
+| `(ExitCode, String, String)` from `runGit`/`runGitWithOutput`/`readProcessWithExitCode` | Standard Haskell process idiom; every call site destructures immediately with clear binding names (`(code, out, err)`) |
+| `Config String String` in `Internal.Git` | Not used externally; too trivial to justify a record |
+| Local `(Bool, Bool)` case dispatch (e.g., `classifyPushStatus`) | When both values are bound with clear names and consumed immediately in the same function, a record adds verbosity without safety |
+
 ## Quick checklist for writing
 
 ### Type safety
