@@ -447,8 +447,8 @@ shouldWriteFile root metaPath entry fHash fSize fContentType = do
 -- | Parse a metadata file (hash/size lines) or read a text file and compute hash/size.
 -- Returns Nothing if file is missing or invalid.
 -- Text files in .rgit/index/ contain actual content; binary files contain metadata.
-readMetadataFile :: FilePath -> IO (Maybe (Hash 'MD5, Integer))
-readMetadataFile fp = fmap (\mc -> (metaHash mc, metaSize mc)) <$> readMetadataOrComputeHash fp
+readMetadataFile :: FilePath -> IO (Maybe MetaContent)
+readMetadataFile = readMetadataOrComputeHash
 
 -- | List all metadata file paths under index dir, relative to index root. Excludes .gitattributes.
 listMetadataPaths :: FilePath -> IO [FilePath]
@@ -468,7 +468,7 @@ listMetadataPaths indexRoot = go indexRoot ""
           pure (if isFile then [rel] else [])
 
 -- | Get hash and size of a file. Returns Nothing if file is missing or not a regular file.
-getFileHashAndSize :: FilePath -> FilePath -> IO (Maybe (Hash 'MD5, Integer))
+getFileHashAndSize :: FilePath -> FilePath -> IO (Maybe MetaContent)
 getFileHashAndSize root relPath = do
   let full = root </> relPath
   exists <- doesFileExist full
@@ -476,4 +476,4 @@ getFileHashAndSize root relPath = do
   else do
     h <- hashFile full
     sz <- getFileSize full
-    pure (Just (h, fromIntegral sz))
+    pure (Just (MetaContent h (fromIntegral sz)))
