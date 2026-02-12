@@ -58,8 +58,7 @@ project/
     ├── remotes/            # Named remote configs (typed)
     │   └── origin          # Remote type + optional target
     ├── devices/            # Device identity files
-    ├── target              # Legacy: single remote URL
-    └── ignore              # Gitignore-style rules
+    └── target              # Legacy: single remote URL
 ```
 
 ### The Index Invariant
@@ -102,7 +101,7 @@ The rule applies symmetrically:
 **Push (sender must prove possession):**
 1. Verify local — every binary file's hash must match its metadata
 2. If verification fails, refuse to push
-3. If verified, push metadata then copy files
+3. If verified, sync files then push metadata (files first so the remote never has metadata referencing missing content)
 
 **Pull (sender must prove possession):**
 1. Verify remote — every binary file on the remote must match the remote's metadata
@@ -176,7 +175,7 @@ bit runs Git with:
 - Git repository initialized in `.bit/index/.git` during `bit init`
 - All git operations use the repo at `.bit/index/.git`
 - Working tree is `.bit/index` (not the project root)
-- `core.excludesFile` points to `.bit/ignore`
+- Ignore rules: user creates `.bitignore` in the project root; `syncBitignoreToIndex` copies it to `.bit/index/.gitignore` (the standard gitignore location for git's working tree)
 
 ### File Handling
 
@@ -260,7 +259,7 @@ The mechanism:
 ```haskell
 oldHead <- getLocalHeadE                        -- 1. Capture HEAD *before* the git operation
 -- ... git merge / git checkout ...             -- 2. Git changes HEAD + index
-applyMergeToWorkingDir transport cwd oldHead    -- 3. Diff old HEAD vs new HEAD, sync files
+applyMergeToWorkingDir remoteRoot cwd oldHead   -- 3. Diff old HEAD vs new HEAD, sync files
 ```
 
 `applyMergeToWorkingDir` uses `git diff --name-status oldHead newHead` to
@@ -692,6 +691,9 @@ For a typical 10GB media repo, this downloads maybe 50KB of text files while ski
 | `bit --remote <name> commit <args>` | Fetch bundle → commit with provided args → push bundle (useful for amending) |
 | `bit --remote <name> status` | Fetch bundle → scan remote → write metadata → show git status (read-only, no push). Shows untracked files that exist on remote but aren't committed. |
 | `bit --remote <name> log` | Fetch bundle → show git log (read-only, no push) |
+| `bit --remote <name> ls-files` | Fetch bundle → show tracked files (read-only, no push) |
+| `bit --remote <name> verify` | Verify remote files match committed remote metadata |
+| `bit --remote <name> repair` | Verify and auto-repair remote files |
 
 The `@<remote>` shorthand is equivalent (e.g., `bit @origin init`).
 
@@ -832,7 +834,7 @@ Both functions:
 All lazy IO replaced with strict operations:
 - `Bit/Scan.hs` — `.gitignore` reading uses strict ByteString
 - `Bit/Device.hs` — `.bit-store`, device files, remote files use strict ByteString + atomic writes
-- `Bit/Core.hs` — `readFileMaybe`, `writeFileAtomicE` (now truly atomic), metadata reading
+- `Bit/Core/Helpers.hs` — `readFileMaybe`, `writeFileAtomicE` (now truly atomic), metadata reading
 - `Bit/Commands.hs` — `.bitignore` reading/writing uses strict ByteString + atomic writes
 - `Internal/ConfigFile.hs` — Config reading uses strict ByteString instead of lazy Text IO
 
@@ -945,9 +947,14 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 **Implementation** (`Bit/Commands.hs`):
 
 ```haskell
--- Lightweight env (no scan) — for read-only commands
+-- Lightweight env (no scan) — for push and read-only commands (falls back to "origin")
 let baseEnv = do
         mRemote <- getDefaultRemote cwd
+        pure $ BitEnv cwd mRemote forceMode
+
+-- Lightweight env for pull — does NOT fall back to "origin" (spec requirement)
+let pullFetchEnv = do
+        mRemote <- getUpstreamRemote cwd
         pure $ BitEnv cwd mRemote forceMode
 
 -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
@@ -960,21 +967,21 @@ case cmd of
     -- ── No env needed ────────────────────────────────────
     ["init"]              -> Bit.init
     ["remote", "add", ...] -> Bit.remoteAdd name url
-    ["fsck"]              -> Bit.fsck cwd ...
+    ["fsck"]              -> Bit.fsck cwd
     ["merge", "--abort"]  -> Bit.mergeAbort
 
     -- ── Lightweight env (no scan) ────────────────────────
     ("log":rest)          -> Bit.log rest >>= exitWith
     ("ls-files":rest)     -> Bit.lsFiles rest >>= exitWith
     ["remote", "show"]    -> runBase $ Bit.remoteShow Nothing
-    ["verify"]            -> runBase $ Bit.verify Bit.VerifyLocal concurrency
+    ["verify"]            -> runBase $ Bit.verify Bit.VerifyLocal Bit.PromptRepair concurrency
     ["push"]              -> runBase Bit.push
 
     -- ── Full scanned env (needs working directory state) ─
     ("add":rest)          -> do scanAndWrite; Bit.add rest >>= exitWith
     ("status":rest)       -> runScanned (Bit.status rest) >>= exitWith
-    ("pull":...)          -> runScanned $ Bit.pull Bit.defaultPullOptions
-    ("fetch":...)         -> runScanned Bit.fetch
+    ("pull":...)          -> runScannedPullFetch $ Bit.pull Bit.defaultPullOptions
+    ("fetch":...)         -> runScanned Bit.fetch   -- falls back to "origin" like git
 ```
 
 **Key Changes**:
@@ -1286,7 +1293,7 @@ Interactive per-file conflict resolution:
 - `bit init` — creates `.bit/`, initializes Git in `.bit/index/.git`
 - `bit add` — scans files, computes MD5 hashes, writes metadata, stages in Git
 - `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `reset`, `rm`, `mv`, `branch`, `merge` — delegate to Git
-- `bit remote add/show/check` — named remotes with device-aware resolution
+- `bit remote add/show` — named remotes with device-aware resolution
 - `bit push` — Cloud: diff-based file sync via rclone, then push metadata bundle. Filesystem: fetch+merge at remote, then sync files
 - `bit pull` — Cloud: fetch metadata bundle, then diff-based file sync via `applyMergeToWorkingDir`. Filesystem: fetch from remote, merge locally, sync files
 - `bit pull --accept-remote` — force-checkout remote branch, then mirror changes to working directory

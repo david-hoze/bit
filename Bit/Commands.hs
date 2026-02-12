@@ -241,11 +241,7 @@ runCommand args = do
         ["repair"]                      -> runBase $ Bit.verify Bit.VerifyLocal Bit.AutoRepair concurrency
 
         ("rm":rest)                     -> runBase (Bit.rm rest) >>= exitWith
-        ("mv":rest)                     -> Bit.mv rest >>= exitWith
-        ("reset":rest)                  -> Bit.reset rest >>= exitWith
         ("branch":rest)                 -> Bit.branch rest >>= exitWith
-        ["merge", "--continue"]         -> runScanned Bit.mergeContinue
-        ("merge":rest)                  -> Bit.merge rest >>= exitWith
 
         -- ── Full scanned env (needs working directory state) ─
         ("add":rest)                    -> do
@@ -257,6 +253,16 @@ runCommand args = do
         ("diff":rest)                   -> do
             scanAndWrite
             Bit.diff rest >>= exitWith
+        ("mv":rest)                     -> do
+            scanAndWrite
+            Bit.mv rest >>= exitWith
+        ("reset":rest)                  -> do
+            scanAndWrite
+            Bit.reset rest >>= exitWith
+        ["merge", "--continue"]         -> runScanned Bit.mergeContinue
+        ("merge":rest)                  -> do
+            scanAndWrite
+            Bit.merge rest >>= exitWith
         ("status":rest)                 -> runScanned (Bit.status rest) >>= exitWith
         ("restore":rest)                -> runScanned (Bit.restore rest) >>= exitWith
         ("checkout":rest)               -> runScanned (Bit.checkout rest) >>= exitWith
