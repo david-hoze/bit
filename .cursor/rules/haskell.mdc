@@ -25,7 +25,7 @@ Key types and conventions used throughout this codebase:
 | `ContentType` | `TextContent` or `BinaryContent` — replaces old `Bool` flag | `Bit.Types` |
 | `ForceMode` | `NoForce` / `Force` / `ForceWithLease` — replaces old `Bool` flag | `Bit.Types` |
 | `PullMode` | `PullNormal` / `PullAcceptRemote` / `PullManualMerge` | `Bit.Core.Helpers` |
-| `PullOptions` | `{ pullMode :: PullMode, pullSkipVerify :: Bool }` | `Bit.Core.Helpers` |
+| `PullOptions` | `newtype` wrapping `{ pullMode :: PullMode }` | `Bit.Core.Helpers` |
 | `Remote` | Opaque type — use `remoteName`/`remoteUrl`, not constructor | `Bit.Remote` |
 | `RemoteTarget` | `TargetCloud` / `TargetDevice` / `TargetLocalPath` | `Bit.Device` |
 | `isFilesystemTarget` | Predicate collapsing `TargetDevice` + `TargetLocalPath` | `Bit.Device` |

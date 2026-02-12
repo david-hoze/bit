@@ -148,7 +148,7 @@ The existing divergence resolution mechanisms (`--accept-remote`, `--force`, `--
 - `bit push` always verifies local working tree before pushing (unconditional — `--force` only affects ancestry check)
 - `bit pull` verifies remote before pulling (unless `--accept-remote` or `--manual-merge`)
 - `bit fetch` does NOT verify (fetch only transfers metadata, no file sync happens)
-- `bit fetch` is silent when already up to date (no stdout), similar to `git fetch`
+- `bit fetch` (cloud) is silent when already up to date (no stdout), similar to `git fetch`. Filesystem fetch prints progress messages regardless of outcome.
 - Cloud remotes: verified via `Verify.verifyRemote` using `rclone lsjson --hash`
 - Filesystem remotes: verified via `Verify.verifyLocalAt` which hashes the remote's working tree
 - Verification runs in parallel using bounded concurrency (`Parallel 0` = auto-detect based on CPU cores)
@@ -194,15 +194,15 @@ bit runs Git with:
 The codebase follows strict layer boundaries:
 
 ```
-bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
+bit/Commands.hs → Bit/Core/*.hs → Internal/Transport.hs → rclone (only here!)
                       ↓
                    Internal/Git.hs → git (only here!)
 ```
 
 - **Internal/Transport.hs** — Dumb rclone wrapper. Knows how to `copyTo`, `moveTo`, `deleteFile`, `listJson`, `check`. Takes `Remote` + relative paths. Does NOT know about `.bit/`, bundles, `RemoteState`, or `FetchResult`. Captures rclone JSON output as raw UTF-8 bytes to correctly handle non-ASCII filenames (Hebrew, Chinese, emoji, etc.). Uses `bracket` for exception-safe subprocess resource cleanup.
 - **Internal/Git.hs** — Dumb git wrapper. Knows how to run git commands. Takes args. Does NOT interpret results in domain terms.
-- **Bit.hs** — Smart business logic. All domain knowledge lives here. Knows about remotes, bundles, `.bit/` layout, sync strategy. Calls Transport and Git, never calls `readProcessWithExitCode` directly.
-- **bit/Commands.hs** — Entry point. Parses CLI, resolves the remote, builds `BitEnv`, dispatches to `Bit`.
+- **Bit/Core/*.hs** — Smart business logic, split by concern. `Bit.Core` re-exports the public API. Sub-modules: `Bit.Core.Push` (push logic + PushSeam), `Bit.Core.Pull` (pull + merge + conflict), `Bit.Core.Fetch` (fetch + remote state classification), `Bit.Core.Transport` (shared action derivation + working-tree sync), `Bit.Core.Verify` (verify + repair), `Bit.Core.Init` (repo initialization), `Bit.Core.Helpers` (shared types + utilities), `Bit.Core.RemoteManagement` (remote add/show), `Bit.Core.GitPassthrough` (git command delegation). All domain knowledge lives here. Calls Transport and Git, never calls `readProcessWithExitCode` directly.
+- **bit/Commands.hs** — Entry point. Parses CLI, resolves the remote, builds `BitEnv`, dispatches to `Bit.Core`.
 
 ### Key Types
 
@@ -225,10 +225,10 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 | `NameStatusChange` | `Internal.Git` | Added, Deleted, Modified, Renamed, Copied — parsed `git diff --name-status` output (replaces bare `(Char, FilePath, Maybe FilePath)` tuple) |
 | `DivergentFile` | `bit.Core.Pull` | Record for remote divergence: path, expected/actual hash and size (replaces bare 5-tuple) |
 | `ScannedEntry` | `bit.Scan` | ScannedFile / ScannedDir — internal type for scan pass, replaces (FilePath, Bool) |
-| `FileToSync` | `bit.Core.Transport` | TextToSync / BinaryToSync — text has no size, binary carries byte count |
+| `FileToSync` | `bit.Core.Transport` | TextToSync / BinaryToSync — classifies files for sync (both carry FilePath only) |
 | `BinaryFileMeta` | `bit.Verify` | Record: bfmPath, bfmHash, bfmSize — replaces bare (Path, Hash, Integer) tuple |
 | `VerifyResult` | `bit.Verify` | Record: vrCount, vrIssues — replaces bare (Int, [VerifyIssue]) tuple |
-| `VerifyTarget` | `bit.Core.Verify` | VerifyLocal or VerifyRemote — whether verify checks local or remote |
+| `VerifyTarget` | `bit.Core.Verify` | VerifyLocal or VerifyRemotePath Remote — whether verify checks local or a specific remote |
 | `DeviceInfo` | `bit.Device` | UUID + storage type + optional hardware serial |
 | `RemoteType` | `bit.Device` | RemoteFilesystem, RemoteDevice, RemoteCloud |
 
@@ -396,7 +396,7 @@ past the merge).
 
 5. **First pull does NOT set upstream**: When pulling for the first time (unborn branch), `checkoutRemoteAsMain` uses `git checkout -B main --no-track refs/remotes/origin/main`. This prevents automatic upstream tracking setup. Users must use `bit push -u <remote>` to explicitly configure tracking.
 
-6. **Internal git remote vs upstream tracking**: bit's internal git repo has a remote named "origin" (used for fetching refs from bundles), but this is distinct from upstream tracking config (`branch.main.remote`). The internal remote is set up automatically; upstream tracking is never automatic. This distinction is critical: `Git.setupRemote` configures the internal git remote (required for bundle operations), while `Git.setupBranchTracking` sets `branch.main.remote` (must only be called from `push -u`).
+6. **Internal git remote vs upstream tracking**: bit's internal git repo has a remote named "origin" (used for fetching refs from bundles), but this is distinct from upstream tracking config (`branch.main.remote`). The internal remote is set up automatically; upstream tracking is never automatic. This distinction is critical: `Git.addRemote` configures the internal git remote (required for bundle operations), while `Git.setupBranchTrackingFor` sets `branch.main.remote` (must only be called from `push -u`).
 
 This makes bit's remote behavior predictable for git users: explicit tracking setup via `-u`, explicit remote selection via argument, sensible defaults when configured, and git-standard fallback to "origin" for push operations.
 
@@ -1141,7 +1141,7 @@ Interactive per-file conflict resolution:
 
 5. **Structured conflict resolution**: Conflict handling is a fold over a conflict list (`bit.Conflict`), not an imperative block. Decision logic is separated from IO mechanics.
 
-6. **Remote as opaque type**: `Remote` is exported without its constructor. Only `remoteName` is public for display. `remoteUrl` exists for Transport to extract the URL, but business logic in Bit.hs should use `displayRemote` for user-facing messages.
+6. **Remote as opaque type**: `Remote` is exported without its constructor. Only `remoteName` is public for display. `remoteUrl` exists for Transport to extract the URL, but business logic in Bit/Core/*.hs should use `displayRemote` for user-facing messages.
 
 7. **Tracking ref invariant**: `refs/remotes/origin/main` must always reflect
    what the remote actually has — never a local-only commit. After **push**,
@@ -1171,7 +1171,7 @@ Interactive per-file conflict resolution:
     HEAD (merge, checkout), capture HEAD so `applyMergeToWorkingDir` can diff
     old vs new and sync only what changed. This pattern appears in `pullLogic`,
     `mergeContinue`, and `pullAcceptRemoteImpl`. The only exception is first
-    pull (`oldHead = Nothing`), which falls back to `syncRemoteFilesToLocal`.
+    pull (`oldHead = Nothing`), which falls back to `syncAllFilesFromHEAD`.
 
 11. **Proof of possession on push/pull**: bit-lite must verify that the sender's
     working tree matches its metadata before transferring that metadata. On push,
@@ -1318,7 +1318,13 @@ Interactive per-file conflict resolution:
 |--------|------|
 | `bit/Commands.hs` | CLI dispatch, env setup |
 | `bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
-| `Bit.hs` | All business logic |
+| `Bit/Core.hs` | Re-exports public API from `Bit/Core/*.hs` sub-modules |
+| `Bit/Core/Push.hs` | Push logic + PushSeam transport abstraction |
+| `Bit/Core/Pull.hs` | Pull + merge + conflict resolution |
+| `Bit/Core/Fetch.hs` | Fetch + remote state classification |
+| `Bit/Core/Transport.hs` | Shared action derivation + working-tree sync |
+| `Bit/Core/Verify.hs` | Verify + repair logic |
+| `Bit/Core/Helpers.hs` | Shared types (PullMode, PullOptions) + utility functions |
 | `Internal/Git.hs` | Git command wrapper; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
 | `Bit/Path.hs` | `RemotePath` newtype — compile-time enforcement that remote filesystem paths go through `Bit.Platform` |
 | `Bit/Platform.hs` | UNC-safe wrappers for `System.Directory` (CPP: Win32 direct calls for UNC paths, `System.Directory` for local); includes `getFileSize` |
@@ -1508,7 +1514,7 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
 - Match Git's CLI conventions and output format
 - Keep Transport dumb — no domain knowledge in Transport
 - Keep Git.hs dumb — no domain interpretation
-- All business logic in Bit.hs
+- All business logic in Bit/Core/*.hs
 - Use the unified metadata parser from `bit/Internal/Metadata.hs`
 - After pull/merge, set refs/remotes/origin/main to the bundle hash, not HEAD
 - Capture `oldHead` before any git operation that changes HEAD, then use
