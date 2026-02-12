@@ -53,7 +53,6 @@ import Bit.Core.Helpers
     , isFilesystemRemote
     , withRemote
     , getLocalHeadE
-    , hasStagedChangesE
     , gitQuery
     , gitRaw
     , tell
@@ -185,8 +184,11 @@ filesystemPullLogicImpl remoteRoot remote remoteHash = do
                 ExitSuccess -> do
                     lift $ putStrLn $ "Updating " ++ shortRefDisplay localHash ++ ".." ++ shortRefDisplay remoteHash
                     lift $ putStrLn "Merge made by the 'recursive' strategy."
-                    hasChanges <- lift hasStagedChangesE
-                    when hasChanges $ lift $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
+                    -- Always commit when MERGE_HEAD exists — never guard with hasStagedChanges.
+                    -- See spec.md "Design Decisions" #9: git commit succeeds when MERGE_HEAD
+                    -- is present even if the tree is unchanged. Skipping would leave MERGE_HEAD
+                    -- dangling and break the next push.
+                    lift $ void $ Git.runGitRaw ["commit", "-m", "Merge remote"]
                     -- CRITICAL: Always read actual HEAD after merge, never use remoteHash
                     lift $ applyMergeToWorkingDir remoteRoot cwd localHash
                     lift $ putStrLn "Syncing binaries... done."
@@ -414,8 +416,11 @@ pullLogic remote _opts = do
                         lift $ do
                             tell $ "Updating " ++ shortRefDisplay localHead ++ ".." ++ shortRefDisplay newHash
                             tell "Merge made by the 'recursive' strategy."
-                        hasChanges <- lift hasStagedChangesE
-                        when hasChanges $ lift $ void $ gitRaw ["commit", "-m", "Merge remote"]
+                        -- Always commit when MERGE_HEAD exists — never guard with hasStagedChanges.
+                        -- When the tree is unchanged (e.g. identical content on both sides),
+                        -- git commit still succeeds because MERGE_HEAD is present, and skipping
+                        -- the commit would leave MERGE_HEAD dangling (breaking the next push).
+                        lift $ void $ gitRaw ["commit", "-m", "Merge remote"]
                         lift $ do
                             applyMergeToWorkingDir remoteRoot cwd localHead
                             tell "Syncing binaries... done."
