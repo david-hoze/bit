@@ -282,6 +282,15 @@ hashProgressLoop fileCounter bytesCounter totalNewFiles totalBytes = go
         threadDelay 50000
         when (n < totalNewFiles) go
 
+-- | Format elapsed seconds as a human-readable string.
+formatElapsed :: Double -> String
+formatElapsed secs
+    | secs < 1    = show (round (secs * 1000) :: Int) ++ " ms"
+    | secs < 60   = show (round secs :: Int) ++ " s"
+    | otherwise   = let mins = floor secs `div` 60 :: Int
+                        remainSecs = round secs - mins * 60 :: Int
+                    in show mins ++ " min " ++ show remainSecs ++ " s"
+
 -- | Recursively collect all paths under root, excluding .bit, .git, .bitignore, .gitignore.
 collectScannedPaths :: FilePath -> IO [ScannedEntry]
 collectScannedPaths root = go root
@@ -488,6 +497,7 @@ scanWorkingDirWithAbort root concurrencyMode mCallback = do
               hashedEntries <- if totalNewFiles > 0
                   then do
                       isTTY <- hIsTerminalDevice stderr
+                      hashStart <- getCurrentTime
                       if isTTY
                         then do
                           reporterThread <- forkIO (hashProgressLoop counter bytesHashedRef totalNewFiles totalBytesNeeded)
@@ -496,9 +506,21 @@ scanWorkingDirWithAbort root concurrencyMode mCallback = do
                               clearProgress
                               actualCount <- readIORef counter
                               actualBytes <- readIORef bytesHashedRef
+                              hashEnd <- getCurrentTime
+                              let elapsed = realToFrac (diffUTCTime hashEnd hashStart) :: Double
                               hPutStrLn stderr $ "Hashed " ++ show actualCount
-                                  ++ " files (" ++ formatBytes actualBytes ++ ")."
-                        else hashingAction
+                                  ++ " files (" ++ formatBytes actualBytes
+                                  ++ ") in " ++ formatElapsed elapsed ++ "."
+                        else do
+                          result <- hashingAction
+                          actualCount <- readIORef counter
+                          actualBytes <- readIORef bytesHashedRef
+                          hashEnd <- getCurrentTime
+                          let elapsed = realToFrac (diffUTCTime hashEnd hashStart) :: Double
+                          hPutStrLn stderr $ "Hashed " ++ show actualCount
+                              ++ " files (" ++ formatBytes actualBytes
+                              ++ ") in " ++ formatElapsed elapsed ++ "."
+                          pure result
                   else hashingAction
 
               pure $ ScanResult
