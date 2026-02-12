@@ -279,7 +279,13 @@ handleNonRgit seam remote samples = do
 executePush :: PushSeam -> Remote -> Maybe String -> BitM ()
 executePush seam remote mRemoteHash = do
     syncRemoteFiles mRemoteHash
-    liftIO $ ptPushMetadata seam
+    -- Skip metadata push when remote is already at our HEAD (avoids slow
+    -- no-op git pull over network paths like \\tsclient\...)
+    localHead <- liftIO getLocalHeadE
+    let alreadyAtHead = case (localHead, mRemoteHash) of
+            (Just lh, Just rh) -> lh == rh
+            _                  -> False
+    unless alreadyAtHead $ liftIO $ ptPushMetadata seam
     liftIO $ void $ Git.updateRemoteTrackingBranchToHead (remoteName remote)
     liftIO $ putStrLn "Push complete."
 
