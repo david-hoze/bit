@@ -110,7 +110,7 @@ cd test\cli\output\work_gdrive_a & echo second file> baz.txt & bit add baz.txt &
 
 cd test\cli\output\work_gdrive_b & bit fetch & bit pull
 <<<
->>>2 /From (gdrive-test|\.git\\fetched_remote\.bundle)|Merge made|Syncing|Updating|remote: Counting/
+>>> /Merge made|Syncing|Updating|remote: Counting/
 >>>= 0
 
 findstr /C:"second file" test\cli\output\work_gdrive_b\.bit\index\baz.txt >nul
