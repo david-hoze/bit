@@ -129,9 +129,10 @@ getDefaultRemote cwd = do
     name <- Git.getTrackedRemoteName  -- defaults to "origin" if not configured
     resolveRemote cwd name
 
--- | Get the upstream remote for pull/fetch (NO fallback to "origin").
+-- | Get the upstream remote for pull (NO fallback to "origin").
 -- Only returns a remote if branch.main.remote is explicitly configured.
--- Spec: "bit pull and bit fetch require explicit remote (no fallback)".
+-- Spec: "bit pull requires explicit remote (no fallback)".
+-- Note: bit fetch uses getDefaultRemote (falls back to "origin"), not this function.
 getUpstreamRemote :: FilePath -> IO (Maybe Remote)
 getUpstreamRemote cwd = do
     mName <- Git.getConfiguredRemoteName  -- Nothing if not configured

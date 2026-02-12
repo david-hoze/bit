@@ -189,7 +189,7 @@ runCommand args = do
             mRemote <- getDefaultRemote cwd
             pure $ BitEnv cwd mRemote forceMode
 
-    -- Lightweight env for pull/fetch — does NOT fall back to "origin" (spec requirement)
+    -- Lightweight env for pull — does NOT fall back to "origin" (spec requirement)
     let pullFetchEnv = do
             mRemote <- getUpstreamRemote cwd
             pure $ BitEnv cwd mRemote forceMode

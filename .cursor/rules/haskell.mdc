@@ -17,7 +17,7 @@ Key types and conventions used throughout this codebase:
 | Type / Value | What it is | Defined in |
 |---|---|---|
 | `BitM` | `ReaderT BitEnv IO` — main application monad | `Bit.Types` |
-| `BitEnv` | Reader environment: cwd, local files, remote, force mode | `Bit.Types` |
+| `BitEnv` | Reader environment: cwd, remote, force mode | `Bit.Types` |
 | `Path` | `newtype` over `FilePath` — unwrap with `unPath` | `Bit.Types` |
 | `Hash 'MD5` | `newtype` over `Text` with phantom `HashAlgo` kind | `Bit.Types` |
 | `FileEntry` | A tracked file: carries `Path` + `EntryKind` | `Bit.Types` |
@@ -32,7 +32,7 @@ Key types and conventions used throughout this codebase:
 | `RemoteState` | Classification of remote: `StateEmpty` / `StateValidRgit` / ... | `Bit.Remote` |
 | `FetchResult` | `BundleFound FilePath` / `RemoteEmpty` / `NetworkError String` | `Bit.Remote` |
 | `FetchOutcome` | `UpToDate` / `Updated { foOldHash, foNewHash }` / `FetchedFirst` / `FetchError` | `Bit.Core.Fetch` |
-| `FileTransport` | Record of functions abstracting cloud vs filesystem transfer | `Bit.Core.Transport` |
+| `PushSeam` | Record of two functions abstracting cloud vs filesystem push transport (ptFetchHistory, ptPushMetadata) | `Bit.Core.Push` |
 | `Concurrency` | `Parallel Int` / `Sequential` | `Bit.Concurrency` |
 | `Resolution` | `KeepLocal` / `TakeRemote` — conflict resolution choice | `Bit.Conflict` |
 | `DeletedSide` | `DeletedInOurs` / `DeletedInTheirs` — which side deleted in modify/delete conflict | `Internal.Git`, re-exported by `Bit.Conflict` |
@@ -42,10 +42,10 @@ Key types and conventions used throughout this codebase:
 | `DivergentFile` | Record: dfPath, dfExpectedHash, dfActualHash, dfExpectedSize, dfActualSize — remote divergence; `findDivergentFiles` takes remoteFileMap and remoteMetaMap only | `Bit.Core.Pull` |
 | `ScannedEntry` | `ScannedFile` / `ScannedDir` — internal scan pass, replaces (FilePath, Bool) | `Bit.Scan` |
 | `readMetadataFile` / `getFileHashAndSize` | Return `Maybe MetaContent` (canonical hash+size type) | `Bit.Scan` |
-| `FileToSync` | `TextToSync` / `BinaryToSync` — text has no size, binary carries byte count | `Bit.Core.Transport` |
+| `FileToSync` | `TextToSync` / `BinaryToSync` — classifies files for sync (both carry FilePath only) | `Bit.Core.Transport` |
 | `BinaryFileMeta` | Record: bfmPath, bfmHash, bfmSize — replaces bare (Path, Hash, Integer) tuple | `Bit.Verify` |
 | `VerifyResult` | Record: vrCount, vrIssues — replaces bare (Int, [VerifyIssue]) tuple | `Bit.Verify` |
-| `VerifyTarget` | `VerifyLocal` / `VerifyRemote` — whether `bit verify` checks local or remote | `Bit.Core.Verify` |
+| `VerifyTarget` | `VerifyLocal` / `VerifyRemotePath Remote` — whether `bit verify` checks local or a specific remote | `Bit.Core.Verify` |
 | `BundleName` | `newtype` over `String` — logical bundle name, not a path | `Internal.Config` |
 | `GitRelPath` | `newtype` — path relative to `.bit/index/` (for git commands) | `Internal.Config` |
 | `CwdPath` | `newtype` — path relative to CWD (for filesystem operations) | `Internal.Config` |
@@ -58,7 +58,7 @@ Key types and conventions used throughout this codebase:
 - **`lift`** is used to run `IO` inside `BitM` (since `BitM = ReaderT BitEnv IO`, `lift = liftIO`).
 - **`Remote` is opaque** — constructor is hidden. Use `mkRemote` to create, `remoteName`/`remoteUrl` to read.
 - **`.bit/index/`** is a git repo tracking metadata. Binary files get hash/size metadata files; text files get actual content.
-- **Transport abstraction**: `FileTransport` is a record of functions, not a typeclass. Cloud remotes use rclone; filesystem remotes use direct copy. Created via `mkCloudTransport` or `mkFilesystemTransport`.
+- **Transport abstraction**: `PushSeam` is a record of functions (not a typeclass) abstracting the push metadata transport. Cloud remotes use bundles + rclone (`mkCloudSeam`); filesystem remotes use native git fetch/pull (`mkFilesystemSeam`). Pull/sync uses parameterized functions with remote root strings.
 
 ### Types intentionally left as tuples or bare parameters
 
