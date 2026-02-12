@@ -23,6 +23,7 @@ module Internal.Git
     , addRemote
     , getRemoteUrl
     , getTrackedRemoteName
+    , getConfiguredRemoteName
     , updateRemoteTrackingBranch
     , updateRemoteTrackingBranchToHead
     , updateRemoteTrackingBranchToHash
@@ -296,6 +297,18 @@ getTrackedRemoteName = do
     pure $ case code of
         ExitSuccess -> filter (/= '\n') out
         _ -> "origin"
+
+-- | Get the explicitly configured upstream remote name (branch.main.remote).
+-- Returns Nothing if no upstream is configured. Does NOT fall back to "origin".
+-- Use this for pull/fetch which require explicit upstream (spec: "bit pull and
+-- bit fetch require explicit remote (no fallback)").
+getConfiguredRemoteName :: IO (Maybe String)
+getConfiguredRemoteName = do
+    (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["config", "--get", "branch.main.remote"]) ""
+    pure $ case code of
+        ExitSuccess -> let name = filter (/= '\n') out
+                       in if null name then Nothing else Just name
+        _ -> Nothing
 
 -- | Update the remote tracking branch refs/remotes/<name>/main to point to the hash from the bundle.
 -- Use when the objects are already in the repo (e.g. after push).

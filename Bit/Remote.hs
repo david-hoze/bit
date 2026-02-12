@@ -7,6 +7,7 @@ module Bit.Remote
   , displayRemote   -- for user-facing messages
   , resolveRemote
   , getDefaultRemote
+  , getUpstreamRemote
   , RemoteState(..) -- remote state classification
   , FetchResult(..) -- bundle fetch result
   , RemotePath(..)  -- re-export for convenience
@@ -120,12 +121,23 @@ stripBitIndexSuffix url =
        then take (length url - length suffix) url
        else url
 
--- | Get the default remote for push/pull/fetch.
--- Checks branch tracking config, falls back to "origin".
+-- | Get the default remote for push (falls back to "origin").
+-- Checks branch tracking config, falls back to "origin" if not configured.
+-- This is git-standard behavior for push.
 getDefaultRemote :: FilePath -> IO (Maybe Remote)
 getDefaultRemote cwd = do
     name <- Git.getTrackedRemoteName  -- defaults to "origin" if not configured
     resolveRemote cwd name
+
+-- | Get the upstream remote for pull/fetch (NO fallback to "origin").
+-- Only returns a remote if branch.main.remote is explicitly configured.
+-- Spec: "bit pull and bit fetch require explicit remote (no fallback)".
+getUpstreamRemote :: FilePath -> IO (Maybe Remote)
+getUpstreamRemote cwd = do
+    mName <- Git.getConfiguredRemoteName  -- Nothing if not configured
+    case mName of
+        Just name -> resolveRemote cwd name
+        Nothing   -> pure Nothing
 
 -- | Classification of remote state (used by Bit.hs to determine what action to take)
 data RemoteState 

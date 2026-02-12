@@ -6,7 +6,7 @@ module Bit.Commands (run) where
 import qualified Bit.Core as Bit
 import Bit.Types (BitEnv(..), ForceMode(..), runBitM)
 import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
-import Bit.Remote (getDefaultRemote, resolveRemote)
+import Bit.Remote (getDefaultRemote, getUpstreamRemote, resolveRemote)
 import Bit.Utils (atomicWriteFileStr)
 import Bit.Concurrency (Concurrency(..))
 import qualified Bit.RemoteWorkspace as RemoteWorkspace
@@ -184,9 +184,14 @@ runCommand args = do
     cwd <- Dir.getCurrentDirectory
     bitExists <- Dir.doesDirectoryExist (cwd </> ".bit")
 
-    -- Lightweight env (no scan) — for read-only commands
+    -- Lightweight env (no scan) — for read-only commands and push (falls back to "origin")
     let baseEnv = do
             mRemote <- getDefaultRemote cwd
+            pure $ BitEnv cwd mRemote forceMode
+
+    -- Lightweight env for pull/fetch — does NOT fall back to "origin" (spec requirement)
+    let pullFetchEnv = do
+            mRemote <- getUpstreamRemote cwd
             pure $ BitEnv cwd mRemote forceMode
 
     -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
@@ -204,6 +209,8 @@ runCommand args = do
     -- Helper functions for running commands
     let runScanned action = do { scanAndWrite; env <- baseEnv; runBitM env action }
     let runBase action = baseEnv >>= \env -> runBitM env action
+    -- pull/fetch without explicit remote: use pullFetchEnv (no "origin" fallback)
+    let runScannedPullFetch action = do { scanAndWrite; env <- pullFetchEnv; runBitM env action }
     let runScannedWithRemote name action = do
             scanAndWrite
             env <- baseEnv
@@ -255,18 +262,18 @@ runCommand args = do
         ["push", "--set-upstream", name] -> runPushWithUpstream name
         ["push", name]                  -> runBaseWithRemote name Bit.push
         
-        -- pull
-        ["pull"]                        -> runScanned $ Bit.pull Bit.defaultPullOptions
+        -- pull (no explicit remote: requires upstream, no "origin" fallback)
+        ["pull"]                        -> runScannedPullFetch $ Bit.pull Bit.defaultPullOptions
         ["pull", name]                  -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions
-        ["pull", "--accept-remote"]     -> runScanned $ Bit.pull optsAcceptRemote
-        ["pull", "--manual-merge"]      -> runScanned $ Bit.pull optsManualMerge
+        ["pull", "--accept-remote"]     -> runScannedPullFetch $ Bit.pull optsAcceptRemote
+        ["pull", "--manual-merge"]      -> runScannedPullFetch $ Bit.pull optsManualMerge
         ["pull", name, "--accept-remote"] -> runScannedWithRemote name $ Bit.pull optsAcceptRemote
         ["pull", "--accept-remote", name] -> runScannedWithRemote name $ Bit.pull optsAcceptRemote
         ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull optsManualMerge
         ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull optsManualMerge
         
-        -- fetch
-        ["fetch"]                       -> runScanned Bit.fetch
+        -- fetch (no explicit remote: requires upstream, no "origin" fallback)
+        ["fetch"]                       -> runScannedPullFetch Bit.fetch
         ["fetch", name]                 -> runScannedWithRemote name Bit.fetch
         
         ["merge", "--continue"]         -> runScanned Bit.mergeContinue
