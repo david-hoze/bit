@@ -272,8 +272,8 @@ runCommand args = do
         ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull optsManualMerge
         ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull optsManualMerge
         
-        -- fetch (no explicit remote: requires upstream, no "origin" fallback)
-        ["fetch"]                       -> runScannedPullFetch Bit.fetch
+        -- fetch (falls back to "origin" like git fetch)
+        ["fetch"]                       -> runScanned Bit.fetch
         ["fetch", name]                 -> runScannedWithRemote name Bit.fetch
         
         ["merge", "--continue"]         -> runScanned Bit.mergeContinue

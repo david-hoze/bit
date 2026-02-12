@@ -390,15 +390,15 @@ past the merge).
 
 4. **Default remote selection**:
    - If `branch.main.remote` is set, it's used as the default
-   - If not set and "origin" exists, **`bit push` uses it as fallback** (git-standard behavior)
-   - If not set and "origin" exists, **`bit pull` and `bit fetch` require explicit remote** (no fallback)
+   - If not set and "origin" exists, **`bit push` and `bit fetch` use it as fallback** (git-standard behavior)
+   - If not set and "origin" exists, **`bit pull` requires explicit remote** (no fallback)
    - If neither upstream nor "origin", commands fail with error suggesting `bit push <remote>` or `bit push -u <remote>`
 
 5. **First pull does NOT set upstream**: When pulling for the first time (unborn branch), `checkoutRemoteAsMain` uses `git checkout -B main --no-track refs/remotes/origin/main`. This prevents automatic upstream tracking setup. Users must use `bit push -u <remote>` to explicitly configure tracking.
 
 6. **Internal git remote vs upstream tracking**: bit's internal git repo has a remote named "origin" (used for fetching refs from bundles), but this is distinct from upstream tracking config (`branch.main.remote`). The internal remote is set up automatically; upstream tracking is never automatic. This distinction is critical: `Git.addRemote` configures the internal git remote (required for bundle operations), while `Git.setupBranchTrackingFor` sets `branch.main.remote` (must only be called from `push -u`).
 
-This makes bit's remote behavior predictable for git users: explicit tracking setup via `-u`, explicit remote selection via argument, sensible defaults when configured, and git-standard fallback to "origin" for push operations.
+This makes bit's remote behavior predictable for git users: explicit tracking setup via `-u`, explicit remote selection via argument, sensible defaults when configured, and git-standard fallback to "origin" for push and fetch operations.
 
 ---
 
