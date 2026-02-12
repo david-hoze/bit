@@ -20,6 +20,7 @@ module Bit.Verify
   , entryPath
   , binaryEntries
   , allEntryPaths
+  , Scan.ScanPhase(..)
   ) where
 
 import Bit.Types (Hash(..), HashAlgo(..), Path(..), FileEntry(..), EntryKind(..), syncHash, hashToText)
@@ -291,9 +292,9 @@ verifyLocal cwd = verifyLocalAt cwd
 -- | Verify with bandwidth detection. Uses scanWorkingDirWithAbort to measure
 -- throughput and optionally skip hashing on slow storage.
 -- Returns the verify result plus a list of files that were skipped.
-verifyWithAbort :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (VerifyResult, [FilePath])
-verifyWithAbort root mCounter concurrency = do
-  Scan.ScanResult entries skipped <- Scan.scanWorkingDirWithAbort root concurrency
+verifyWithAbort :: FilePath -> Maybe (IORef Int) -> Concurrency -> Maybe (Scan.ScanPhase -> IO ()) -> IO (VerifyResult, [FilePath])
+verifyWithAbort root mCounter concurrency mCallback = do
+  Scan.ScanResult entries skipped <- Scan.scanWorkingDirWithAbort root concurrency mCallback
   result <- findIssuesFromScan root entries
   traverse_ (\ref -> atomicModifyIORef' ref (\_ -> (vrCount result, ()))) mCounter
   pure (result, skipped)

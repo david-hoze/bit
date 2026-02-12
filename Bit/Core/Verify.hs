@@ -32,7 +32,7 @@ import qualified Bit.Verify as Verify
 import qualified Bit.Fsck as Fsck
 import Internal.Config (bundleForRemote, bitIndexPath, bitRemotesDir)
 import Bit.Progress (reportProgress, clearProgress)
-import Bit.Utils (toPosix, atomicWriteFileStr)
+import Bit.Utils (toPosix, atomicWriteFileStr, formatBytes)
 import Bit.Internal.Metadata (MetaContent(..), serializeMetadata)
 import qualified Bit.Device as Device
 import qualified Internal.Transport as Transport
@@ -79,8 +79,20 @@ verifyFilesystem cwd targetPath mTargetRemote repairMode concurrency = do
     let label = maybe "local" (\r -> "remote '" ++ remoteName r ++ "'") mTargetRemote
     putStrLn $ "Verifying " ++ label ++ " files..."
 
+    -- Build verbose phase callback
+    let onPhase = \case
+            Verify.PhaseCollected n ->
+                hPutStrLn stderr $ "Collecting files... " ++ show n ++ " found."
+            Verify.PhaseCacheResult cached toHash totalBytes ->
+                hPutStrLn stderr $ "Checking cache... " ++ show cached ++ " cached, "
+                    ++ show toHash ++ " need hashing (" ++ formatBytes totalBytes ++ ")."
+            Verify.PhaseAllCached n ->
+                hPutStrLn stderr $ "All " ++ show n ++ " files cached, no hashing needed."
+
     -- Verify with bandwidth detection
-    (result, skipped) <- Verify.verifyWithAbort targetPath Nothing concurrency
+    (result, skipped) <- Verify.verifyWithAbort targetPath Nothing concurrency (Just onPhase)
+
+    hPutStrLn stderr "Comparing against committed metadata..."
 
     -- Report results
     printVerifyResultWithSkipped result skipped
@@ -100,6 +112,7 @@ verifyCloud cwd remote repairMode concurrency = do
 
     entries <- Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
     let fileCount = length entries
+    hPutStrLn stderr $ "Loading bundle metadata... " ++ show fileCount ++ " files to check."
 
     if fileCount > 5
       then do

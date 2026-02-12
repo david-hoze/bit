@@ -7,6 +7,7 @@ module Bit.Scan
   ( scanWorkingDir
   , scanWorkingDirWithAbort
   , ScanResult(..)
+  , ScanPhase(..)
   , writeMetadataFiles
   , readMetadataFile
   , listMetadataPaths
@@ -37,7 +38,7 @@ import Data.Foldable (traverse_)
 import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
 import qualified Internal.ConfigFile as ConfigFile
-import Bit.Utils (atomicWriteFileStr, toPosix)
+import Bit.Utils (atomicWriteFileStr, toPosix, formatBytes)
 import Bit.Internal.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
 import qualified Data.Set as Set
 import qualified Crypto.Hash.MD5 as MD5
@@ -74,6 +75,13 @@ data FileToHash = FileToHash
   , fthSize  :: !Integer    -- ^ File size
   , fthMtime :: !Integer    -- ^ Modification time (POSIX seconds)
   }
+
+-- | Phase callbacks for scan progress reporting.
+data ScanPhase
+    = PhaseCollected Int                    -- ^ N files found
+    | PhaseCacheResult Int Int Integer      -- ^ cached, needsHashing, totalBytesNeeded
+    | PhaseAllCached Int                    -- ^ all N files cached
+    deriving (Show, Eq)
 
 -- | Single-pass file hash and classification. Returns (hash, contentType).
 -- For large files or binary extensions: streams hash only, returns BinaryContent.
@@ -252,6 +260,20 @@ progressLoop counter total = go
         threadDelay 50000  -- 50ms
         when (n < total) go
 
+-- | Progress reporter for the hashing phase, showing files + bytes + percentage.
+hashProgressLoop :: IORef Int -> IORef Integer -> Int -> Integer -> IO ()
+hashProgressLoop fileCounter bytesCounter totalNewFiles totalBytes = go
+  where
+    go = do
+        n <- readIORef fileCounter
+        b <- readIORef bytesCounter
+        let pct = if totalBytes > 0 then (b * 100) `div` totalBytes else 0
+        reportProgress $ "Hashing: " ++ show n ++ "/" ++ show totalNewFiles
+            ++ " files, " ++ formatBytes b ++ " / " ++ formatBytes totalBytes
+            ++ " (" ++ show pct ++ "%)"
+        threadDelay 50000
+        when (n < totalNewFiles) go
+
 -- | Recursively collect all paths under root, excluding .bit, .git, .bitignore, .gitignore.
 collectScannedPaths :: FilePath -> IO [ScannedEntry]
 collectScannedPaths root = go root
@@ -379,8 +401,8 @@ scanWorkingDir root = do
 -- to hash all files. If estimated time exceeds 60 seconds, prompts the user.
 -- Returns entries (with hashes) and skipped file paths.
 -- The Concurrency parameter controls hashing parallelism (Sequential = 1 thread).
-scanWorkingDirWithAbort :: FilePath -> Concurrency -> IO ScanResult
-scanWorkingDirWithAbort root concurrencyMode = do
+scanWorkingDirWithAbort :: FilePath -> Concurrency -> Maybe (ScanPhase -> IO ()) -> IO ScanResult
+scanWorkingDirWithAbort root concurrencyMode mCallback = do
     let bitRoot = root </> ".bit"
     bitExists <- doesDirectoryExist bitRoot
     if not bitExists then pure (ScanResult [] [])
@@ -395,11 +417,19 @@ scanWorkingDirWithAbort root concurrencyMode = do
           filesToProcess = [(rel, root </> rel) | ScannedFile rel <- allPaths
                                                 , not (Set.member (normalizePath rel) ignoredSet)]
 
+      -- Report collection phase
+      traverse_ (\cb -> cb (PhaseCollected (length filesToProcess))) mCallback
+
       -- Phase 1: stat all files and check cache
       statResults <- mapM (statAndCheckCache root) filesToProcess
       let cacheHits    = [e | Right e <- statResults]
           needsHashing = [fth | Left fth <- statResults]
           totalBytesNeeded = sum [fthSize fth | fth <- needsHashing]
+
+      -- Report cache result phase
+      if null needsHashing
+          then traverse_ (\cb -> cb (PhaseAllCached (length cacheHits))) mCallback
+          else traverse_ (\cb -> cb (PhaseCacheResult (length cacheHits) (length needsHashing) totalBytesNeeded)) mCallback
 
       -- Phase 2: bandwidth check — only if significant work remains
       shouldSkip <- if null needsHashing || totalBytesNeeded < 100 * 1024 * 1024
@@ -431,8 +461,9 @@ scanWorkingDirWithAbort root concurrencyMode = do
               }
           else do
               -- Phase 3: hash remaining files with progress
-              let total = length filesToProcess
-              counter <- newIORef (length cacheHits :: Int)
+              let totalNewFiles = length needsHashing
+              counter <- newIORef (0 :: Int)
+              bytesHashedRef <- newIORef (0 :: Integer)
               concurrency <- case concurrencyMode of
                   Sequential  -> pure 1
                   Parallel 0  -> ioConcurrency
@@ -441,17 +472,23 @@ scanWorkingDirWithAbort root concurrencyMode = do
               let hashWithProgress fth = do
                       entry <- hashFileToEntry root config fth
                       atomicModifyIORef' counter (\n -> (n + 1, ()))
+                      atomicModifyIORef' bytesHashedRef (\b -> (b + fthSize fth, ()))
                       pure entry
 
               let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress needsHashing
 
-              hashedEntries <- if total > 50
+              hashedEntries <- if totalNewFiles > 0
                   then do
-                      reporterThread <- forkIO (progressLoop counter total)
-                      finally hashingAction $ do
-                          killThread reporterThread
-                          clearProgress
-                          hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
+                      isTTY <- hIsTerminalDevice stderr
+                      if isTTY
+                        then do
+                          reporterThread <- forkIO (hashProgressLoop counter bytesHashedRef totalNewFiles totalBytesNeeded)
+                          finally hashingAction $ do
+                              killThread reporterThread
+                              clearProgress
+                              hPutStrLn stderr $ "Hashed " ++ show totalNewFiles
+                                  ++ " files (" ++ formatBytes totalBytesNeeded ++ ")."
+                        else hashingAction
                   else hashingAction
 
               pure $ ScanResult
