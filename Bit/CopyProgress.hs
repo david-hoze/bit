@@ -7,6 +7,7 @@ module Bit.CopyProgress
     ( SyncProgress(..)
     , newSyncProgress
     , rcloneCopyFiles
+    , rcloneCopyto
     , withSyncProgressReporter
     , incrementFilesComplete
     ) where
@@ -167,6 +168,53 @@ rcloneCopyFiles src dst files progress = do
         void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
 
     traverse_ f = maybe (pure ()) f
+
+-- | Copy a single file with progress tracking via rclone JSON logs.
+-- Runs @rclone copyto src dst@ and updates bytesRef with bytes transferred.
+-- Returns the rclone exit code.
+rcloneCopyto :: String -> String -> IORef Integer -> IO ExitCode
+rcloneCopyto src dst bytesRef = do
+    let args = [ "copyto", toPosix src, toPosix dst
+               , "--use-json-log", "--stats", "0.5s", "-v"
+               ]
+        cp = (proc "rclone" args)
+               { std_out = NoStream
+               , std_err = CreatePipe
+               , std_in  = NoStream
+               }
+    bracket (createProcess cp) cleanupProcess $ \(_, _, mStderr, ph) ->
+        case mStderr of
+            Just hErr -> do
+                asyncDrain <- async (drainCopytoStderr hErr bytesRef)
+                wait asyncDrain
+                waitForProcess ph
+            Nothing ->
+                waitForProcess ph
+  where
+    cleanupProcess (mIn, _, mErr, ph) = do
+        void (try (hClose' mIn) :: IO (Either SomeException ()))
+        void (try (hClose' mErr) :: IO (Either SomeException ()))
+        void (try (terminateProcess ph) :: IO (Either SomeException ()))
+        void (try (waitForProcess ph) :: IO (Either SomeException ExitCode))
+    hClose' = maybe (pure ()) hClose
+
+-- | Drain rclone copyto stderr, updating a bytes counter from JSON stats.
+drainCopytoStderr :: Handle -> IORef Integer -> IO ()
+drainCopytoStderr h bytesRef = go
+  where
+    go = do
+        eof <- hIsEOF h
+        unless eof $ do
+            lineBytes <- BS.hGetLine h
+            unless (BS.null lineBytes) $
+                case Aeson.decodeStrict lineBytes :: Maybe RcloneLogLine of
+                    Just logLine -> case rllStats logLine of
+                        Just stats -> case rsBytes stats of
+                            Just b -> atomicModifyIORef' bytesRef (\_ -> (b, ()))
+                            Nothing -> pure ()
+                        Nothing -> pure ()
+                    Nothing -> pure ()
+            go
 
 -- | Drain rclone stderr, parsing JSON log lines to update progress.
 -- Reads raw ByteString to preserve UTF-8 (non-ASCII filenames in JSON).

@@ -2,7 +2,8 @@
 {-# LANGUAGE DeriveAnyClass #-}
 
 module Internal.Transport
-    ( copyToRemote
+    ( remoteFilePath
+    , copyToRemote
     , copyFromRemote
     , copyFromRemoteDetailed
     , CopyResult(..)

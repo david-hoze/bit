@@ -199,7 +199,7 @@ classifyTextCandidates remote config candidates = do
             ExitSuccess ->
                 case kind fe of
                     File{fSize} -> do
-                        (h, contentType) <- hashAndClassifyFile localPath fSize config
+                        (h, contentType) <- hashAndClassifyFile localPath fSize config Nothing
                         pure fe { kind = File { fHash = h, fSize = fSize, fContentType = contentType } }
                     _ -> pure fe
             _ -> do

@@ -64,8 +64,8 @@ data ScannedEntry = ScannedFile FilePath | ScannedDir FilePath
 
 -- | Result of a scan that may skip some files.
 data ScanResult = ScanResult
-  { srEntries :: [FileEntry]   -- ^ Files with hashes (cache hits + completed hashes)
-  , srSkipped :: [FilePath]    -- ^ Files where hashing was skipped (bandwidth abort)
+  { srEntries :: [FileEntry]          -- ^ Files with hashes (cache hits + completed hashes)
+  , srSkipped :: [(FilePath, Integer)] -- ^ (relPath, fileSize) where hashing was skipped
   }
 
 -- | Internal: a file that needs hashing (cache miss).
@@ -86,22 +86,27 @@ data ScanPhase
 -- | Single-pass file hash and classification. Returns (hash, contentType).
 -- For large files or binary extensions: streams hash only, returns BinaryContent.
 -- For others: reads first 8KB for text classification, then streams remaining chunks for hash.
-hashAndClassifyFile :: FilePath -> Integer -> ConfigFile.TextConfig -> IO (Hash 'MD5, ContentType)
-hashAndClassifyFile filePath size config = do
+-- When mBytesRef is provided, updates it with bytes read per chunk for live progress.
+hashAndClassifyFile :: FilePath -> Integer -> ConfigFile.TextConfig -> Maybe (IORef Integer) -> IO (Hash 'MD5, ContentType)
+hashAndClassifyFile filePath size config mBytesRef = do
     let ext = map toLower (takeExtension filePath)
-    
+        bump chunk = case mBytesRef of
+            Just ref -> atomicModifyIORef' ref (\b -> (b + fromIntegral (BS.length chunk), ()))
+            Nothing  -> pure ()
+
     -- Fast path: large files or known binary extensions - just stream hash
     if size >= ConfigFile.textSizeLimit config || ext `elem` binaryExtensions
         then do
-            h <- streamHash filePath
+            h <- streamHash bump filePath
             pure (h, BinaryContent)
         else
             -- Single-pass: read first 8KB for classification, continue streaming for hash
             withFile filePath ReadMode $ \handle -> do
                 firstChunk <- BS.hGet handle 8192
+                bump firstChunk
                 let contentType = if not (BS.elem 0 firstChunk) && isRight (decodeUtf8' firstChunk)
                                   then TextContent else BinaryContent
-                
+
                 -- Continue streaming hash from where we left off
                 let loop !ctx = do
                         eof <- hIsEOF handle
@@ -111,14 +116,16 @@ hashAndClassifyFile filePath size config = do
                                 pure (Hash (T.pack "md5:" <> md5hex))
                             else do
                                 chunk <- BS.hGet handle 65536
+                                bump chunk
                                 loop (MD5.update ctx chunk)
-                
+
                 -- Start with first chunk already included
                 h <- loop (MD5.update MD5.init firstChunk)
                 pure (h, contentType)
   where
     -- Stream hash for files we're not classifying
-    streamHash fp = withFile fp ReadMode $ \h -> do
+    streamHash :: (BS.ByteString -> IO ()) -> FilePath -> IO (Hash 'MD5)
+    streamHash bumpFn fp = withFile fp ReadMode $ \h -> do
         let loop !ctx = do
                 eof <- hIsEOF h
                 if eof
@@ -127,6 +134,7 @@ hashAndClassifyFile filePath size config = do
                         pure (Hash (T.pack "md5:" <> md5hex))
                     else do
                         chunk <- BS.hGet h 65536
+                        bumpFn chunk
                         loop (MD5.update ctx chunk)
         loop MD5.init
 
@@ -310,9 +318,9 @@ statAndCheckCache root (rel, fullPath) = do
         _ -> pure $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
 
 -- | Hash a single file and save the result to cache.
-hashFileToEntry :: FilePath -> ConfigFile.TextConfig -> FileToHash -> IO FileEntry
-hashFileToEntry root config fth = do
-    (h, contentType) <- hashAndClassifyFile (fthFull fth) (fthSize fth) config
+hashFileToEntry :: FilePath -> ConfigFile.TextConfig -> Maybe (IORef Integer) -> FileToHash -> IO FileEntry
+hashFileToEntry root config mBytesRef fth = do
+    (h, contentType) <- hashAndClassifyFile (fthFull fth) (fthSize fth) config mBytesRef
     saveCacheEntry root (fthRel fth) (CacheEntry (fthMtime fth) (fthSize fth) h contentType)
     pure $ FileEntry
         { path = Path (fthRel fth)
@@ -375,7 +383,7 @@ scanWorkingDir root = do
                       , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ceContentType ce }
                       }
                 _ -> do
-                  (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config
+                  (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config Nothing
                   saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
                   atomicModifyIORef' counter (\n -> (n + 1, ()))
                   pure $ FileEntry
@@ -432,7 +440,7 @@ scanWorkingDirWithAbort root concurrencyMode mCallback = do
           else traverse_ (\cb -> cb (PhaseCacheResult (length cacheHits) (length needsHashing) totalBytesNeeded)) mCallback
 
       -- Phase 2: bandwidth check — only if significant work remains
-      shouldSkip <- if null needsHashing || totalBytesNeeded < 100 * 1024 * 1024
+      shouldSkip <- if null needsHashing || totalBytesNeeded < 20 * 1024 * 1024
           then pure False
           else do
               throughput <- measureThroughput (fthFull (head needsHashing))
@@ -440,12 +448,13 @@ scanWorkingDirWithAbort root concurrencyMode mCallback = do
               if estimatedSecs <= 60
                   then pure False
                   else do
-                      let mbps = throughput / (1024 * 1024)
-                          mins = estimatedSecs / 60
-                      hPutStrLn stderr $ "Hashing is slow (" ++ show (round mbps :: Int)
-                          ++ " MB/s). Estimated: " ++ show (ceiling mins :: Int)
+                      let mins = estimatedSecs / 60
+                          speedStr = formatBytes (round throughput :: Integer) ++ "/s"
+                      hPutStrLn stderr $ "Hashing is slow (" ++ speedStr
+                          ++ "). Estimated: " ++ show (ceiling mins :: Int)
                           ++ " min for " ++ show (length needsHashing) ++ " files."
-                      hPutStr stderr "Continue hashing? [y/N] "
+                      hPutStrLn stderr "Size-only verification covers most corruption cases."
+                      hPutStr stderr "Continue full hashing? [y/N] "
                       hFlush stderr
                       isTTY <- hIsTerminalDevice stdin
                       if isTTY
@@ -457,7 +466,7 @@ scanWorkingDirWithAbort root concurrencyMode mCallback = do
       if shouldSkip
           then pure $ ScanResult
               { srEntries = dirEntries ++ cacheHits
-              , srSkipped = [fthRel fth | fth <- needsHashing]
+              , srSkipped = [(fthRel fth, fthSize fth) | fth <- needsHashing]
               }
           else do
               -- Phase 3: hash remaining files with progress
@@ -470,9 +479,8 @@ scanWorkingDirWithAbort root concurrencyMode mCallback = do
                   Parallel n  -> pure n
 
               let hashWithProgress fth = do
-                      entry <- hashFileToEntry root config fth
+                      entry <- hashFileToEntry root config (Just bytesHashedRef) fth
                       atomicModifyIORef' counter (\n -> (n + 1, ()))
-                      atomicModifyIORef' bytesHashedRef (\b -> (b + fthSize fth, ()))
                       pure entry
 
               let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress needsHashing
@@ -486,8 +494,10 @@ scanWorkingDirWithAbort root concurrencyMode mCallback = do
                           finally hashingAction $ do
                               killThread reporterThread
                               clearProgress
-                              hPutStrLn stderr $ "Hashed " ++ show totalNewFiles
-                                  ++ " files (" ++ formatBytes totalBytesNeeded ++ ")."
+                              actualCount <- readIORef counter
+                              actualBytes <- readIORef bytesHashedRef
+                              hPutStrLn stderr $ "Hashed " ++ show actualCount
+                                  ++ " files (" ++ formatBytes actualBytes ++ ")."
                         else hashingAction
                   else hashingAction
 

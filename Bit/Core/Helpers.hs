@@ -55,7 +55,7 @@ import System.IO (stderr, hPutStrLn)
 import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
-import Bit.Utils (toPosix, atomicWriteFileStr, trimGitOutput)
+import Bit.Utils (toPosix, atomicWriteFileStr, trimGitOutput, formatBytes)
 import qualified Bit.Verify as Verify
 import qualified Bit.Scan as Scan
 import Internal.Config (bitIndexPath)
@@ -198,10 +198,15 @@ formatVerifiedRemoteFiles n = "Verified " ++ show n ++ " remote files."
 
 printVerifyIssue :: (String -> String) -> Verify.VerifyIssue -> IO ()
 printVerifyIssue fmtHash = \case
-  Verify.HashMismatch filePath expectedHash actualHash _expectedSize _actualSize -> do
-    hPutStrLn stderr $ "[ERROR] Hash mismatch: " ++ toPosix (unPath filePath)
-    hPutStrLn stderr $ "  Expected: " ++ fmtHash expectedHash
-    hPutStrLn stderr $ "  Actual:   " ++ fmtHash actualHash
+  Verify.HashMismatch filePath expectedHash actualHash expectedSize actualSize
+    | expectedHash == actualHash -> do
+        hPutStrLn stderr $ "[ERROR] Size mismatch: " ++ toPosix (unPath filePath)
+        hPutStrLn stderr $ "  Expected size: " ++ formatBytes expectedSize
+        hPutStrLn stderr $ "  Actual size:   " ++ formatBytes actualSize
+    | otherwise -> do
+        hPutStrLn stderr $ "[ERROR] Metadata mismatch: " ++ toPosix (unPath filePath)
+        hPutStrLn stderr $ "  Expected: " ++ fmtHash expectedHash
+        hPutStrLn stderr $ "  Actual:   " ++ fmtHash actualHash
   Verify.Missing filePath ->
     hPutStrLn stderr $ "[ERROR] Missing: " ++ toPosix (unPath filePath)
 

@@ -1,0 +1,134 @@
+# bit verify verbose output tests
+# Verifies that verify prints phase messages on stderr:
+#   - "Collecting files... N found."
+#   - "All N files cached, no hashing needed." (when all cached)
+#   - "Checking cache... N cached, M need hashing (X B)." (when some need hashing)
+#   - "Comparing against committed metadata..."
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_vv 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_vv & cd test\cli\output\work_vv & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# TEST: Empty repo — collecting 0 files, all cached
+# ======================================================================
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /Collecting files\.\.\. 0 found/
+>>>= 0
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /All 0 files cached/
+>>>= 0
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /Comparing against committed metadata/
+>>>= 0
+
+# ======================================================================
+# SETUP: add files and commit
+# ======================================================================
+
+cd test\cli\output\work_vv & echo hello> a.txt & echo data> b.bin & bit add a.txt b.bin & bit commit -m "Add files"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# ======================================================================
+# TEST: All files cached — "All N files cached, no hashing needed."
+# ======================================================================
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /Collecting files\.\.\. 2 found/
+>>>= 0
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /All 2 files cached, no hashing needed/
+>>>= 0
+
+# ======================================================================
+# TEST: Cache miss forces re-hash — "Checking cache... N cached, M need hashing"
+# ======================================================================
+
+# Delete one cache entry to force re-hash
+cd test\cli\output\work_vv & del .bit\cache\b.bin
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /Checking cache\.\.\. 1 cached, 1 need hashing/
+>>>= 0
+
+# ======================================================================
+# TEST: All caches cleared — "0 cached, 2 need hashing"
+# ======================================================================
+
+cd test\cli\output\work_vv & rmdir /s /q .bit\cache
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /Checking cache\.\.\. 0 cached, 2 need hashing/
+>>>= 0
+
+# ======================================================================
+# TEST: Corrupted file — "Comparing against committed metadata..." + ERROR
+# ======================================================================
+
+cd test\cli\output\work_vv & echo corrupted> b.bin & rmdir /s /q .bit\cache
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /Comparing against committed metadata/
+>>>= 1
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /\[ERROR\] Metadata mismatch.*b\.bin/
+>>>= 1
+
+# ======================================================================
+# TEST: Missing file — ERROR on stderr
+# ======================================================================
+
+# Restore b.bin to committed content first, then delete a.txt
+cd test\cli\output\work_vv & echo data> b.bin & del a.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_vv & bit verify
+<<<
+>>>2 /\[ERROR\] Missing.*a\.txt/
+>>>= 1
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_vv 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

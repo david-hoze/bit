@@ -17,15 +17,24 @@ Checks whether the files in your working tree match what you committed.
 
 ```
 $ bit verify
+Verifying local files...
+Collecting files... 47 found.
+All 47 files cached, no hashing needed.
+Comparing against committed metadata...
 [OK] All 47 files match metadata.
 ```
 
-Every tracked file is hashed and compared against the committed metadata. If
-anything doesn't match, bit tells you exactly what's wrong:
+Every tracked file is hashed and compared against the committed metadata. bit
+uses a scan cache (`.bit/cache/`) so files that haven't changed since the last
+scan are checked instantly. If anything doesn't match, bit tells you exactly
+what's wrong:
 
 ```
 $ bit verify
-[ERROR] Hash mismatch: data/model.bin
+Collecting files... 47 found.
+Checking cache... 45 cached, 2 need hashing (120.5 MB).
+Comparing against committed metadata...
+[ERROR] Metadata mismatch: data/model.bin
   Expected: md5:a1b2c3d4e5f6...
   Actual:   md5:9f8e7d6c5b4a...
 Checked 47 files. 1 issues found.
@@ -37,16 +46,39 @@ When issues are found, bit prompts you to repair:
 
 ```
 $ bit verify
-[ERROR] Hash mismatch: data/model.bin
+[ERROR] Metadata mismatch: data/model.bin
   Expected: md5:a1b2c3d4e5f6...
   Actual:   md5:9f8e7d6c5b4a...
 Checked 47 files. 1 issues found.
 1 issues found. Repair? [y/N] y
 Repairing 1 file(s)...
+  (1/1) data/model.bin — 120.0 MB / 120.0 MB (100%)
   [REPAIRED] data/model.bin
 ```
 
 If you decline (or the session is non-interactive), bit exits with code 1.
+
+### Slow Storage and Size-Only Verification
+
+On slow storage (network drives, USB), hashing can take minutes. bit detects
+this by measuring throughput before committing:
+
+```
+Hashing is slow (329.0 KB/s). Estimated: 12 min for 5 files.
+Size-only verification covers most corruption cases.
+Continue full hashing? [y/N]
+```
+
+If you choose **N**, bit skips hashing and verifies by file size only. Most
+real-world corruption (partial writes, truncation, failed transfers) changes the
+file size, so this catches the majority of issues. Size mismatches are reported
+differently:
+
+```
+[ERROR] Size mismatch: data/model.bin
+  Expected size: 120.0 MB
+  Actual size:   64.2 MB
+```
 
 ### Automatic Verification
 
@@ -66,6 +98,10 @@ Same idea, but checks the files on a specific remote:
 
 ```
 $ bit --remote origin verify
+Verifying remote 'origin' files...
+Collecting files... 47 found.
+All 47 files cached, no hashing needed.
+Comparing against committed metadata...
 [OK] All 47 files match metadata.
 ```
 
@@ -73,8 +109,8 @@ For cloud remotes (Google Drive, S3, etc.), this is fast — cloud providers sto
 MD5 hashes as native file metadata, so bit can verify without downloading anything.
 
 For filesystem remotes (USB drives, network shares), bit reads and hashes every
-file on the remote, same as local verification. If the storage is slow, bit
-measures throughput and offers to skip hashing.
+file on the remote, same as local verification. The same bandwidth detection and
+size-only fallback applies — if the remote is slow, bit offers to skip hashing.
 
 ## `bit repair`
 
@@ -84,7 +120,11 @@ any issues from configured remotes — no prompt.
 ```
 $ bit repair
 Verifying local files...
+Collecting files... 47 found.
+Checking cache... 46 cached, 1 need hashing (120.0 MB).
+Comparing against committed metadata...
 Repairing 1 file(s)...
+  (1/1) data/model.bin — 120.0 MB / 120.0 MB (100%)
   [REPAIRED] data/model.bin
 
 1 repaired, 0 failed, 0 unrepairable.

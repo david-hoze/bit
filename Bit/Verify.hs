@@ -23,14 +23,14 @@ module Bit.Verify
   , Scan.ScanPhase(..)
   ) where
 
-import Bit.Types (Hash(..), HashAlgo(..), Path(..), FileEntry(..), EntryKind(..), syncHash, hashToText)
+import Bit.Types (Hash(..), HashAlgo(..), Path(..), FileEntry(..), EntryKind(..), ContentType(..), syncHash, hashToText)
 import Bit.Utils (filterOutBitPaths, toPosix)
 import Bit.Concurrency (Concurrency(..), runConcurrently, ioConcurrency)
 import System.FilePath ((</>), makeRelative, normalise, takeDirectory)
 import System.Directory (doesFileExist, listDirectory, doesDirectoryExist, removeFile, createDirectoryIfMissing, removeDirectoryRecursive, getPermissions, setPermissions, setOwnerWritable, setModificationTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Data.List (isPrefixOf)
-import Data.Maybe (maybeToList)
+import Data.Maybe (maybeToList, isJust)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Internal.Git as Git
@@ -295,9 +295,25 @@ verifyLocal cwd = verifyLocalAt cwd
 verifyWithAbort :: FilePath -> Maybe (IORef Int) -> Concurrency -> Maybe (Scan.ScanPhase -> IO ()) -> IO (VerifyResult, [FilePath])
 verifyWithAbort root mCounter concurrency mCallback = do
   Scan.ScanResult entries skipped <- Scan.scanWorkingDirWithAbort root concurrency mCallback
-  result <- findIssuesFromScan root entries
+
+  -- For skipped files, create size-only entries: committed hash + actual file size.
+  -- If the size changed, git diff will detect the mismatch.
+  sizeEntries <- if null skipped
+      then pure []
+      else do
+          committedMeta <- loadCommittedBinaryMetadata (root </> bitIndexPath)
+          let metaMap = Map.fromList
+                [(unPath (bfmPath m), (bfmHash m, bfmSize m)) | m <- committedMeta]
+          pure $ concatMap (\(rel, actualSize) ->
+              case Map.lookup rel metaMap of
+                  Just (h, _) -> [FileEntry (Path rel) (File h actualSize BinaryContent)]
+                  Nothing     -> []
+              ) skipped
+
+  when (isJust mCallback) $ hPutStrLn stderr "Comparing against committed metadata..."
+  result <- findIssuesFromScan root (entries ++ sizeEntries)
   traverse_ (\ref -> atomicModifyIORef' ref (\_ -> (vrCount result, ()))) mCounter
-  pure (result, skipped)
+  pure (result, [rel | (rel, _) <- skipped])
 
 -- | Extract metadata from a bundle's HEAD commit.
 -- Reads the hash from the bundle, then loads metadata from that commit.

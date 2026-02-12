@@ -13,13 +13,13 @@ module Bit.Core.Verify
     ) where
 
 import System.FilePath ((</>), takeDirectory)
-import Control.Monad (when, unless, forM_)
+import Control.Monad (when, unless, forM_, forM)
 import Data.Foldable (traverse_)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (asks)
-import Control.Exception (finally)
+import Control.Exception (bracket, finally)
 import Control.Concurrent (forkIO, threadDelay, killThread)
-import Data.IORef (IORef, newIORef, readIORef)
+import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import System.IO (stderr, stdin, hPutStr, hPutStrLn, hFlush, hIsTerminalDevice)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Data.Map.Strict as Map
@@ -35,6 +35,7 @@ import Bit.Progress (reportProgress, clearProgress)
 import Bit.Utils (toPosix, atomicWriteFileStr, formatBytes)
 import Bit.Internal.Metadata (MetaContent(..), serializeMetadata)
 import qualified Bit.Device as Device
+import qualified Bit.CopyProgress as CopyProgress
 import qualified Internal.Transport as Transport
 
 import Bit.Core.Helpers (printVerifyIssue, isFilesystemRemote)
@@ -92,14 +93,13 @@ verifyFilesystem cwd targetPath mTargetRemote repairMode concurrency = do
     -- Verify with bandwidth detection
     (result, skipped) <- Verify.verifyWithAbort targetPath Nothing concurrency (Just onPhase)
 
-    hPutStrLn stderr "Comparing against committed metadata..."
-
     -- Report results
     printVerifyResultWithSkipped result skipped
 
     -- Repair flow
+    let loadMeta = Verify.loadCommittedBinaryMetadata (targetPath </> bitIndexPath)
     unless (null result.vrIssues) $
-        repairFlow cwd targetPath mTargetRemote result.vrIssues repairMode concurrency
+        repairFlow cwd loadMeta mTargetRemote result.vrIssues repairMode concurrency
 
 -- ============================================================================
 -- Cloud verify (uses bundle + rclone)
@@ -132,13 +132,17 @@ verifyCloud cwd remote repairMode concurrency = do
           )
 
         printVerifyResultWithSkipped result []
+        let loadMeta = Verify.binaryEntries <$>
+                Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
         unless (null result.vrIssues) $
-            repairFlow cwd (remoteUrl remote) (Just remote) result.vrIssues repairMode concurrency
+            repairFlow cwd loadMeta (Just remote) result.vrIssues repairMode concurrency
       else do
         result <- Verify.verifyRemote cwd remote Nothing concurrency
         printVerifyResultWithSkipped result []
+        let loadMeta = Verify.binaryEntries <$>
+                Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
         unless (null result.vrIssues) $
-            repairFlow cwd (remoteUrl remote) (Just remote) result.vrIssues repairMode concurrency
+            repairFlow cwd loadMeta (Just remote) result.vrIssues repairMode concurrency
 
 -- ============================================================================
 -- Repair logic (shared between local and remote, filesystem and cloud)
@@ -155,8 +159,9 @@ data RepairResult = Repaired Path | RepairFailed Path String
     deriving (Show)
 
 -- | Repair flow: prompt (if needed), load sources, plan and execute repairs.
-repairFlow :: FilePath -> FilePath -> Maybe Remote -> [Verify.VerifyIssue] -> RepairMode -> Concurrency -> IO ()
-repairFlow cwd _targetPath mTargetRemote issues repairMode _concurrency = do
+-- The loadTargetMeta action is called only after the user confirms repair.
+repairFlow :: FilePath -> IO [Verify.BinaryFileMeta] -> Maybe Remote -> [Verify.VerifyIssue] -> RepairMode -> Concurrency -> IO ()
+repairFlow cwd loadTargetMeta mTargetRemote issues repairMode _concurrency = do
     shouldRepair <- case repairMode of
         AutoRepair -> pure True
         PromptRepair -> do
@@ -176,10 +181,7 @@ repairFlow cwd _targetPath mTargetRemote issues repairMode _concurrency = do
 
     when shouldRepair $ do
         -- Load committed metadata for the target (to know expected hash+size for Missing issues)
-        targetMeta <- case mTargetRemote of
-            Nothing -> Verify.loadCommittedBinaryMetadata (cwd </> bitIndexPath)
-            Just r  -> Verify.binaryEntries <$>
-                Verify.loadMetadataFromBundle (bundleForRemote (remoteName r))
+        targetMeta <- loadTargetMeta
         let metaMap = Map.fromList [(m.bfmPath, (m.bfmHash, m.bfmSize)) | m <- targetMeta]
 
         -- Load repair sources (everything except the target)
@@ -201,7 +203,11 @@ repairFlow cwd _targetPath mTargetRemote issues repairMode _concurrency = do
 
                 unless (null repairable) $ do
                     putStrLn $ "Repairing " ++ show (length repairable) ++ " file(s)..."
-                    results <- mapM (executeRepairAction cwd mTargetRemote) repairable
+                    let total = length repairable
+                    results <- forM (zip [1..] repairable) $ \(i :: Int, plan) -> do
+                        let label = "(" ++ show i ++ "/" ++ show total ++ ") "
+                                ++ toPosix (unPath (rpDestPath plan))
+                        executeRepairWithProgress cwd mTargetRemote plan label
 
                     let repaired = [p | Repaired p <- results]
                         failed   = [(p, e) | RepairFailed p e <- results]
@@ -303,50 +309,97 @@ planRepairs issues metaMap repairIndex = foldr go ([], []) issues
 
     lookupExpected _ p = Map.lookup p metaMap
 
--- | Execute a single repair plan.
-executeRepairAction :: FilePath -> Maybe Remote -> RepairPlan -> IO RepairResult
-executeRepairAction cwd mTargetRemote plan = case mTargetRemote of
-    -- Target is local: copy from source to local
-    Nothing -> case rpSource plan of
-        RemoteSource remote _ -> do
-            let localDest = cwd </> unPath (rpDestPath plan)
-            Dir.createDirectoryIfMissing True (takeDirectory localDest)
-            code <- Transport.copyFromRemote remote (toPosix (unPath (rpSourcePath plan))) localDest
-            case code of
-                ExitSuccess -> do
-                    restoreLocalMetadata cwd (rpDestPath plan) (rpExpectedHash plan) (rpExpectedSize plan)
-                    pure (Repaired (rpDestPath plan))
-                _ -> pure (RepairFailed (rpDestPath plan) "copy from remote failed")
-        LocalSource _ _ ->
-            pure (RepairFailed (rpDestPath plan) "internal error: local source for local target")
+-- | Execute a single repair plan with a live progress bar during the copy.
+executeRepairWithProgress :: FilePath -> Maybe Remote -> RepairPlan -> String -> IO RepairResult
+executeRepairWithProgress cwd mTargetRemote plan label = do
+    let fileSize = rpExpectedSize plan
+        -- Remote-to-remote has two legs (download + upload), so double the total
+        isRemoteToRemote = case (mTargetRemote, rpSource plan) of
+            (Just _, RemoteSource _ _) -> True
+            _                          -> False
+        totalBytes = if isRemoteToRemote then fileSize * 2 else fileSize
+    bytesRef <- newIORef (0 :: Integer)
+    isTTY <- hIsTerminalDevice stderr
 
-    -- Target is a remote: copy from source to that remote
-    Just targetRemote -> case rpSource plan of
-        LocalSource localCwd _ -> do
-            let localSrc = localCwd </> unPath (rpSourcePath plan)
-            code <- Transport.copyToRemote localSrc targetRemote (toPosix (unPath (rpDestPath plan)))
-            case code of
-                ExitSuccess -> do
-                    restoreRemoteMetadata targetRemote (rpDestPath plan) (rpExpectedHash plan) (rpExpectedSize plan)
-                    pure (Repaired (rpDestPath plan))
-                _ -> pure (RepairFailed (rpDestPath plan) "copy to remote failed")
-        RemoteSource sourceRemote _ -> do
-            -- Download from source remote to temp, then upload to target remote
-            tempDir <- Dir.getTemporaryDirectory
-            let tempFile = tempDir </> "bit-repair-temp"
-            code1 <- Transport.copyFromRemote sourceRemote (toPosix (unPath (rpSourcePath plan))) tempFile
-            case code1 of
-                ExitSuccess -> do
-                    code2 <- Transport.copyToRemote tempFile targetRemote (toPosix (unPath (rpDestPath plan)))
-                    safeRemove tempFile
-                    case code2 of
-                        ExitSuccess -> do
-                            restoreRemoteMetadata targetRemote (rpDestPath plan) (rpExpectedHash plan) (rpExpectedSize plan)
-                            pure (Repaired (rpDestPath plan))
-                        _ -> pure (RepairFailed (rpDestPath plan) "copy to target remote failed")
-                _ -> do
-                    safeRemove tempFile
-                    pure (RepairFailed (rpDestPath plan) "copy from source remote failed")
+    let withProgress action = if isTTY && totalBytes > 0
+            then do
+                reporterThread <- forkIO (repairFileProgress bytesRef totalBytes label)
+                finally action $ do
+                    killThread reporterThread
+                    clearProgress
+            else do
+                hPutStrLn stderr $ "  " ++ label ++ "..."
+                action
+
+    withProgress $ case mTargetRemote of
+        -- Target is local: copy from source to local
+        Nothing -> case rpSource plan of
+            RemoteSource remote _ -> do
+                let localDest = cwd </> unPath (rpDestPath plan)
+                    remoteSrc = Transport.remoteFilePath remote (toPosix (unPath (rpSourcePath plan)))
+                Dir.createDirectoryIfMissing True (takeDirectory localDest)
+                code <- CopyProgress.rcloneCopyto remoteSrc localDest bytesRef
+                case code of
+                    ExitSuccess -> do
+                        restoreLocalMetadata cwd (rpDestPath plan) (rpExpectedHash plan) (rpExpectedSize plan)
+                        pure (Repaired (rpDestPath plan))
+                    _ -> pure (RepairFailed (rpDestPath plan) "copy from remote failed")
+            LocalSource _ _ ->
+                pure (RepairFailed (rpDestPath plan) "internal error: local source for local target")
+
+        -- Target is a remote: copy from source to that remote
+        Just targetRemote -> case rpSource plan of
+            LocalSource localCwd _ -> do
+                let localSrc = localCwd </> unPath (rpSourcePath plan)
+                    remoteDst = Transport.remoteFilePath targetRemote (toPosix (unPath (rpDestPath plan)))
+                code <- CopyProgress.rcloneCopyto localSrc remoteDst bytesRef
+                case code of
+                    ExitSuccess -> do
+                        restoreRemoteMetadata targetRemote (rpDestPath plan) (rpExpectedHash plan) (rpExpectedSize plan)
+                        pure (Repaired (rpDestPath plan))
+                    _ -> pure (RepairFailed (rpDestPath plan) "copy to remote failed")
+            RemoteSource sourceRemote _ -> do
+                let remoteSrc = Transport.remoteFilePath sourceRemote (toPosix (unPath (rpSourcePath plan)))
+                    remoteDst = Transport.remoteFilePath targetRemote (toPosix (unPath (rpDestPath plan)))
+                -- Download from source remote to temp, then upload to target remote
+                -- bytesRef accumulates across both legs; totalBytes = 2 * fileSize
+                tempDir <- Dir.getTemporaryDirectory
+                let tempFile = tempDir </> "bit-repair-temp"
+                    offsetRef = bytesRef  -- first leg writes 0..fileSize
+                code1 <- CopyProgress.rcloneCopyto remoteSrc tempFile offsetRef
+                case code1 of
+                    ExitSuccess -> do
+                        -- Second leg: rclone reports bytes from 0 again, so add fileSize offset
+                        uploadRef <- newIORef (0 :: Integer)
+                        let pump = do
+                                ub <- readIORef uploadRef
+                                atomicModifyIORef' bytesRef (\_ -> (fileSize + ub, ()))
+                                threadDelay 50000
+                                pump
+                        code2 <- bracket (forkIO pump) killThread $ \_ ->
+                            CopyProgress.rcloneCopyto tempFile remoteDst uploadRef
+                        safeRemove tempFile
+                        case code2 of
+                            ExitSuccess -> do
+                                restoreRemoteMetadata targetRemote (rpDestPath plan) (rpExpectedHash plan) (rpExpectedSize plan)
+                                pure (Repaired (rpDestPath plan))
+                            _ -> pure (RepairFailed (rpDestPath plan) "copy to target remote failed")
+                    _ -> do
+                        safeRemove tempFile
+                        pure (RepairFailed (rpDestPath plan) "copy from source remote failed")
+
+-- | Progress reporter for a single file repair.
+repairFileProgress :: IORef Integer -> Integer -> String -> IO ()
+repairFileProgress bytesRef totalSize label = go
+  where
+    go = do
+        b <- readIORef bytesRef
+        let pct = if totalSize > 0 then (b * 100) `div` totalSize else 0
+        reportProgress $ "  " ++ label ++ " — "
+            ++ formatBytes b ++ " / " ++ formatBytes totalSize
+            ++ " (" ++ show pct ++ "%)"
+        threadDelay 100000
+        when (b < totalSize) go
 
 -- | Restore the local .bit/index/ metadata file after repair.
 restoreLocalMetadata :: FilePath -> Path -> Hash 'MD5 -> Integer -> IO ()

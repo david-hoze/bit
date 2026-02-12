@@ -305,6 +305,10 @@ local-to-cloud transfers transparently. Pull, push, and merge orchestration shar
 the same `oldHead` capture pattern, conflict resolution (`Conflict.resolveAll`),
 and tracking ref updates.
 
+**Remote path construction**: All remote file paths go through `Transport.remoteFilePath`, which normalizes trailing slashes on the remote URL before joining. This prevents double-slash issues when the remote URL already ends with `/`.
+
+**`toPosix` on rclone arguments**: All paths passed to rclone are converted to forward slashes via `toPosix`. Rclone on Windows accepts both slash styles for local paths, but cloud remote paths (e.g., `gdrive:folder/file`) require forward slashes. Since rclone handles both uniformly, `toPosix` is applied to all arguments for consistency rather than conditional conversion. UNC paths (`\\server\share`) are not a concern because rclone remotes are configured by name (e.g., `gdrive:`), not by UNC path.
+
 ### Conflict Resolution
 
 Conflict resolution is structured as a fold over a list of conflicts (`bit.Conflict`). Each conflict is resolved identically via `resolveConflict`, and the traversal guarantees every conflict is visited exactly once with correct progress tracking (1/N, 2/N, ...). The decision logic (KeepLocal vs TakeRemote) is cleanly separated from the git checkout/merge mechanics.
@@ -878,7 +882,9 @@ The file scanner (`Bit/Scan.hs`) uses bounded parallelism for both scanning and 
 - `QSem` limits concurrent file reads (default: `numCapabilities * 4`)
 - Each file is fully read, hashed, and closed before moving to next
 - Progress reporting uses `IORef` with `atomicModifyIORef'` for thread-safe updates
+- Per-chunk byte tracking: `hashAndClassifyFile` accepts `Maybe (IORef Integer)` and updates it every 64 KB chunk, giving smooth progress even for large files
 - Cache entries use strict ByteString read/write
+- Phase callbacks (`ScanPhase`): callers receive `PhaseCollected`, `PhaseCacheResult`/`PhaseAllCached` notifications for verbose output
 
 **Metadata Writing** (`writeMetadataFiles`):
 - Parallel execution with same bounded concurrency as scanning
@@ -905,11 +911,17 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 - **Final summary**: `Synced 12 files (18.3 GB).`
 - Human-readable byte formatting: `formatBytes` (B, KB, MB, GB, TB with 1 decimal place)
 
-**All remotes** (cloud and filesystem) use `rcloneCopyFiles` for binary sync:
+**Push/Pull** use `rcloneCopyFiles` (batch `rclone copy --files-from`) for binary sync:
 - **Push**: `syncRemoteFiles` (unified, derives actions from git metadata diff, executes via rclone)
 - **Pull**: `syncAllFilesFromHEAD`, `applyMergeToWorkingDir` (both, parameterized by remote root)
 - Progress: counts binary files only (text files are small and fast via index copy)
 - Byte progress: parsed from rclone's `--use-json-log` output on stderr (stats block)
+
+**Repair** uses `rcloneCopyto` (single-file `rclone copyto`) for per-file progress:
+- Each file is copied individually with `--use-json-log --stats 0.5s -v`
+- JSON stats on stderr are parsed to update an `IORef Integer` byte counter
+- A reporter thread displays live progress: `(1/3) file.bin — 45.2 MB / 120.0 MB (37%)`
+- Remote-to-remote repairs use two legs (download to temp, upload from temp) with a pump thread that offsets the second leg's byte counter by the file size, giving smooth 0→100% across both legs
 
 **Design Notes**:
 - Complies with project's strict IO rules: no lazy `ByteString`, no lazy IO
@@ -997,37 +1009,80 @@ case cmd of
 
 ### `bit verify`
 
-Verifies local working tree files match their committed metadata. Scans the working directory to update `.bit/index/` metadata, then runs `git diff` on the index repo to find files whose metadata changed from the committed state. Any difference means the file has been corrupted or modified since the last commit.
+Verifies local working tree files match their committed metadata. Uses a bandwidth-aware scan (`Scan.scanWorkingDirWithAbort`) to hash files and compare against the committed state via `git diff`. Any difference means the file has been corrupted or modified since the last commit.
 
 **Why scan + git diff (not direct file-vs-metadata comparison):** An earlier approach loaded metadata from `.bit/index/` on disk and compared file hashes against it. The problem: any command that scans the working directory (`bit status`, `bit add`, etc.) updates `.bit/index/` metadata to reflect current file state. If a file was corrupted and the user happened to run `bit status` first, the metadata would be updated to match the corrupted content — and verification would pass, silently missing the corruption. By comparing against the *committed* state in git (what was explicitly committed with `bit commit`), verification is immune to stale metadata. The committed state doesn't change just because a scan ran.
 
 **Implementation:**
-1. `Scan.scanWorkingDir` + `Scan.writeMetadataFiles` — update `.bit/index/` to match current working tree
-2. `git diff --name-only` in `.bit/index` repo — find files whose metadata changed from HEAD
-3. For each changed binary file: read committed metadata (`git show HEAD:<path>`) for expected hash/size, read filesystem metadata for actual hash/size → `HashMismatch`
-4. For each changed text file: report `HashMismatch` (git diff already proves the content changed)
-5. For missing files: `git ls-tree -r HEAD` lists committed paths, check existence in working tree → `Missing`
+1. `Scan.scanWorkingDirWithAbort` — hash files with bandwidth detection (see below)
+2. `Scan.writeMetadataFiles` — update `.bit/index/` to match scan results
+3. `git diff --name-only` in `.bit/index` repo — find files whose metadata changed from HEAD
+4. For each changed binary file: read committed metadata (`git show HEAD:<path>`) for expected hash/size, read filesystem metadata for actual hash/size → `HashMismatch`
+5. For each changed text file: report `HashMismatch` (git diff already proves the content changed)
+6. For missing files: `git ls-tree -r HEAD` lists committed paths, check existence in working tree → `Missing`
 
-**Progress reporting**: On TTY with >5 files, displays live progress: `Checking files: N/Total (X%)...`
+**Verbose phase output** (always on stderr):
+```
+Verifying local files...
+Collecting files... 1247 found.
+Checking cache... 1200 cached, 47 need hashing (892.1 MB).
+Hashing: 23/47 files, 156.3 MB / 892.1 MB (17%)     ← live progress bar (TTY only)
+Hashed 47 files (892.1 MB).                           ← final summary replaces bar
+Comparing against committed metadata...
+[OK] All 1247 files match metadata.
+```
+
+Fast path (everything cached):
+```
+Collecting files... 1247 found.
+All 1247 files cached, no hashing needed.
+Comparing against committed metadata...
+[OK] All 1247 files match metadata.
+```
+
+**Bandwidth-aware hashing** (`scanWorkingDirWithAbort`):
+1. **Cache check**: Each file's mtime+size is compared against `.bit/cache/` entries. Cache hits skip re-hashing entirely.
+2. **Throughput measurement**: If >100 MB of uncached files remain, reads a 10 MB sample and estimates total time.
+3. **Abort prompt**: If estimated time exceeds 60 seconds, prompts the user:
+   ```
+   Hashing is slow (329.0 KB/s). Estimated: 12 min for 5 files.
+   Size-only verification covers most corruption cases.
+   Continue full hashing? [y/N]
+   ```
+4. **Size-only fallback**: If the user declines, uncached files are verified by size only — the committed hash is kept, but the actual file size is written to the metadata entry. `git diff` then detects any size changes. Same-size content corruption is not detected in this mode, but this covers the vast majority of real-world corruption (partial writes, truncation, failed transfers).
+
+**Per-chunk progress**: Hashing progress updates every 64 KB chunk, not per-file. This gives smooth progress even for large files on slow storage. The byte counter (`IORef Integer`) is updated via `atomicModifyIORef'` from the `hashAndClassifyFile` streaming loop.
+
+**Error display**: Different messages for different failure modes:
+- `[ERROR] Metadata mismatch: file.bin` — hash differs (full hash path)
+- `[ERROR] Size mismatch: file.bin` — only size differs (size-only path, shows `Expected size: 1.0 MB / Actual size: 524.3 KB`)
+- `[ERROR] Missing: file.bin` — file doesn't exist on disk
 
 ### `bit --remote <name> verify` / `bit --remote <name> repair`
 
 Verifies a remote's files match the committed metadata. Routes by remote type:
 
-- **Filesystem remotes**: Scans the remote working directory using `Verify.verifyWithAbort` (bandwidth-aware scan + git diff), the same approach as local verification.
+- **Filesystem remotes**: Scans the remote working directory using `Verify.verifyWithAbort` (bandwidth-aware scan + git diff), the same approach as local verification. Phase messages appear on stderr.
 - **Cloud remotes**: Fetches the remote bundle (committed metadata), scans remote files via `rclone lsjson --hash`, and compares.
 
 When issues are found:
 - `verify` prompts "Repair? [y/N]" on TTY, skips in non-interactive mode
 - `repair` repairs automatically without prompting
 
-Repair sources for a remote target: local repo + all other configured remotes.
+Repair sources: local repo + all other configured remotes. Each source's metadata is loaded according to its type — filesystem remotes load from their `.bit/index/` directory, cloud remotes from their bundle.
 
 ### `bit repair`
 
 Same as `bit verify` but repairs automatically without prompting. Searches all configured remotes for correct versions of corrupted or missing files.
 
 **Content-addressable repair**: Files are matched by (hash, size), not by path. If `photos/song.mp3` is corrupted locally but `backup/song_copy.mp3` on a remote has the same hash and size, it will be used as the repair source.
+
+**Per-file progress**: Each repair copy shows live progress on TTY:
+```
+Repairing 3 file(s)...
+  (1/3) data/model.bin — 45.2 MB / 120.0 MB (37%)
+```
+Repair uses `rclone copyto` with `--use-json-log` for byte-level progress parsing. Remote-to-remote repairs (source remote → target remote) go through a temp file with two legs; the progress bar shows both legs as a single 0–100% range.
 
 ### `bit fsck`
 
@@ -1267,15 +1322,15 @@ Interactive per-file conflict resolution:
 | `Internal/Git.hs` | Git command wrapper; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
 | `Bit/Path.hs` | `RemotePath` newtype — compile-time enforcement that remote filesystem paths go through `Bit.Platform` |
 | `Bit/Platform.hs` | UNC-safe wrappers for `System.Directory` (CPP: Win32 direct calls for UNC paths, `System.Directory` for local); includes `getFileSize` |
-| `Internal/Transport.hs` | Rclone command wrapper |
+| `Internal/Transport.hs` | Rclone command wrapper; `remoteFilePath` for trailing-slash-safe remote path construction |
 | `Internal/Config.hs` | Path constants |
 | `Internal/ConfigFile.hs` | Config file parsing (strict ByteString) |
 | `bit/Types.hs` | Core types: Hash, FileEntry, BitEnv, BitM |
 | `bit/Internal/Metadata.hs` | Canonical metadata parser/serializer |
-| `bit/Scan.hs` | Working directory scanning, hash computation (`hashAndClassifyFile` returns `ContentType`), cache entries use `ContentType`, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO). `readMetadataFile`, `getFileHashAndSize` return `Maybe MetaContent`. |
+| `bit/Scan.hs` | Working directory scanning, hash computation (`hashAndClassifyFile` returns `ContentType`, accepts optional `IORef Integer` for per-chunk byte progress), `ScanPhase` callbacks for verbose phase reporting, bandwidth-aware `scanWorkingDirWithAbort` with cache check + throughput measurement + size-only fallback, cache entries use `ContentType`, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO). `readMetadataFile`, `getFileHashAndSize` return `Maybe MetaContent`. |
 | `bit/Concurrency.hs` | Bounded parallelism helpers: concurrency level calculation, sequential/parallel mode switching |
 | `bit/Plan.hs` | `RcloneAction` type and `resolveSwaps` (detects pairwise Move swaps → Swap) |
-| `bit/Verify.hs` | Local and remote verification; scan + git diff approach for local (compares against committed metadata); unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
+| `bit/Verify.hs` | Local and remote verification; scan + git diff approach for local (compares against committed metadata); `verifyWithAbort` threads `ScanPhase` callbacks and creates size-only entries for skipped files; unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
 | `bit/Fsck.hs` | Passthrough to `git fsck` on `.bit/index` metadata repository |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
 | `bit/Remote/Scan.hs` | Remote file scanning via rclone |
@@ -1289,7 +1344,7 @@ Interactive per-file conflict resolution:
 | `bit/ConcurrentFileIO.hs` | Strict ByteString file operations |
 | `bit/Process.hs` | Strict process output capture (concurrent stdout/stderr reading) |
 | `bit/Progress.hs` | Centralized progress reporting for terminal operations |
-| `bit/CopyProgress.hs` | Progress tracking for file copy operations (push/pull sync) |
+| `bit/CopyProgress.hs` | Progress tracking for file copy operations (push/pull sync via `rcloneCopyFiles`, repair via `rcloneCopyto` with per-file JSON progress parsing) |
 
 ---
 
