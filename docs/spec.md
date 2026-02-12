@@ -126,7 +126,7 @@ On pull failure (remote doesn't match its metadata):
 $ bit pull
 error: Remote files do not match remote metadata.
   Modified: data/model.bin (expected md5:a1b2..., got md5:c3d4...)
-hint: Run 'bit verify --remote' to see all mismatches.
+hint: Run 'bit --remote <name> verify' to see all mismatches.
 hint: Run 'bit pull --accept-remote' to accept the remote's actual file state.
 hint: Run 'bit push --force' to overwrite remote with local state.
 ```
@@ -346,7 +346,7 @@ past the merge).
 | `bit merge` | `git merge` | Merge branches |
 | `bit remote add <name> <url>` | `git remote add` | Add named remote (does NOT set upstream) |
 | `bit remote show [name]` | `git remote show` | Show remote status |
-| `bit remote repair [name]` | — | Verify and repair files against remote |
+| `bit repair` | — | Verify and auto-repair local files from remotes |
 | `bit push [<remote>]` | `git push [<remote>]` | Push to specified or default remote |
 | `bit push -u <remote>` | `git push -u <remote>` | Push and set upstream tracking |
 | `bit push --set-upstream <remote>` | `git push --set-upstream <remote>` | Push and set upstream tracking (alt) |
@@ -356,7 +356,8 @@ past the merge).
 | `bit pull --manual-merge` | — | Interactive per-file conflict resolution |
 | `bit fetch [<remote>]` | `git fetch [<remote>]` | Fetch metadata from specified or default remote |
 | `bit verify` | — | Verify local files match committed metadata |
-| `bit verify --remote` | — | Verify remote files match committed remote metadata |
+| `bit --remote <name> verify` | — | Verify remote files match committed remote metadata |
+| `bit --remote <name> repair` | — | Verify and auto-repair remote files |
 | `bit fsck` | `git fsck` | Check integrity of internal metadata repository |
 | `bit merge --continue` | `git merge --continue` | Continue after conflict resolution |
 | `bit merge --abort` | `git merge --abort` | Abort current merge |
@@ -604,7 +605,7 @@ bit @origin init              # shorthand — needs quoting in PowerShell
 
 **Why `--remote` exists**: The `@<remote>` prefix doesn't work in PowerShell because `@` is the splatting operator. PowerShell interprets `@gdrive` as splatting the variable `$gdrive`, which is undefined, so the argument is silently dropped. `--remote <name>` is the portable alternative that works everywhere.
 
-**Placement**: Both `--remote <name>` and `@<remote>` must appear as the first argument(s) to `bit`. This is consistent between the two forms and avoids ambiguity with subcommand flags (e.g., `bit verify --remote` uses `--remote` as a boolean flag for the `verify` command, not as a remote target).
+**Placement**: Both `--remote <name>` and `@<remote>` must appear as the first argument(s) to `bit`. This is consistent between the two forms and avoids ambiguity with subcommand flags.
 
 **`--remote` is recommended** for scripts and cross-shell compatibility. `@<remote>` remains available as a convenient shorthand for interactive use in bash/zsh/cmd.
 
@@ -775,7 +776,7 @@ This feature does NOT provide:
 - **Incremental remote re-scan** — `bit --remote origin add` always scans from scratch (the workspace is ephemeral).
 - **`bit --remote origin push`** — pushing *to* a remote workspace doesn't make sense. Push targets the actual remote.
 - **Conflict resolution in remote context** — not needed. The workspace is single-writer (the local user).
-- **`--remote` after the subcommand** — `--remote <name>` must appear before the subcommand (first args). This avoids ambiguity with subcommand flags like `bit verify --remote`.
+- **`--remote` after the subcommand** — `--remote <name>` must appear before the subcommand (first args).
 
 ---
 
@@ -978,8 +979,8 @@ case cmd of
 
 2. **Lightweight env (no scan)**: Commands that read git history, config, or derive actions from git metadata
    - `log`, `ls-files` — read git objects only
-   - `remote show`, `remote repair` — read config/remote state
-   - `verify`, `verify --remote` — compare against existing metadata
+   - `remote show` — read config/remote state
+   - `verify`, `repair` — compare against existing metadata
    - `push` — derives file actions from `git diff --name-status` (no working directory scan needed)
 
 3. **Full scanned env**: Commands that need current working directory state
@@ -1009,40 +1010,34 @@ Verifies local working tree files match their committed metadata. Scans the work
 
 **Progress reporting**: On TTY with >5 files, displays live progress: `Checking files: N/Total (X%)...`
 
-### `bit verify --remote`
+### `bit --remote <name> verify` / `bit --remote <name> repair`
 
-Detects remote type via `isFilesystemRemote` (Bit.Core.Helpers) and routes accordingly:
+Verifies a remote's files match the committed metadata. Routes by remote type:
 
-- **Filesystem remotes**: Scans the remote working directory using `Verify.verifyLocalAt`, the same scan + git diff approach as local verification.
+- **Filesystem remotes**: Scans the remote working directory using `Verify.verifyWithAbort` (bandwidth-aware scan + git diff), the same approach as local verification.
 - **Cloud remotes**: Fetches the remote bundle (committed metadata), scans remote files via `rclone lsjson --hash`, and compares.
 
-**Progress reporting**: On TTY with >5 files, displays live progress during comparison phase (cloud remotes only).
+When issues are found:
+- `verify` prompts "Repair? [y/N]" on TTY, skips in non-interactive mode
+- `repair` repairs automatically without prompting
+
+Repair sources for a remote target: local repo + all other configured remotes.
+
+### `bit repair`
+
+Same as `bit verify` but repairs automatically without prompting. Searches all configured remotes for correct versions of corrupted or missing files.
+
+**Content-addressable repair**: Files are matched by (hash, size), not by path. If `photos/song.mp3` is corrupted locally but `backup/song_copy.mp3` on a remote has the same hash and size, it will be used as the repair source.
 
 ### `bit fsck`
 
 Runs `git fsck` on the internal metadata repository (`.bit/index`). Checks the integrity of the object store — that all commits, trees, and blobs are valid and consistent. This is a passthrough to git's own integrity check. Use `bit verify` to check file integrity instead.
 
-### `bit remote repair`
-
-Verifies both local and remote files against their respective metadata, then repairs any broken/missing files by copying verified files from the other side using content-addressable lookup. **File copies use rclone for both cloud and filesystem remotes** (cloud: via `Transport.copyToRemote`/`copyFromRemote`; filesystem: same, with `remoteUrl` as the local path).
-
-**Algorithm**:
-1. Resolve remote, load binary metadata from both sides (filesystem: from remote's `.bit/index`; cloud: from bundle)
-2. Verify both sides: `verifyLocal` and `verifyRemote` (cloud) or `verifyLocalAt` (filesystem remotes)
-3. Build content indexes from verified files (metadata entries not in the issue set)
-4. For each local issue: look up expected (hash, size) in remote verified index, copy from remote via rclone
-5. For each remote issue: look up expected (hash, size) in local verified index, copy to remote via rclone
-6. Report summary: repaired, failed, unrepairable
-
-**Content-addressable repair**: Files are matched by (hash, size), not by path. If `photos/song.mp3` is corrupted locally but `backup/song_copy.mp3` on the remote has the same hash and size, it will be used as the repair source.
-
-**Output**: Full comparison report saved to `.bit/last-check.txt` for detailed analysis.
-
 ---
 
 ## Handling Remote Divergence
 
-When remote files don't match remote metadata (detected via `bit verify --remote` or during `bit pull`):
+When remote files don't match remote metadata (detected via `bit --remote <name> verify` or during `bit pull`):
 
 ### Resolution Option 1: Accept Remote Reality (`--accept-remote`)
 
@@ -1244,9 +1239,10 @@ Interactive per-file conflict resolution:
 - `bit merge --continue / --abort` — merge lifecycle management
 - `bit fetch` — fetch metadata bundle only
 - `bit verify` — local file verification against committed metadata (scan + git diff)
-- `bit verify --remote` — remote file verification against committed remote metadata
+- `bit repair` — verify + auto-repair local files from all remotes
+- `bit --remote <name> verify` / `bit --remote <name> repair` — remote file verification and repair
 - `bit fsck` — passthrough to `git fsck` on internal metadata repository
-- `bit --remote <name>` / `bit @<remote>` — ephemeral remote workspace commands (`init`, `add`, `commit`, `status`, `log`, `ls-files`); each command fetches bundle, inflates into temp dir, operates, re-bundles if changed, pushes, and cleans up
+- `bit --remote <name>` / `bit @<remote>` — ephemeral remote workspace commands (`init`, `add`, `commit`, `status`, `log`, `ls-files`, `verify`, `repair`); each command fetches bundle, inflates into temp dir, operates, re-bundles if changed, pushes, and cleans up
 - Shared `deriveActions` for push/pull with `resolveSwaps` swap detection and property tests
 - Device-identity system for filesystem remotes (UUID + hardware serial)
 - Filesystem remote transport (full bit repo at remote, direct git fetch/merge)

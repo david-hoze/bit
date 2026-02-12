@@ -67,7 +67,7 @@ cd test\cli\output\work_verify_progress & echo corrupted> f1.txt
 cd test\cli\output\work_verify_progress & bit verify
 <<<
 >>> /Checked.*files.*issues found|hash mismatch/
->>>= 0
+>>>= 1
 
 # ======================================================================
 # TEST: Verify detects missing file
@@ -83,7 +83,7 @@ cd test\cli\output\work_verify_progress & echo file1> f1.txt & del f2.txt
 cd test\cli\output\work_verify_progress & bit verify
 <<<
 >>> /Checked.*files.*issues found|Missing/
->>>= 0
+>>>= 1
 
 # ======================================================================
 # TEST: Fsck with progress code

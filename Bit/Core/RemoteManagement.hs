@@ -2,9 +2,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 
 module Bit.Core.RemoteManagement
     ( remoteAdd
@@ -12,39 +9,29 @@ module Bit.Core.RemoteManagement
     , addRemoteFilesystem
     , promptDeviceName
     , remoteShow
-    , remoteRepair
     , formatRemoteDisplay
     , showRemoteStatusFromBundle
     ) where
 
 import qualified System.Directory as Dir
 import qualified Bit.Platform as Platform
-import System.FilePath ((</>), takeDirectory)
-import Control.Monad (unless, void, when, forM_)
+import System.FilePath ((</>))
+import Control.Monad (unless, void, forM_)
 import System.Exit (ExitCode(..), exitWith)
 import Internal.Git (AncestorQuery(..))
 import qualified Internal.Git as Git
-import qualified Internal.Transport as Transport
 import qualified Bit.Device as Device
 import qualified Bit.DevicePrompt as DevicePrompt
 import Data.UUID (UUID)
 import System.IO (stderr, hPutStrLn)
 import Control.Exception (try, IOException)
 import Data.Maybe (fromMaybe)
-import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
-import qualified Data.Text as T
-import Internal.Config (bitDevicesDir, bitRemotesDir, bundleForRemote, bundleCwdPath, fromCwdPath, BundleName(..), bitIndexPath, bundleGitRelPath, fromGitRelPath)
-import Bit.Types (BitM, BitEnv(..), Path(..), Hash(..), HashAlgo(..), hashToText)
+import Internal.Config (bitDevicesDir, bitRemotesDir, bundleForRemote, bundleCwdPath, fromCwdPath, BundleName(..), bundleGitRelPath, fromGitRelPath)
+import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
-import Bit.Remote (Remote, remoteUrl, remoteName, displayRemote, resolveRemote)
-import Bit.Core.Helpers (getRemoteType, formatVerifyCounts)
+import Bit.Remote (Remote, remoteUrl, displayRemote, resolveRemote)
 import qualified Bit.Core.Fetch as Fetch
-import qualified Bit.Verify as Verify
-import Bit.Concurrency (Concurrency(..))
-import Bit.Utils (toPosix, atomicWriteFileStr)
-import Bit.Internal.Metadata (MetaContent(..), serializeMetadata)
 
 -- ============================================================================
 -- Remote Management
@@ -152,7 +139,7 @@ displayStorageType Device.Physical = "physical"
 displayStorageType Device.Network  = "network"
 
 -- ============================================================================
--- Remote show / repair
+-- Remote show
 -- ============================================================================
 
 remoteShow :: Maybe String -> BitM ()
@@ -216,258 +203,6 @@ remoteShow mRemoteName = do
                                             putStrLn "  Local refs configured for 'bit push':"
                                             putStrLn "    main pushes to main (unknown)"
 
--- ============================================================================
--- Remote repair
--- ============================================================================
-
--- | Repair action: copy a file from one side to repair the other.
--- Carries the expected hash+size so metadata can be restored.
-data RepairAction
-    = RepairLocal  Path Path (Hash 'MD5) Integer  -- ^ Copy from remote sourcePath to fix local destPath, with expected hash+size
-    | RepairRemote Path Path (Hash 'MD5) Integer  -- ^ Copy from local sourcePath to fix remote destPath, with expected hash+size
-    deriving (Show)
-
--- | Result of executing a single repair action.
-data RepairResult = Repaired Path | RepairFailed Path String
-    deriving (Show)
-
-remoteRepair :: Maybe String -> Concurrency -> BitM ()
-remoteRepair mName concurrency = do
-    cwd <- asks envCwd
-    -- Resolve remote
-    (mRemote, _resolvedName) <- liftIO $ do
-        name <- maybe Git.getTrackedRemoteName pure mName
-        mRemote <- resolveRemote cwd name
-        pure (mRemote, name)
-    case mRemote of
-        Nothing -> liftIO $ do
-            maybe
-                (hPutStrLn stderr "fatal: No remote configured.")
-                (\n -> hPutStrLn stderr $ "fatal: '" ++ n ++ "' does not appear to be a git remote.")
-                mName
-            hPutStrLn stderr "hint: Set remote with 'bit remote add <name> <url>'"
-            exitWith (ExitFailure 1)
-        Just remote -> liftIO $ do
-            putStrLn $ "Repairing against remote: " ++ displayRemote remote
-            putStrLn ""
-
-            -- Determine if filesystem or cloud remote
-            mType <- getRemoteType cwd (remoteName remote)
-            let isFilesystem = maybe False Device.isFilesystemType mType
-
-            if isFilesystem
-                then repairFilesystem cwd remote concurrency
-                else repairCloud cwd remote concurrency
-
--- | Repair against a filesystem remote. Loads metadata from remote's .bit/index,
--- verifies with verifyLocalAt, then uses rclone (same as cloud) for file copies.
-repairFilesystem :: FilePath -> Remote -> Concurrency -> IO ()
-repairFilesystem cwd remote concurrency = do
-    let remotePath = remoteUrl remote
-    -- Load committed metadata from both sides (immune to scan updates)
-    let localIndexDir = cwd </> bitIndexPath
-        remoteIndexDir = remotePath </> bitIndexPath
-    localMeta <- Verify.loadCommittedBinaryMetadata localIndexDir
-    remoteMeta <- Verify.loadCommittedBinaryMetadata remoteIndexDir
-
-    -- Verify both sides
-    putStrLn "Verifying local files..."
-    localResult <- Verify.verifyLocal cwd Nothing concurrency
-    putStrLn $ formatVerifyCounts localResult.vrCount (length localResult.vrIssues)
-
-    putStrLn "Verifying remote files..."
-    remoteResult <- Verify.verifyLocalAt remotePath Nothing concurrency
-    putStrLn $ formatVerifyCounts remoteResult.vrCount (length remoteResult.vrIssues)
-
-    runRepairLogic localMeta remoteMeta localResult.vrIssues remoteResult.vrIssues
-        (executeRepairForFilesystem cwd remote)
-
--- | Repair against a cloud remote (bundle-based, uses rclone).
-repairCloud :: FilePath -> Remote -> Concurrency -> IO ()
-repairCloud cwd remote concurrency = do
-    -- Fetch bundle
-    maybeBundlePath <- Fetch.fetchRemoteBundle remote
-    case maybeBundlePath of
-        Nothing -> do
-            hPutStrLn stderr "fatal: Could not fetch remote bundle."
-            exitWith (ExitFailure 1)
-        Just bPath -> do
-            outcome <- Fetch.saveFetchedBundle remote (Just bPath)
-            case outcome of
-                Fetch.FetchError err -> do
-                    hPutStrLn stderr $ "fatal: " ++ err
-                    exitWith (ExitFailure 1)
-                _ -> pure ()
-
-    -- Load committed metadata (immune to scan updates)
-    let localIndexDir = cwd </> bitIndexPath
-    localMeta <- Verify.loadCommittedBinaryMetadata localIndexDir
-    entries <- Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
-    let remoteMeta = Verify.binaryEntries entries
-
-    -- Verify both sides
-    putStrLn "Verifying local files..."
-    localResult <- Verify.verifyLocal cwd Nothing concurrency
-    putStrLn $ formatVerifyCounts localResult.vrCount (length localResult.vrIssues)
-
-    putStrLn "Verifying remote files..."
-    remoteResult <- Verify.verifyRemote cwd remote Nothing concurrency
-    putStrLn $ formatVerifyCounts remoteResult.vrCount (length remoteResult.vrIssues)
-
-    runRepairLogic localMeta remoteMeta localResult.vrIssues remoteResult.vrIssues
-        (executeRepair cwd remote)
-
--- | Common repair logic shared between filesystem and cloud remotes.
-runRepairLogic :: [Verify.BinaryFileMeta]    -- local metadata
-              -> [Verify.BinaryFileMeta]    -- remote metadata
-              -> [Verify.VerifyIssue]             -- local issues
-              -> [Verify.VerifyIssue]             -- remote issues
-              -> (RepairAction -> IO RepairResult) -- repair executor
-              -> IO ()
-runRepairLogic localMeta remoteMeta localIssues remoteIssues executeAction =
-    if null localIssues && null remoteIssues
-        then putStrLn "\nAll files verified. Nothing to repair."
-        else do
-            putStrLn ""
-
-            -- Build sets of broken paths
-            let localIssueSet = Set.fromList (map issuePath localIssues)
-                remoteIssueSet = Set.fromList (map issuePath remoteIssues)
-
-            -- Build content indexes from VERIFIED files
-            let remoteVerified = buildContentIndex remoteMeta remoteIssueSet
-                localVerified  = buildContentIndex localMeta localIssueSet
-
-            -- Build metadata maps for lookup
-            let localMetaMap = Map.fromList [(m.bfmPath, (m.bfmHash, m.bfmSize)) | m <- localMeta]
-                remoteMetaMap = Map.fromList [(m.bfmPath, (m.bfmHash, m.bfmSize)) | m <- remoteMeta]
-
-            -- Plan repairs: use the OTHER side's metadata as source of truth
-            -- (local metadata may reflect corrupted state after a scan)
-            let (localRepairs, localUnrepairable) =
-                    planRepairs localIssues remoteMetaMap remoteVerified RepairLocal
-                (remoteRepairs, remoteUnrepairable) =
-                    planRepairs remoteIssues localMetaMap localVerified RepairRemote
-                allRepairs = localRepairs ++ remoteRepairs
-                allUnrepairable = localUnrepairable ++ remoteUnrepairable
-
-            when (null allRepairs && null allUnrepairable) $
-                putStrLn "No repairable issues found (issues may be in text files or untracked files)."
-
-            -- Execute repairs
-            unless (null allRepairs) $ do
-                putStrLn $ "Repairing " ++ show (length allRepairs) ++ " file(s)..."
-                results <- mapM executeAction allRepairs
-
-                let repaired = [p | Repaired p <- results]
-                    failed   = [(p, e) | RepairFailed p e <- results]
-
-                forM_ repaired $ \p ->
-                    putStrLn $ "  [REPAIRED] " ++ toPosix (unPath p)
-                forM_ failed $ \(p, e) ->
-                    hPutStrLn stderr $ "  [FAILED]   " ++ toPosix (unPath p) ++ " (" ++ e ++ ")"
-
-                -- Summary
-                putStrLn ""
-                putStrLn $ show (length repaired) ++ " repaired, "
-                    ++ show (length failed) ++ " failed, "
-                    ++ show (length allUnrepairable) ++ " unrepairable."
-
-                unless (null failed && null allUnrepairable) $
-                    exitWith (ExitFailure 1)
-
-            unless (null allUnrepairable) $ do
-                when (null allRepairs) $ do
-                    forM_ allUnrepairable $ \p ->
-                        hPutStrLn stderr $ "  [UNREPAIRABLE] " ++ toPosix (unPath p)
-                    putStrLn ""
-                    putStrLn $ "0 repaired, 0 failed, " ++ show (length allUnrepairable) ++ " unrepairable."
-                    exitWith (ExitFailure 1)
-
--- | Extract the path from a VerifyIssue.
-issuePath :: Verify.VerifyIssue -> Path
-issuePath (Verify.HashMismatch p _ _ _ _) = p
-issuePath (Verify.Missing p) = p
-
--- | Build a content-addressable index from verified metadata entries.
--- Maps (hashString, size) to a Path that is known to be good.
--- Excludes any paths that are in the issue set (those are broken).
-buildContentIndex :: [Verify.BinaryFileMeta] -> Set.Set Path -> Map.Map (String, Integer) Path
-buildContentIndex entries issueSet =
-    Map.fromList
-        [ ((T.unpack (hashToText m.bfmHash), m.bfmSize), m.bfmPath)
-        | m <- entries
-        , not (Set.member m.bfmPath issueSet)
-        ]
-
--- | Plan repair actions for a list of issues.
--- For each issue, looks up the expected (hash, size) in the opposite side's content index.
--- Returns (repair actions, unrepairable paths).
-planRepairs :: [Verify.VerifyIssue]
-            -> Map.Map Path (Hash 'MD5, Integer)
-            -> Map.Map (String, Integer) Path
-            -> (Path -> Path -> Hash 'MD5 -> Integer -> RepairAction)
-            -> ([RepairAction], [Path])
-planRepairs issues metaMap contentIndex mkAction = foldr go ([], []) issues
-  where
-    go issue (repairs, unrepairables) =
-        let p = issuePath issue
-        in case Map.lookup p metaMap of
-            Nothing -> (repairs, unrepairables)  -- not in binary metadata, skip
-            Just (expectedHash, expectedSize) ->
-                let key = (T.unpack (hashToText expectedHash), expectedSize)
-                in case Map.lookup key contentIndex of
-                    Just sourcePath -> (mkAction sourcePath p expectedHash expectedSize : repairs, unrepairables)
-                    Nothing -> (repairs, p : unrepairables)
-
--- | Restore the metadata file in .bit/index/ to match the expected hash+size.
-restoreLocalMetadata :: FilePath -> Path -> Hash 'MD5 -> Integer -> IO ()
-restoreLocalMetadata cwd destPath expectedHash expectedSize = do
-    let metaPath = cwd </> bitIndexPath </> unPath destPath
-    Dir.createDirectoryIfMissing True (takeDirectory metaPath)
-    atomicWriteFileStr metaPath (serializeMetadata (MetaContent expectedHash expectedSize))
-
--- | Execute a single repair action. Uses rclone for file copies.
--- For RepairRemote on filesystem, also restores remote .bit/index/ metadata.
-executeRepairForFilesystem :: FilePath -> Remote -> RepairAction -> IO RepairResult
-executeRepairForFilesystem cwd remote action = case action of
-    RepairRemote _ dest h s -> do
-        r <- executeRepair cwd remote action
-        case r of
-            Repaired _ -> restoreRemoteMetadata remote dest h s
-            _ -> pure ()
-        pure r
-    other -> executeRepair cwd remote other
-
-executeRepair :: FilePath -> Remote -> RepairAction -> IO RepairResult
-executeRepair cwd remote (RepairLocal sourcePath destPath expectedHash expectedSize) = do
-    -- Copy from remote to fix local
-    let remoteRelPath = toPosix (unPath sourcePath)
-        localFullPath = cwd </> unPath destPath
-    Dir.createDirectoryIfMissing True (takeDirectory localFullPath)
-    code <- Transport.copyFromRemote remote remoteRelPath localFullPath
-    case code of
-        ExitSuccess -> do
-            restoreLocalMetadata cwd destPath expectedHash expectedSize
-            pure (Repaired destPath)
-        _ -> pure (RepairFailed destPath "copy from remote failed")
-executeRepair cwd remote (RepairRemote sourcePath destPath _ _) = do
-    -- Copy from local to fix remote
-    let localFullPath = cwd </> unPath sourcePath
-        remoteRelPath = toPosix (unPath destPath)
-    code <- Transport.copyToRemote localFullPath remote remoteRelPath
-    pure $ case code of
-        ExitSuccess -> Repaired destPath
-        _ -> RepairFailed destPath "copy to remote failed"
-
--- | Restore remote .bit/index/ metadata after repairing a file on a filesystem remote.
--- Cloud remotes store metadata in the bundle; only filesystem remotes need this.
-restoreRemoteMetadata :: Remote -> Path -> Hash 'MD5 -> Integer -> IO ()
-restoreRemoteMetadata remote destPath expectedHash expectedSize = do
-    let remotePath = remoteUrl remote
-        remoteMetaPath = remotePath </> bitIndexPath </> unPath destPath
-    Platform.createDirectoryIfMissing True (takeDirectory remoteMetaPath)
-    atomicWriteFileStr remoteMetaPath (serializeMetadata (MetaContent expectedHash expectedSize))
 
 -- | Format remote display line (e.g. "origin → black_usb:Backup (physical, connected at E:\)")
 formatRemoteDisplay :: FilePath -> String -> Maybe Device.RemoteTarget -> IO String

@@ -30,9 +30,9 @@ cd test\cli\output\work_gdrive_a & bit push
 >>>= 0
 
 # --- A: remote repair after push: all files verified, nothing to repair ---
-cd test\cli\output\work_gdrive_a & bit remote repair
+cd test\cli\output\work_gdrive_a & bit --remote origin repair
 <<<
->>> /Nothing to repair/
+>>> /\[OK\] All.*files match|Nothing to repair/
 >>>= 0
 
 # --- Repo B: init, add remote, fetch, pull ---
@@ -68,20 +68,20 @@ rclone deletefile gdrive-test:bit-test/bar.bin
 >>>
 >>>= 0
 
-# --- B: verify --remote may report missing file or 0 files (bundle metadata) ---
-cd test\cli\output\work_gdrive_b & bit verify --remote
+# --- B: verify remote detects missing file ---
+cd test\cli\output\work_gdrive_b & bit --remote origin verify
 <<<
->>> /Missing:|issues found|ERROR|\[OK\] All files match|Verifying 0/
->>>= 0
+>>> /Missing:|issues found|ERROR/
+>>>= 1
 
 # --- Restore remote: repair from A (push won't re-upload externally-deleted files) ---
-cd test\cli\output\work_gdrive_a & bit remote repair
+cd test\cli\output\work_gdrive_a & bit --remote origin repair
 <<<
 >>> /repaired|REPAIRED|Nothing to repair/
 >>>= 0
 
-# --- B: verify --remote should be clean again after repair ---
-cd test\cli\output\work_gdrive_b & bit verify --remote
+# --- B: verify remote should be clean again after repair ---
+cd test\cli\output\work_gdrive_b & bit --remote origin verify
 <<<
 >>> /\[OK\] All.*files match|Checked.*files/
 >>>= 0
@@ -113,16 +113,16 @@ echo junk content> test\cli\output\work_gdrive_b\junk.tmp & rclone copyto test\c
 >>>
 >>>= 0
 
-# --- B: fetch (bundle unchanged), then pull: local should not get orphan; verify --remote ---
+# --- B: fetch (bundle unchanged), then pull: local should not get orphan; verify remote ---
 cd test\cli\output\work_gdrive_b & bit fetch
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_gdrive_b & bit verify --remote
+cd test\cli\output\work_gdrive_b & bit --remote origin verify
 <<<
->>> /Verifying|All files match|issues found/
->>>= 0
+>>> /Verifying|issues found/
+>>>= 1
 
 # --- Cleanup: remove orphan from remote so future runs are clean ---
 rclone deletefile gdrive-test:bit-test/orphan.txt

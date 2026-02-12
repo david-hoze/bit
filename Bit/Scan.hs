@@ -5,6 +5,8 @@
 
 module Bit.Scan
   ( scanWorkingDir
+  , scanWorkingDirWithAbort
+  , ScanResult(..)
   , writeMetadataFiles
   , readMetadataFile
   , listMetadataPaths
@@ -25,7 +27,7 @@ import System.Directory
       createDirectoryIfMissing,
       copyFileWithMetadata,
       getModificationTime )
-import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, stderr)
+import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, hFlush, stderr, stdin)
 import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf)
 import Data.Either (isRight)
 import Data.Maybe (listToMaybe)
@@ -47,7 +49,9 @@ import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
 import Control.Exception (bracket_, finally)
 import Bit.Progress (reportProgress, clearProgress)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
+import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
+import Bit.Concurrency (Concurrency(..), ioConcurrency)
 
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]
@@ -56,6 +60,20 @@ binaryExtensions = [".mp4", ".zip", ".bin", ".exe", ".dll", ".so", ".dylib", ".j
 -- | Internal: scanned path before hashing. Distinguishes dirs from files without boolean blindness.
 data ScannedEntry = ScannedFile FilePath | ScannedDir FilePath
   deriving (Show, Eq)
+
+-- | Result of a scan that may skip some files.
+data ScanResult = ScanResult
+  { srEntries :: [FileEntry]   -- ^ Files with hashes (cache hits + completed hashes)
+  , srSkipped :: [FilePath]    -- ^ Files where hashing was skipped (bandwidth abort)
+  }
+
+-- | Internal: a file that needs hashing (cache miss).
+data FileToHash = FileToHash
+  { fthRel   :: !FilePath   -- ^ Relative path
+  , fthFull  :: !FilePath   -- ^ Absolute path
+  , fthSize  :: !Integer    -- ^ File size
+  , fthMtime :: !Integer    -- ^ Modification time (POSIX seconds)
+  }
 
 -- | Single-pass file hash and classification. Returns (hash, contentType).
 -- For large files or binary extensions: streams hash only, returns BinaryContent.
@@ -234,82 +252,13 @@ progressLoop counter total = go
         threadDelay 50000  -- 50ms
         when (n < total) go
 
--- Main scan function
-scanWorkingDir :: FilePath -> IO [FileEntry]
-scanWorkingDir root = do
-    let bitRoot = root </> ".bit"
-    bitExists <- doesDirectoryExist bitRoot
-    if not bitExists then pure []
-    else do
-      -- Read config once for all files
-      config <- ConfigFile.readTextConfig
-    
-      -- First pass: collect all paths (without hashing)
-      allPaths <- collectPaths root
-
-      -- Filter through git check-ignore
-      let filePaths = [p | ScannedFile p <- allPaths]
-      ignoredSet <- checkIgnoredFiles root filePaths
-
-      -- Separate directories from files to hash
-      let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
-          filesToHash = [(rel, root </> rel) | ScannedFile rel <- allPaths
-                                             , not (Set.member (normalizePath rel) ignoredSet)]
-    
-      -- Setup progress tracking
-      let total = length filesToHash
-      counter <- newIORef (0 :: Int)
-    
-      -- Hash/classify files in parallel (bounded by numCapabilities * 4)
-      caps <- getNumCapabilities
-      let concurrency = max 4 (caps * 4)
-    
-      let hashWithProgress (rel, fullPath) = do
-              size <- getFileSize fullPath
-              mtime <- getModificationTime fullPath
-              let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
-              cached <- loadCacheEntry root rel
-              case cached of
-                Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
-                  -- Cache hit: reuse hash and contentType
-                  atomicModifyIORef' counter (\n -> (n + 1, ()))
-                  pure $ FileEntry
-                      { path = Path rel
-                      , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ceContentType ce }
-                      }
-                _ -> do
-                  -- Cache miss: hash the file, save cache entry
-                  (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config
-                  saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
-                  atomicModifyIORef' counter (\n -> (n + 1, ()))
-                  pure $ FileEntry
-                      { path = Path rel
-                      , kind = File { fHash = h, fSize = fromIntegral size, fContentType = contentType }
-                      }
-    
-      -- Wrap hashing with progress reporter
-      let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress filesToHash
-    
-      fileEntries <- if total > 50
-          then do
-              -- Show progress for large scans
-              reporterThread <- forkIO (progressLoop counter total)
-              finally hashingAction $ do
-                  killThread reporterThread
-                  clearProgress
-                  hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
-          else
-              -- No progress for small scans
-              hashingAction
-    
-      pure $ dirEntries ++ fileEntries
+-- | Recursively collect all paths under root, excluding .bit, .git, .bitignore, .gitignore.
+collectScannedPaths :: FilePath -> IO [ScannedEntry]
+collectScannedPaths root = go root
   where
-    collectPaths :: FilePath -> IO [ScannedEntry]
-    collectPaths path = do
+    go path = do
       isDir <- doesDirectoryExist path
       let rel = makeRelative root path
-
-      -- ignore .bit folder, .git, .bitignore, and .gitignore (the latter two are config files)
       if rel == ".bit" || (".bit" `isPrefixOf` rel)
           || rel == ".git" || (".git" `isPrefixOf` rel)
           || rel == ".bitignore"
@@ -318,10 +267,197 @@ scanWorkingDir root = do
         else if isDir
           then do
             names <- listDirectory path
-            let children = map (path </>) names
-            childPaths <- concat <$> mapM collectPaths children
+            childPaths <- concat <$> mapM (go . (path </>)) names
             pure (ScannedDir rel : childPaths)
         else pure [ScannedFile rel]
+
+-- | Stat a file and check the hash cache.
+-- Returns Right for cache hits, Left for files needing hashing.
+statAndCheckCache :: FilePath -> (FilePath, FilePath) -> IO (Either FileToHash FileEntry)
+statAndCheckCache root (rel, fullPath) = do
+    size <- getFileSize fullPath
+    mtime <- getModificationTime fullPath
+    let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+    cached <- loadCacheEntry root rel
+    case cached of
+        Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt ->
+            pure $ Right $ FileEntry
+                { path = Path rel
+                , kind = File (ceHash ce) (fromIntegral size) (ceContentType ce)
+                }
+        _ -> pure $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
+
+-- | Hash a single file and save the result to cache.
+hashFileToEntry :: FilePath -> ConfigFile.TextConfig -> FileToHash -> IO FileEntry
+hashFileToEntry root config fth = do
+    (h, contentType) <- hashAndClassifyFile (fthFull fth) (fthSize fth) config
+    saveCacheEntry root (fthRel fth) (CacheEntry (fthMtime fth) (fthSize fth) h contentType)
+    pure $ FileEntry
+        { path = Path (fthRel fth)
+        , kind = File h (fthSize fth) contentType
+        }
+
+-- | Measure storage throughput by reading a sample from a file.
+-- Reads up to 10 MB and returns estimated bytes per second.
+measureThroughput :: FilePath -> IO Double
+measureThroughput filePath = do
+    let sampleSize = 10 * 1024 * 1024 :: Int
+    start <- getCurrentTime
+    bytesRead <- withFile filePath ReadMode $ \h -> do
+        let loop !total
+                | total >= sampleSize = pure total
+                | otherwise = do
+                    eof <- hIsEOF h
+                    if eof then pure total
+                    else do
+                        chunk <- BS.hGet h 65536
+                        loop (total + BS.length chunk)
+        loop 0
+    end <- getCurrentTime
+    let elapsed = realToFrac (diffUTCTime end start) :: Double
+    pure (fromIntegral bytesRead / max 0.001 elapsed)
+
+-- | Main scan function. Always hashes all files (no bandwidth abort).
+scanWorkingDir :: FilePath -> IO [FileEntry]
+scanWorkingDir root = do
+    let bitRoot = root </> ".bit"
+    bitExists <- doesDirectoryExist bitRoot
+    if not bitExists then pure []
+    else do
+      config <- ConfigFile.readTextConfig
+      allPaths <- collectScannedPaths root
+
+      let filePaths = [p | ScannedFile p <- allPaths]
+      ignoredSet <- checkIgnoredFiles root filePaths
+
+      let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
+          filesToHash = [(rel, root </> rel) | ScannedFile rel <- allPaths
+                                             , not (Set.member (normalizePath rel) ignoredSet)]
+
+      let total = length filesToHash
+      counter <- newIORef (0 :: Int)
+
+      caps <- getNumCapabilities
+      let concurrency = max 4 (caps * 4)
+
+      let hashWithProgress (rel, fullPath) = do
+              size <- getFileSize fullPath
+              mtime <- getModificationTime fullPath
+              let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+              cached <- loadCacheEntry root rel
+              case cached of
+                Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
+                  atomicModifyIORef' counter (\n -> (n + 1, ()))
+                  pure $ FileEntry
+                      { path = Path rel
+                      , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ceContentType ce }
+                      }
+                _ -> do
+                  (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config
+                  saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
+                  atomicModifyIORef' counter (\n -> (n + 1, ()))
+                  pure $ FileEntry
+                      { path = Path rel
+                      , kind = File { fHash = h, fSize = fromIntegral size, fContentType = contentType }
+                      }
+
+      let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress filesToHash
+
+      fileEntries <- if total > 50
+          then do
+              reporterThread <- forkIO (progressLoop counter total)
+              finally hashingAction $ do
+                  killThread reporterThread
+                  clearProgress
+                  hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
+          else
+              hashingAction
+
+      pure $ dirEntries ++ fileEntries
+
+-- | Scan with bandwidth detection. Measures storage throughput before committing
+-- to hash all files. If estimated time exceeds 60 seconds, prompts the user.
+-- Returns entries (with hashes) and skipped file paths.
+-- The Concurrency parameter controls hashing parallelism (Sequential = 1 thread).
+scanWorkingDirWithAbort :: FilePath -> Concurrency -> IO ScanResult
+scanWorkingDirWithAbort root concurrencyMode = do
+    let bitRoot = root </> ".bit"
+    bitExists <- doesDirectoryExist bitRoot
+    if not bitExists then pure (ScanResult [] [])
+    else do
+      config <- ConfigFile.readTextConfig
+      allPaths <- collectScannedPaths root
+
+      let filePaths = [p | ScannedFile p <- allPaths]
+      ignoredSet <- checkIgnoredFiles root filePaths
+
+      let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
+          filesToProcess = [(rel, root </> rel) | ScannedFile rel <- allPaths
+                                                , not (Set.member (normalizePath rel) ignoredSet)]
+
+      -- Phase 1: stat all files and check cache
+      statResults <- mapM (statAndCheckCache root) filesToProcess
+      let cacheHits    = [e | Right e <- statResults]
+          needsHashing = [fth | Left fth <- statResults]
+          totalBytesNeeded = sum [fthSize fth | fth <- needsHashing]
+
+      -- Phase 2: bandwidth check — only if significant work remains
+      shouldSkip <- if null needsHashing || totalBytesNeeded < 100 * 1024 * 1024
+          then pure False
+          else do
+              throughput <- measureThroughput (fthFull (head needsHashing))
+              let estimatedSecs = fromIntegral totalBytesNeeded / throughput
+              if estimatedSecs <= 60
+                  then pure False
+                  else do
+                      let mbps = throughput / (1024 * 1024)
+                          mins = estimatedSecs / 60
+                      hPutStrLn stderr $ "Hashing is slow (" ++ show (round mbps :: Int)
+                          ++ " MB/s). Estimated: " ++ show (ceiling mins :: Int)
+                          ++ " min for " ++ show (length needsHashing) ++ " files."
+                      hPutStr stderr "Continue hashing? [y/N] "
+                      hFlush stderr
+                      isTTY <- hIsTerminalDevice stdin
+                      if isTTY
+                          then do
+                              response <- getLine
+                              pure (response /= "y" && response /= "Y")
+                          else pure True  -- non-interactive: skip
+
+      if shouldSkip
+          then pure $ ScanResult
+              { srEntries = dirEntries ++ cacheHits
+              , srSkipped = [fthRel fth | fth <- needsHashing]
+              }
+          else do
+              -- Phase 3: hash remaining files with progress
+              let total = length filesToProcess
+              counter <- newIORef (length cacheHits :: Int)
+              concurrency <- case concurrencyMode of
+                  Sequential  -> pure 1
+                  Parallel 0  -> ioConcurrency
+                  Parallel n  -> pure n
+
+              let hashWithProgress fth = do
+                      entry <- hashFileToEntry root config fth
+                      atomicModifyIORef' counter (\n -> (n + 1, ()))
+                      pure entry
+
+              let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress needsHashing
+
+              hashedEntries <- if total > 50
+                  then do
+                      reporterThread <- forkIO (progressLoop counter total)
+                      finally hashingAction $ do
+                          killThread reporterThread
+                          clearProgress
+                          hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
+                  else hashingAction
+
+              pure $ ScanResult
+                  { srEntries = dirEntries ++ cacheHits ++ hashedEntries
+                  , srSkipped = []
+                  }
 
 writeMetadataFiles :: FilePath -> [FileEntry] -> IO ()
 writeMetadataFiles root entries = do

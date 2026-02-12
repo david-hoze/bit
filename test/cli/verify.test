@@ -36,7 +36,7 @@ cd test\cli\output\work_verify & echo corrupted> file.bin
 cd test\cli\output\work_verify & bit verify
 <<<
 >>> /issues found|hash mismatch|file\.bin/
->>>= 0
+>>>= 1
 
 # --- verify detects corrupted file even after scan (stale metadata regression) ---
 cd test\cli\output\work_verify & bit status
@@ -46,7 +46,7 @@ cd test\cli\output\work_verify & bit status
 cd test\cli\output\work_verify & bit verify
 <<<
 >>> /issues found|hash mismatch|file\.bin/
->>>= 0
+>>>= 1
 
 # --- verify detects missing file ---
 rmdir /s /q test\cli\output\work_verify 2>nul & mkdir test\cli\output\work_verify & cd test\cli\output\work_verify & bit init & echo x> missing.txt & bit add missing.txt & bit commit -m "Add missing"
@@ -62,7 +62,7 @@ del test\cli\output\work_verify\missing.txt
 cd test\cli\output\work_verify & bit verify
 <<<
 >>> /issues found|missing|missing\.txt/
->>>= 0
+>>>= 1
 
 # --- cleanup ---
 timeout /t 1 >nul & rmdir /s /q test\cli\output\work_verify 2>nul

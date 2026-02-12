@@ -28,13 +28,14 @@ module Bit.Core
 
       -- Verification
     , VerifyTarget(..)
+    , RepairMode(..)
     , verify
+    , repair
     , fsck
 
       -- Remote management
     , remoteAdd
     , remoteShow
-    , remoteRepair
 
       -- Merge management
     , mergeContinue
@@ -73,6 +74,6 @@ import Bit.Core.GitPassthrough
 import Bit.Core.Push (push)
 import Bit.Core.Pull (pull)
 import Bit.Core.Fetch (fetch)
-import Bit.Core.RemoteManagement (remoteAdd, remoteShow, remoteRepair)
-import Bit.Core.Verify (VerifyTarget(..), verify, fsck)
+import Bit.Core.RemoteManagement (remoteAdd, remoteShow)
+import Bit.Core.Verify (VerifyTarget(..), RepairMode(..), verify, repair, fsck)
 

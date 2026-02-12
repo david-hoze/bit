@@ -53,10 +53,10 @@ printMainHelp = putStr $ unlines
     , "Remote management:"
     , "  remote add <name> <url>           Add a remote"
     , "  remote show [<name>]              Show remote information"
-    , "  remote repair [<name>]            Verify and repair files against remote"
     , ""
     , "Integrity:"
-    , "  verify [--remote]                 Verify files match committed metadata"
+    , "  verify                            Verify files match committed metadata"
+    , "  repair                            Verify and repair files from remotes"
     , "  fsck                              Check metadata repository integrity"
     , ""
     , "Merge and branching:"
@@ -66,7 +66,7 @@ printMainHelp = putStr $ unlines
     , "Remote workspace:"
     , "  --remote <name> <cmd>             Target a remote workspace (portable)"
     , "  @<remote> <cmd>                   Shorthand (needs quoting in PowerShell)"
-    , "  Supported: init, add, commit, status, log, ls-files"
+    , "  Supported: init, add, commit, status, log, ls-files, verify, repair"
     , ""
     , "See 'bit help <command>' for more information on a specific command."
     ]
@@ -251,8 +251,7 @@ commandRegistry =
                         , ""
                         , "Available subcommands:"
                         , "  add <name> <url>   Add a remote"
-                        , "  show [<name>]      Show remote information"
-                        , "  repair [<name>]    Verify and repair files against remote" ]
+                        , "  show [<name>]      Show remote information" ]
         , cmdOptions  = []
         , cmdExamples = [ HelpItem "bit remote add origin gdrive:Projects/foo" "Add a cloud remote"
                         , HelpItem "bit remote show" "Show all remotes"
@@ -284,27 +283,30 @@ commandRegistry =
                         , HelpItem "bit remote show origin" "Show details for origin" ]
         }
     , CommandHelp
-        { cmdName     = "remote repair"
-        , cmdSynopsis = "Verify and repair files against remote"
-        , cmdUsage    = "bit remote repair [<name>]"
-        , cmdDesc     = [ "Verify both local and remote files against their metadata,"
-                        , "then repair broken or missing files by copying from the other side."
-                        , "Uses content-addressable lookup (matches by hash, not path)." ]
-        , cmdOptions  = [HelpItem "--sequential" "Run verification sequentially (no parallelism)"]
-        , cmdExamples = [ HelpItem "bit remote repair" "Repair against default remote"
-                        , HelpItem "bit remote repair origin" "Repair against named remote" ]
-        }
-    , CommandHelp
         { cmdName     = "verify"
         , cmdSynopsis = "Verify files match committed metadata"
-        , cmdUsage    = "bit verify [--remote]"
+        , cmdUsage    = "bit verify"
         , cmdDesc     = [ "Verify that files match their committed metadata (hash, size)."
-                        , "Without --remote, checks local working tree files."
-                        , "With --remote, checks files on the remote." ]
-        , cmdOptions  = [ HelpItem "--remote" "Verify remote files instead of local"
-                        , HelpItem "--sequential" "Run verification sequentially" ]
+                        , "On slow storage, measures throughput and offers to skip hashing."
+                        , "If issues are found, offers to repair from configured remotes."
+                        , ""
+                        , "Use 'bit --remote <name> verify' to verify a remote." ]
+        , cmdOptions  = [HelpItem "--sequential" "Run verification sequentially"]
         , cmdExamples = [ HelpItem "bit verify" "Verify local files"
-                        , HelpItem "bit verify --remote" "Verify remote files" ]
+                        , HelpItem "bit --remote origin verify" "Verify remote files" ]
+        }
+    , CommandHelp
+        { cmdName     = "repair"
+        , cmdSynopsis = "Verify and repair files from remotes"
+        , cmdUsage    = "bit repair"
+        , cmdDesc     = [ "Same as 'bit verify' but repairs automatically without prompting."
+                        , "Searches all configured remotes for correct versions of"
+                        , "corrupted or missing files."
+                        , ""
+                        , "Use 'bit --remote <name> repair' to repair a remote." ]
+        , cmdOptions  = [HelpItem "--sequential" "Run verification sequentially"]
+        , cmdExamples = [ HelpItem "bit repair" "Repair local files"
+                        , HelpItem "bit --remote origin repair" "Repair remote files" ]
         }
     , CommandHelp
         { cmdName     = "fsck"

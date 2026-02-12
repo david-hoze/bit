@@ -159,7 +159,7 @@ Tests rclone Google Drive remote: push, pull, fetch, and corruption recovery.
 - **Two repos:** `work_gdrive_a` (pusher) and `work_gdrive_b` (puller), both use `gdrive-test:bit-test` as origin
 - **Push/pull/fetch:** Repo A adds a file, commits, pushes; Repo B fetches and pulls; verifies file content
 - **Corruption:** Uses `rclone deletefile` to remove a file on the remote (simulates partial/corrupt state)
-- **Verify --remote:** Repo B runs `bit verify --remote` and expects missing-file issues
+- **Verify remote:** Repo B runs `bit --remote origin verify` and expects missing-file issues
 - **Recovery:** Repo A pushes again (re-syncs files); Repo B fetches/pulls; verify is clean
 - **Orphan file:** Adds a file on the remote with `rclone copyto` (not in metadata); verifies behavior
 - **Cleanup:** Removes the orphan from the remote at the end
@@ -179,15 +179,17 @@ Tests `bit fsck` (local-only, git-style: terse output, one line per issue, exit 
 - Corrupted working-tree file: prints `hash mismatch <path>`, exits 1.
 - Missing tracked file: prints `missing <path>`, exits 1.
 
-Fsck does not check remote; use `bit verify --remote` for that.
+Fsck does not check remotes; use `bit --remote <name> verify` for that.
 
 ## remote-repair.test
 
-Tests `bit remote repair`: verifies both local and remote files against their metadata, then repairs broken files by copying verified files from the other side using content-addressable (hash+size) lookup. Covers:
-- No remote configured: prints error and exits 1.
+Tests `bit repair`: verifies local files against committed metadata, then auto-repairs from configured remotes using content-addressable (hash+size) lookup. Covers:
+- No remotes configured, no issues: repair succeeds (nothing to fix).
+- No remotes configured, corruption: prints "No repair sources available" and exits 1.
 - Nothing to repair: push then repair — all files verified.
 - Local corruption: corrupt a local binary file — repair copies from remote.
-- Unrepairable: corrupt same file on both sides — reports unrepairable.
+- Stale metadata regression: corrupt file then scan, repair still detects mismatch.
+- Unrepairable: file committed but never pushed — no remote has it.
 
 ## unicode.test
 

@@ -6,6 +6,7 @@
 module Bit.Verify
   ( verifyLocal
   , verifyLocalAt
+  , verifyWithAbort
   , verifyRemote
   , VerifyIssue(..)
   , VerifyResult(..)
@@ -196,22 +197,16 @@ loadCommittedBinaryMetadata indexDir = do
       binaryEntries <$> loadMetadata (FromCommit headHash) Sequential
     _ -> pure []
 
--- | Verify working tree at an arbitrary root path against its committed metadata.
--- Scans the working directory to update .bit/index/ metadata, then uses
--- git diff to find files whose metadata changed from the committed state.
--- Returns (number of files checked, list of issues).
--- If an IORef counter is provided, it will be incremented after each file is checked.
-verifyLocalAt :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
-verifyLocalAt root mCounter _concurrency = do
+-- | Given scan entries for a root path, write metadata, defeat racy git, and
+-- find issues via git diff. Shared logic for all verify variants.
+findIssuesFromScan :: FilePath -> [FileEntry] -> IO VerifyResult
+findIssuesFromScan root entries = do
   let indexDir = root </> bitIndexPath
 
-  -- 1. Scan working directory and update .bit/index/ metadata
-  entries <- Scan.scanWorkingDir root
+  -- 1. Write metadata
   Scan.writeMetadataFiles root entries
 
   -- 2. Defeat racy git: set mtime to epoch so git always re-reads content.
-  --    Without this, git's stat cache can skip content comparison when metadata
-  --    files have the same byte length (e.g. two 2-digit file sizes).
   let metaFiles = [indexDir </> unPath (path e) | e <- entries
                   , case kind e of File{} -> True; _ -> False]
   mapM_ (\f -> setModificationTime f (posixSecondsToUTCTime 0)) metaFiles
@@ -239,9 +234,6 @@ verifyLocalAt root mCounter _concurrency = do
 
   let allIssues = mismatchIssues ++ missingFiltered
       totalChecked = length committedPaths
-
-  -- Update counter
-  traverse_ (\ref -> atomicModifyIORef' ref (\_ -> (totalChecked, ()))) mCounter
 
   pure (VerifyResult totalChecked allIssues)
   where
@@ -283,11 +275,28 @@ verifyLocalAt root mCounter _concurrency = do
               0
               actualSize]
 
+-- | Verify working tree at an arbitrary root path against its committed metadata.
+-- Scans the working directory (always hashes all files) then finds issues via git diff.
+verifyLocalAt :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
+verifyLocalAt root mCounter _concurrency = do
+  entries <- Scan.scanWorkingDir root
+  result <- findIssuesFromScan root entries
+  traverse_ (\ref -> atomicModifyIORef' ref (\_ -> (vrCount result, ()))) mCounter
+  pure result
+
 -- | Verify local working tree against committed metadata in .bit/index.
--- Returns (number of files checked, list of issues).
--- If an IORef counter is provided, it will be incremented after each file is checked.
 verifyLocal :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
 verifyLocal cwd = verifyLocalAt cwd
+
+-- | Verify with bandwidth detection. Uses scanWorkingDirWithAbort to measure
+-- throughput and optionally skip hashing on slow storage.
+-- Returns the verify result plus a list of files that were skipped.
+verifyWithAbort :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO (VerifyResult, [FilePath])
+verifyWithAbort root mCounter concurrency = do
+  Scan.ScanResult entries skipped <- Scan.scanWorkingDirWithAbort root concurrency
+  result <- findIssuesFromScan root entries
+  traverse_ (\ref -> atomicModifyIORef' ref (\_ -> (vrCount result, ()))) mCounter
+  pure (result, skipped)
 
 -- | Extract metadata from a bundle's HEAD commit.
 -- Reads the hash from the bundle, then loads metadata from that commit.

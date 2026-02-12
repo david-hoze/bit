@@ -28,10 +28,25 @@ $ bit verify
 [ERROR] Hash mismatch: data/model.bin
   Expected: md5:a1b2c3d4e5f6...
   Actual:   md5:9f8e7d6c5b4a...
-Checked 47 files. 1 issues found. Run 'bit status' for details.
+Checked 47 files. 1 issues found.
 ```
 
 bit also checks for missing files — tracked files that no longer exist on disk.
+
+When issues are found, bit prompts you to repair:
+
+```
+$ bit verify
+[ERROR] Hash mismatch: data/model.bin
+  Expected: md5:a1b2c3d4e5f6...
+  Actual:   md5:9f8e7d6c5b4a...
+Checked 47 files. 1 issues found.
+1 issues found. Repair? [y/N] y
+Repairing 1 file(s)...
+  [REPAIRED] data/model.bin
+```
+
+If you decline (or the session is non-interactive), bit exits with code 1.
 
 ### Automatic Verification
 
@@ -45,12 +60,12 @@ bit verifies automatically in:
 This is the **proof of possession** rule: you can't transfer metadata claims you
 can't substantiate, i.e. provide the actual file.
 
-## `bit verify --remote`
+## `bit --remote <name> verify`
 
-Same idea, but checks the files on the remote:
+Same idea, but checks the files on a specific remote:
 
 ```
-$ bit verify --remote
+$ bit --remote origin verify
 [OK] All 47 files match metadata.
 ```
 
@@ -58,54 +73,56 @@ For cloud remotes (Google Drive, S3, etc.), this is fast — cloud providers sto
 MD5 hashes as native file metadata, so bit can verify without downloading anything.
 
 For filesystem remotes (USB drives, network shares), bit reads and hashes every
-file on the remote, same as local verification.
+file on the remote, same as local verification. If the storage is slow, bit
+measures throughput and offers to skip hashing.
 
-## `bit remote repair`
+## `bit repair`
 
-When verification finds problems, repair fixes them. It checks both sides, then
-copies healthy files to replace broken ones.
+Verify + auto-repair in one command. Scans local files and automatically repairs
+any issues from configured remotes — no prompt.
 
 ```
-$ bit remote repair
-Repairing against remote: gdrive (gdrive:MyBackup)
-
+$ bit repair
 Verifying local files...
-  47 files checked, 1 issues
-Verifying remote files...
-  47 files checked, 0 issues
-
 Repairing 1 file(s)...
   [REPAIRED] data/model.bin
 
 1 repaired, 0 failed, 0 unrepairable.
 ```
 
+For remote targets, use the workspace prefix:
+
+```
+$ bit --remote origin repair
+```
+
 ### How Repair Finds the Right File
 
 Repair matches files by **content hash and size**, not by path. This means:
 
-- If `photos/vacation.jpg` is corrupted locally, but the remote has an identical
+- If `photos/vacation.jpg` is corrupted locally, but a remote has an identical
   copy at `backup/vacation_copy.jpg`, it will be used as the repair source.
 - Renamed files, moved files, and duplicates all serve as valid repair sources.
 
 Two files with the same hash and size have identical content — it doesn't matter
 what they're called or where they live.
 
-### Repair Works Both Ways
+### Repair Sources
 
-Repair isn't one-directional. If a local file is broken, it copies from the remote.
-If a remote file is broken, it copies from local. It fixes whatever it can on
-both sides in a single run.
+When repairing a target, bit searches **all other sources** for the correct file:
+
+- **`bit repair`** (local target): searches all configured remotes
+- **`bit --remote origin repair`** (remote target): searches local files + all other remotes
 
 ### When Files Can't Be Repaired
 
-A file is **unrepairable** when the same content is broken on both sides:
+A file is **unrepairable** when no source has a copy with the expected hash:
 
 ```
-$ bit remote repair
+$ bit repair
   [UNREPAIRABLE] data/model.bin
 
-0 repaired, 0 failed, 2 unrepairable.
+0 repaired, 0 failed, 1 unrepairable.
 ```
 
 If this happens, you'll need to restore the file from another source (another
@@ -127,14 +144,14 @@ $ bit fsck
 A typical workflow when something seems wrong:
 
 ```bash
-# 1. Check if local files are healthy
+# 1. Check if local files are healthy (prompts to repair if issues found)
 bit verify
 
 # 2. Check if remote files are healthy
-bit verify --remote
+bit --remote origin verify
 
-# 3. If either side has issues, repair automatically
-bit remote repair
+# 3. Or auto-repair without prompts
+bit repair
 
 # 4. Verify again to confirm everything is clean
 bit verify

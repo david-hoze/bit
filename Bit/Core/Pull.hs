@@ -385,7 +385,7 @@ pullLogic remote _opts = do
                 else lift $ do
                     hPutStrLn stderr $ "error: Remote files do not match remote metadata (" ++ show (length result.vrIssues) ++ " issues)."
                     mapM_ (printVerifyIssue id) result.vrIssues
-                    dieRemoteVerifyFailed "hint: Run 'bit verify --remote' to see all mismatches."
+                    dieRemoteVerifyFailed "hint: Run 'bit --remote <name> verify' to see all mismatches."
 
             oldHash <- lift getLocalHeadE
             (_remoteCode, remoteOut, _) <- lift $ gitQuery ["rev-parse", Git.remoteTrackingRef name]

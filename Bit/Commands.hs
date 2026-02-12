@@ -78,7 +78,14 @@ runRemoteCommand remoteName args = do
         Nothing -> do
             hPutStrLn stderr $ "fatal: remote '" ++ remoteName ++ "' not found."
             exitWith (ExitFailure 1)
-        Just remote -> case args of
+        Just remote ->
+            let isSequential = "--sequential" `elem` args
+                concurrency = if isSequential then Sequential else Parallel 0
+                cmd = filter (/= "--sequential") args
+                runVerifyCmd repairMode = do
+                    let env = BitEnv cwd (Just remote) NoForce
+                    runBitM env $ Bit.verify (Bit.VerifyRemotePath remote) repairMode concurrency
+            in case cmd of
             ["init"] ->
                 RemoteWorkspace.initRemote remote remoteName
             ("add":paths) ->
@@ -91,9 +98,13 @@ runRemoteCommand remoteName args = do
                 RemoteWorkspace.logRemote remote rest >>= exitWith
             ("ls-files":rest) ->
                 RemoteWorkspace.lsFilesRemote remote rest >>= exitWith
+            ["verify"] ->
+                runVerifyCmd Bit.PromptRepair
+            ["repair"] ->
+                runVerifyCmd Bit.AutoRepair
             _ -> do
-                hPutStrLn stderr $ "error: command not supported in remote context: " ++ unwords args
-                hPutStrLn stderr "Supported: init, add, commit, status, log, ls-files"
+                hPutStrLn stderr $ "error: command not supported in remote context: " ++ unwords cmd
+                hPutStrLn stderr "Supported: init, add, commit, status, log, ls-files, verify, repair"
                 exitWith (ExitFailure 1)
 
 -- | Helper function to push with upstream tracking
@@ -136,7 +147,7 @@ syncBitignoreToIndex cwd = do
 -- Handles multi-word commands like "remote add", "merge --continue", etc.
 commandKey :: [String] -> String
 commandKey ("remote":sub:_)
-    | sub `elem` ["add", "show", "repair"] = "remote " ++ sub
+    | sub `elem` ["add", "show"] = "remote " ++ sub
 commandKey ("merge":sub:_)
     | sub `elem` ["--continue", "--abort"] = "merge " ++ sub
 commandKey ("branch":sub:_)
@@ -219,10 +230,8 @@ runCommand args = do
         ("ls-files":rest)               -> Bit.lsFiles rest >>= exitWith
         ["remote", "show"]              -> runBase $ Bit.remoteShow Nothing
         ["remote", "show", name]        -> runBaseWithRemote name $ Bit.remoteShow (Just name)
-        ["remote", "repair"]             -> runBase $ Bit.remoteRepair Nothing concurrency
-        ["remote", "repair", name]      -> runBaseWithRemote name $ Bit.remoteRepair (Just name) concurrency
-        ["verify"]                      -> runBase $ Bit.verify Bit.VerifyLocal concurrency
-        ["verify", "--remote"]          -> runBase $ Bit.verify Bit.VerifyRemote concurrency
+        ["verify"]                      -> runBase $ Bit.verify Bit.VerifyLocal Bit.PromptRepair concurrency
+        ["repair"]                      -> runBase $ Bit.verify Bit.VerifyLocal Bit.AutoRepair concurrency
 
         ("rm":rest)                     -> runBase (Bit.rm rest) >>= exitWith
 

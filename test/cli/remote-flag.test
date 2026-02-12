@@ -154,8 +154,8 @@ cd test\cli\output\work_rflag_a & bit --remote origin push
 >>>2 /not supported in remote context/
 >>>= 1
 
-# ---- verify --remote should still work (not confused with --remote flag) ----
-cd test\cli\output\work_rflag_a & bit verify --remote
+# ---- verify via --remote prefix should work ----
+cd test\cli\output\work_rflag_a & bit --remote origin verify
 <<<
 >>> /Verifying remote files|\[OK\] All/
 >>>= 0

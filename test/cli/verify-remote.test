@@ -1,6 +1,6 @@
-# bit verify --remote tests (filesystem remotes)
-# Verifies that verify --remote works for filesystem remotes by scanning
-# the remote working directory instead of using the cloud bundle path.
+# bit --remote <name> verify tests (filesystem remotes)
+# Verifies that remote verify works for filesystem remotes using the
+# bundle + file scan approach.
 
 # ---- CLEANUP ----
 timeout /t 1 >nul & rmdir /s /q test\cli\output\work_vr 2>nul & rmdir /s /q test\cli\output\remote_vr 2>nul & echo cleanup done
@@ -37,7 +37,7 @@ cd test\cli\output\work_vr & bit push
 # TEST: Clean verify — all files match
 # ======================================================================
 
-cd test\cli\output\work_vr & bit verify --remote
+cd test\cli\output\work_vr & bit --remote origin verify
 <<<
 >>> /\[OK\] All [0-9]+ files match metadata/
 >>>= 0
@@ -51,10 +51,10 @@ cd test\cli\output\remote_vr & echo corrupted> data.bin
 >>>
 >>>= 0
 
-cd test\cli\output\work_vr & bit verify --remote
+cd test\cli\output\work_vr & bit --remote origin verify
 <<<
 >>>2 /\[ERROR\] Hash mismatch.*data\.bin/
->>>= 0
+>>>= 1
 
 # ======================================================================
 # TEST: Missing file — detected
@@ -65,10 +65,10 @@ cd test\cli\output\remote_vr & del greet.txt
 >>>
 >>>= 0
 
-cd test\cli\output\work_vr & bit verify --remote
+cd test\cli\output\work_vr & bit --remote origin verify
 <<<
 >>>2 /\[ERROR\] Missing.*greet\.txt/
->>>= 0
+>>>= 1
 
 # ---- CLEANUP ----
 timeout /t 1 >nul & rmdir /s /q test\cli\output\work_vr 2>nul & rmdir /s /q test\cli\output\remote_vr 2>nul & echo cleanup done
