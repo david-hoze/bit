@@ -199,6 +199,8 @@ formatVerifiedRemoteFiles n = "Verified " ++ show n ++ " remote files."
 printVerifyIssue :: (String -> String) -> Verify.VerifyIssue -> IO ()
 printVerifyIssue fmtHash = \case
   Verify.HashMismatch filePath expectedHash actualHash expectedSize actualSize
+    | expectedHash == "(committed)" ->
+        hPutStrLn stderr $ "[ERROR] Text file modified: " ++ toPosix (unPath filePath)
     | expectedHash == actualHash -> do
         hPutStrLn stderr $ "[ERROR] Size mismatch: " ++ toPosix (unPath filePath)
         hPutStrLn stderr $ "  Expected size: " ++ formatBytes expectedSize

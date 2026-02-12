@@ -19,7 +19,9 @@ module Bit.Verify
   , loadMetadata
   , entryPath
   , binaryEntries
+  , textEntryPaths
   , allEntryPaths
+  , loadCommittedTextPaths
   , Scan.ScanPhase(..)
   ) where
 
@@ -197,6 +199,20 @@ loadCommittedBinaryMetadata indexDir = do
       let headHash = filter (not . isSpace) out
       binaryEntries <$> loadMetadata (FromCommit headHash) Sequential
     _ -> pure []
+
+-- | Extract text-only entry paths.
+textEntryPaths :: [MetadataEntry] -> [Path]
+textEntryPaths entries = [p | TextEntry p <- entries]
+
+-- | Load committed text file paths from the HEAD of a .bit/index repo.
+loadCommittedTextPaths :: FilePath -> IO (Set.Set Path)
+loadCommittedTextPaths indexDir = do
+  (code, out, _) <- Git.runGitAt indexDir ["rev-parse", "HEAD"]
+  case code of
+    ExitSuccess -> do
+      let headHash = filter (not . isSpace) out
+      Set.fromList . textEntryPaths <$> loadMetadata (FromCommit headHash) Sequential
+    _ -> pure Set.empty
 
 -- | Given scan entries for a root path, write metadata, defeat racy git, and
 -- find issues via git diff. Shared logic for all verify variants.

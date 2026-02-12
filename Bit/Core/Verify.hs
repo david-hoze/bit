@@ -22,8 +22,9 @@ import Control.Concurrent (forkIO, threadDelay, killThread)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import System.IO (stderr, stdin, hPutStr, hPutStrLn, hFlush, hIsTerminalDevice)
 import System.Exit (ExitCode(..), exitWith)
-import Data.List (intercalate)
+import Data.List (intercalate, partition)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified System.Directory as Dir
 
@@ -38,6 +39,7 @@ import Bit.Internal.Metadata (MetaContent(..), serializeMetadata)
 import qualified Bit.Device as Device
 import qualified Bit.CopyProgress as CopyProgress
 import qualified Internal.Transport as Transport
+import qualified Internal.Git as Git
 
 import Bit.Core.Helpers (printVerifyIssue, isFilesystemRemote)
 import Bit.Remote (Remote, remoteName, remoteUrl, resolveRemote)
@@ -99,8 +101,9 @@ verifyFilesystem cwd targetPath mTargetRemote repairMode concurrency = do
 
     -- Repair flow
     let loadMeta = Verify.loadCommittedBinaryMetadata (targetPath </> bitIndexPath)
+        loadTextPaths = Verify.loadCommittedTextPaths (targetPath </> bitIndexPath)
     unless (null result.vrIssues) $
-        repairFlow cwd loadMeta mTargetRemote result.vrIssues repairMode concurrency
+        repairFlow cwd loadMeta loadTextPaths mTargetRemote result.vrIssues repairMode concurrency
 
 -- ============================================================================
 -- Cloud verify (uses bundle + rclone)
@@ -135,15 +138,19 @@ verifyCloud cwd remote repairMode concurrency = do
         printVerifyResultWithSkipped result []
         let loadMeta = Verify.binaryEntries <$>
                 Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
+            loadTextPaths = Set.fromList . Verify.textEntryPaths <$>
+                Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
         unless (null result.vrIssues) $
-            repairFlow cwd loadMeta (Just remote) result.vrIssues repairMode concurrency
+            repairFlow cwd loadMeta loadTextPaths (Just remote) result.vrIssues repairMode concurrency
       else do
         result <- Verify.verifyRemote cwd remote Nothing concurrency
         printVerifyResultWithSkipped result []
         let loadMeta = Verify.binaryEntries <$>
                 Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
+            loadTextPaths = Set.fromList . Verify.textEntryPaths <$>
+                Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
         unless (null result.vrIssues) $
-            repairFlow cwd loadMeta (Just remote) result.vrIssues repairMode concurrency
+            repairFlow cwd loadMeta loadTextPaths (Just remote) result.vrIssues repairMode concurrency
 
 -- ============================================================================
 -- Repair logic (shared between local and remote, filesystem and cloud)
@@ -160,9 +167,9 @@ data RepairResult = Repaired Path | RepairFailed Path String
     deriving (Show)
 
 -- | Repair flow: prompt (if needed), load sources, plan and execute repairs.
--- The loadTargetMeta action is called only after the user confirms repair.
-repairFlow :: FilePath -> IO [Verify.BinaryFileMeta] -> Maybe Remote -> [Verify.VerifyIssue] -> RepairMode -> Concurrency -> IO ()
-repairFlow cwd loadTargetMeta mTargetRemote issues repairMode _concurrency = do
+-- Text files are repaired from git; binary files are repaired from other sources.
+repairFlow :: FilePath -> IO [Verify.BinaryFileMeta] -> IO (Set.Set Path) -> Maybe Remote -> [Verify.VerifyIssue] -> RepairMode -> Concurrency -> IO ()
+repairFlow cwd loadTargetMeta loadTextPaths mTargetRemote issues repairMode _concurrency = do
     shouldRepair <- case repairMode of
         AutoRepair -> pure True
         PromptRepair -> do
@@ -181,61 +188,155 @@ repairFlow cwd loadTargetMeta mTargetRemote issues repairMode _concurrency = do
         exitWith (ExitFailure 1)
 
     when shouldRepair $ do
-        -- Load committed metadata for the target (to know expected hash+size for Missing issues)
-        targetMeta <- loadTargetMeta
-        let metaMap = Map.fromList [(m.bfmPath, (m.bfmHash, m.bfmSize)) | m <- targetMeta]
+        -- Partition issues into text and binary
+        textPaths <- loadTextPaths
+        let (textIssues, binaryIssues) = partition (isTextIssue textPaths) issues
 
-        -- Load repair sources (everything except the target)
-        let excludeName = remoteName <$> mTargetRemote
-            includeLocal = case mTargetRemote of
-                Nothing -> False  -- target is local, don't include local as source
-                Just _  -> True   -- target is remote, include local as source
-        sources <- loadRepairSources cwd excludeName includeLocal
-
-        if null sources
-            then do
-                hPutStrLn stderr "No repair sources available (no remotes configured)."
-                exitWith (ExitFailure 1)
+        -- Load repair sources for binary issues
+        sources <- if null binaryIssues
+            then pure []
             else do
-                -- Print which sources will be searched
-                hPutStrLn stderr $ "Searching " ++ show (length sources) ++ " source(s): "
-                    ++ intercalate ", " (map sourceName sources)
-                let repairIndex = buildRepairIndex sources
-                -- Plan repairs for each issue
-                let plans = planRepairs issues metaMap repairIndex
-                    (repairable, unrepairable) = (fst plans, snd plans)
+                let excludeName = remoteName <$> mTargetRemote
+                    includeLocal = case mTargetRemote of
+                        Nothing -> False
+                        Just _  -> True
+                srcs <- loadRepairSources cwd excludeName includeLocal
+                unless (null srcs) $
+                    hPutStrLn stderr $ "Searching " ++ show (length srcs) ++ " source(s): "
+                        ++ intercalate ", " (map sourceName srcs)
+                pure srcs
 
-                unless (null repairable) $ do
-                    putStrLn $ "Repairing " ++ show (length repairable) ++ " file(s)..."
-                    let total = length repairable
-                    results <- forM (zip [1..] repairable) $ \(i :: Int, plan) -> do
-                        let label = "(" ++ show i ++ "/" ++ show total ++ ") "
-                                ++ toPosix (unPath (rpDestPath plan))
-                                ++ " from " ++ sourceName (rpSource plan)
-                        executeRepairWithProgress cwd mTargetRemote plan label
+        -- Phase 1: Text repair from git
+        textResults <- if null textIssues
+            then pure []
+            else do
+                hPutStrLn stderr $ "Restoring " ++ show (length textIssues) ++ " text file(s) from git..."
+                repairTextFiles cwd mTargetRemote (map issuePath textIssues)
 
-                    let repaired = [p | Repaired p <- results]
-                        failed   = [(p, e) | RepairFailed p e <- results]
+        forM_ textResults $ \case
+            Repaired p -> putStrLn $ "  [REPAIRED] " ++ toPosix (unPath p)
+            RepairFailed p e -> hPutStrLn stderr $ "  [FAILED]   " ++ toPosix (unPath p) ++ " (" ++ e ++ ")"
 
-                    forM_ repaired $ \p ->
+        -- Phase 2: Binary repair from sources
+        (binaryResults, unrepairable) <- if null binaryIssues
+            then pure ([], [])
+            else if null sources
+                then do
+                    when (null textIssues) $
+                        hPutStrLn stderr "No repair sources available (no remotes configured)."
+                    pure ([], map issuePath binaryIssues)
+                else do
+                    targetMeta <- loadTargetMeta
+                    let metaMap = Map.fromList [(m.bfmPath, (m.bfmHash, m.bfmSize)) | m <- targetMeta]
+                        repairIndex = buildRepairIndex sources
+                        (repairable, unrep) = planRepairs binaryIssues metaMap repairIndex
+
+                    results <- if null repairable
+                        then pure []
+                        else do
+                            putStrLn $ "Repairing " ++ show (length repairable) ++ " file(s)..."
+                            let total = length repairable
+                            forM (zip [1..] repairable) $ \(i :: Int, plan) -> do
+                                let label = "(" ++ show i ++ "/" ++ show total ++ ") "
+                                        ++ toPosix (unPath (rpDestPath plan))
+                                        ++ " from " ++ sourceName (rpSource plan)
+                                executeRepairWithProgress cwd mTargetRemote plan label
+
+                    forM_ [p | Repaired p <- results] $ \p ->
                         putStrLn $ "  [REPAIRED] " ++ toPosix (unPath p)
-                    forM_ failed $ \(p, e) ->
+                    forM_ [(p, e) | RepairFailed p e <- results] $ \(p, e) ->
                         hPutStrLn stderr $ "  [FAILED]   " ++ toPosix (unPath p) ++ " (" ++ e ++ ")"
 
-                    putStrLn ""
-                    putStrLn $ show (length repaired) ++ " repaired, "
-                        ++ show (length failed) ++ " failed, "
-                        ++ show (length unrepairable) ++ " unrepairable."
+                    pure (results, unrep)
 
-                    unless (null failed && null unrepairable) $
-                        exitWith (ExitFailure 1)
+        -- Combined summary
+        let textRepaired = [p | Repaired p <- textResults]
+            textFailed   = [(p, e) | RepairFailed p e <- textResults]
+            binRepaired  = [p | Repaired p <- binaryResults]
+            binFailed    = [(p, e) | RepairFailed p e <- binaryResults]
+            allRepaired  = textRepaired ++ binRepaired
+            allFailed    = textFailed ++ binFailed
 
-                when (null repairable && not (null unrepairable)) $ do
-                    forM_ unrepairable $ \p ->
-                        hPutStrLn stderr $ "  [UNREPAIRABLE] " ++ toPosix (unPath p)
-                    putStrLn ""
-                    putStrLn $ "0 repaired, 0 failed, " ++ show (length unrepairable) ++ " unrepairable."
-                    exitWith (ExitFailure 1)
+        forM_ unrepairable $ \p ->
+            hPutStrLn stderr $ "  [UNREPAIRABLE] " ++ toPosix (unPath p)
+
+        putStrLn ""
+        putStrLn $ show (length allRepaired) ++ " repaired, "
+            ++ show (length allFailed) ++ " failed, "
+            ++ show (length unrepairable) ++ " unrepairable."
+
+        unless (null allFailed && null unrepairable) $
+            exitWith (ExitFailure 1)
+
+-- | Check if an issue is for a text file.
+isTextIssue :: Set.Set Path -> Verify.VerifyIssue -> Bool
+isTextIssue textPaths issue = issuePath issue `Set.member` textPaths
+
+-- | Repair text files by restoring from git.
+repairTextFiles :: FilePath -> Maybe Remote -> [Path] -> IO [RepairResult]
+repairTextFiles cwd Nothing paths = repairTextLocal cwd paths
+repairTextFiles cwd (Just remote) paths = do
+    mType <- Device.readRemoteType cwd (remoteName remote)
+    let isFs = maybe False Device.isFilesystemType mType
+    if isFs
+        then repairTextFilesystem remote paths
+        else repairTextCloud remote paths
+
+-- | Restore text files locally: git restore in index repo, then copy to working dir.
+repairTextLocal :: FilePath -> [Path] -> IO [RepairResult]
+repairTextLocal cwd paths = do
+    let indexDir = cwd </> bitIndexPath
+        pathStrs = map unPath paths
+    (code, _, err) <- Git.runGitAt indexDir (["restore", "--"] ++ pathStrs)
+    case code of
+        ExitSuccess -> forM paths $ \p -> do
+            let src = indexDir </> unPath p
+                dst = cwd </> unPath p
+            Platform.createDirectoryIfMissing True (takeDirectory dst)
+            Platform.copyFile src dst
+            pure (Repaired p)
+        _ -> pure [RepairFailed p ("git restore failed: " ++ err) | p <- paths]
+
+-- | Restore text files on a filesystem remote: git restore in remote index repo, then copy.
+repairTextFilesystem :: Remote -> [Path] -> IO [RepairResult]
+repairTextFilesystem remote paths = do
+    let remoteDir = remoteUrl remote
+        indexDir = remoteDir </> bitIndexPath
+        pathStrs = map unPath paths
+    (code, _, err) <- Git.runGitAt indexDir (["restore", "--"] ++ pathStrs)
+    case code of
+        ExitSuccess -> forM paths $ \p -> do
+            let src = indexDir </> unPath p
+                dst = remoteDir </> unPath p
+            Platform.createDirectoryIfMissing True (takeDirectory dst)
+            Platform.copyFile src dst
+            pure (Repaired p)
+        _ -> pure [RepairFailed p ("git restore failed: " ++ err) | p <- paths]
+
+-- | Restore text files on a cloud remote: read from bundle commit, upload via rclone.
+repairTextCloud :: Remote -> [Path] -> IO [RepairResult]
+repairTextCloud remote paths = do
+    let bundleName = bundleForRemote (remoteName remote)
+    mHash <- Git.getHashFromBundle bundleName
+    case mHash of
+        Nothing -> pure [RepairFailed p "no bundle hash available" | p <- paths]
+        Just hash -> forM paths $ \p -> do
+            (code, content, _) <- Git.runGitWithOutput ["show", hash ++ ":" ++ unPath p]
+            case code of
+                ExitSuccess -> do
+                    let tempPath = ".bit" </> "temp_text_repair"
+                    Dir.createDirectoryIfMissing True (takeDirectory tempPath)
+                    writeFile tempPath content
+                    uploadCode <- Transport.copyToRemote tempPath remote (toPosix (unPath p))
+                    safeRemoveTemp tempPath
+                    case uploadCode of
+                        ExitSuccess -> pure (Repaired p)
+                        _ -> pure (RepairFailed p "upload to remote failed")
+                _ -> pure (RepairFailed p "could not read from bundle commit")
+  where
+    safeRemoveTemp filePath = do
+        exists <- Dir.doesFileExist filePath
+        when exists $ Dir.removeFile filePath
 
 -- | Load metadata from all configured remotes (and optionally local) as repair sources.
 loadRepairSources :: FilePath -> Maybe String -> Bool -> IO [RepairSource]
