@@ -55,14 +55,13 @@ When tests fail, analyze which is wrong — the test or the implementation. Fix 
 ### Running Tests
 ```bash
 cabal install --overwrite-policy=always
-shelltest test/cli/specific.test --debug    # Single test
-shelltest test/cli --debug                  # Full suite
+shelltest test/cli/specific.test --debug                       # Single test
+powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # Full suite (parallel, including cloud)
 ```
 
 ### Cloud Remote Tests
 - `gdrive-test` is a configured rclone remote for cloud tests (`test/cli/gdrive-remote.test`)
-- Cloud tests are active in the full test suite — they are not excluded or skipped
-- Cloud tests require network access and are slow; run filesystem remote tests first when iterating
+- Cloud tests are included in the parallel test runner — do NOT exclude them
 
 ## Commit Messages
 
