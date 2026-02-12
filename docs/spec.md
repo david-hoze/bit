@@ -214,7 +214,7 @@ bit/Commands.hs → Bit/Core/*.hs → Internal/Transport.hs → rclone (only her
 | `BitM` | `bit.Types` | `ReaderT BitEnv IO` — the application monad |
 | `MetaContent` | `bit.Internal.Metadata` | Canonical metadata: hash + size, single parser/serializer |
 | `Remote` | `bit.Remote` | Resolved remote: name + URL. Smart constructor, `remoteUrl` for Transport only |
-| `RemoteState` | `bit.Remote` | Remote classification: StateEmpty, StateValidRgit, StateNonRgitOccupied, StateCorruptedRgit, StateNetworkError |
+| `RemoteState` | `bit.Remote` | Remote classification: StateEmpty, StateValidBit, StateNonBitOccupied, StateNetworkError |
 | `FetchResult` | `bit.Remote` | Bundle fetch result: BundleFound, RemoteEmpty, NetworkError |
 | `FetchOutcome` | `bit.Core.Fetch` | UpToDate, Updated { foOldHash, foNewHash }, FetchedFirst, FetchError |
 | `RcloneAction` | `bit.Plan` | Copy, Move, Delete, Swap — concrete rclone operations. Swap is produced by `resolveSwaps`. |
@@ -389,15 +389,16 @@ past the merge).
 
 4. **Default remote selection**:
    - If `branch.main.remote` is set, it's used as the default
-   - If not set and "origin" exists, **`bit push` and `bit fetch` use it as fallback** (git-standard behavior)
-   - If not set and "origin" exists, **`bit pull` requires explicit remote** (no fallback)
+   - If not set, **`bit push` requires explicit remote** (no fallback — matches `git push` with `push.default=simple`)
+   - If not set, **`bit pull` requires explicit remote** (no fallback)
+   - If not set and "origin" exists, **`bit fetch` uses it as fallback** (git-standard behavior — fetch is read-only)
    - If neither upstream nor "origin", commands fail with error suggesting `bit push <remote>` or `bit push -u <remote>`
 
 5. **First pull does NOT set upstream**: When pulling for the first time (unborn branch), `checkoutRemoteAsMain` uses `git checkout -B main --no-track refs/remotes/origin/main`. This prevents automatic upstream tracking setup. Users must use `bit push -u <remote>` to explicitly configure tracking.
 
 6. **Internal git remote vs upstream tracking**: bit's internal git repo has a remote named "origin" (used for fetching refs from bundles), but this is distinct from upstream tracking config (`branch.main.remote`). The internal remote is set up automatically; upstream tracking is never automatic. This distinction is critical: `Git.addRemote` configures the internal git remote (required for bundle operations), while `Git.setupBranchTrackingFor` sets `branch.main.remote` (must only be called from `push -u`).
 
-This makes bit's remote behavior predictable for git users: explicit tracking setup via `-u`, explicit remote selection via argument, sensible defaults when configured, and git-standard fallback to "origin" for push and fetch operations.
+This makes bit's remote behavior predictable for git users: explicit tracking setup via `-u`, explicit remote selection via argument, sensible defaults when configured, and git-standard fallback to "origin" for fetch (read-only) operations only.
 
 ---
 
@@ -948,13 +949,13 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 **Implementation** (`Bit/Commands.hs`):
 
 ```haskell
--- Lightweight env (no scan) — for push and read-only commands (falls back to "origin")
+-- Lightweight env (no scan) — for fetch, verify, and explicit-remote commands (falls back to "origin")
 let baseEnv = do
         mRemote <- getDefaultRemote cwd
         pure $ BitEnv cwd mRemote forceMode
 
--- Lightweight env for pull — does NOT fall back to "origin" (spec requirement)
-let pullFetchEnv = do
+-- Strict upstream env — requires branch.main.remote (for push and pull without explicit remote)
+let upstreamEnv = do
         mRemote <- getUpstreamRemote cwd
         pure $ BitEnv cwd mRemote forceMode
 
@@ -976,12 +977,12 @@ case cmd of
     ("ls-files":rest)     -> Bit.lsFiles rest >>= exitWith
     ["remote", "show"]    -> runBase $ Bit.remoteShow Nothing
     ["verify"]            -> runBase $ Bit.verify Bit.VerifyLocal Bit.PromptRepair concurrency
-    ["push"]              -> runBase Bit.push
+    ["push"]              -> runUpstream Bit.push
 
     -- ── Full scanned env (needs working directory state) ─
     ("add":rest)          -> do scanAndWrite; Bit.add rest >>= exitWith
     ("status":rest)       -> runScanned (Bit.status rest) >>= exitWith
-    ("pull":...)          -> runScannedPullFetch $ Bit.pull Bit.defaultPullOptions
+    ("pull":...)          -> runScannedUpstream $ Bit.pull Bit.defaultPullOptions
     ("fetch":...)         -> runScanned Bit.fetch   -- falls back to "origin" like git
 ```
 
@@ -991,7 +992,7 @@ case cmd of
 2. **Separated concerns** — `baseEnv` builds a lightweight `BitEnv`; `scanAndWrite` handles the expensive scan as a separate `IO ()` action, only called by commands that need it
 3. **Explicit tier assignment** — every command branch explicitly picks: no env, `baseEnv` (via `runBase`), or `scanAndWrite` + `baseEnv` (via `runScanned`)
 4. **Safe by default** — new commands default to not scanning; the scan is an explicit opt-in step
-5. **Push uses lightweight env** — push derives file actions from `git diff --name-status` against the remote HEAD, requiring no working directory scan
+5. **Push requires upstream** — `bit push` (without args) requires `branch.main.remote` to be configured (via `bit push -u`); `bit push <remote>` works without upstream. Push derives file actions from `git diff --name-status` against the remote HEAD, requiring no working directory scan
 
 **Command Classification**:
 
@@ -1001,7 +1002,8 @@ case cmd of
    - `log`, `ls-files` — read git objects only
    - `remote show` — read config/remote state
    - `verify`, `repair` — compare against existing metadata
-   - `push` — derives file actions from `git diff --name-status` (no working directory scan needed)
+   - `push <remote>` — explicit remote, derives file actions from `git diff --name-status`
+   - Note: `push` (no args) uses strict upstream env (not baseEnv) — requires `branch.main.remote`
 
 3. **Full scanned env**: Commands that need current working directory state
    - `status`, `restore`, `checkout` — need working directory state for display/operations
@@ -1217,8 +1219,9 @@ Interactive per-file conflict resolution:
     `bit push -u <remote>` to establish upstream tracking. This includes:
     - `bit remote add` does NOT set upstream (unlike old bit behavior)
     - First pull uses `git checkout -B main --no-track` to prevent auto-tracking
-    - `bit push` and `bit fetch` fall back to "origin" if it exists and no upstream is configured (git-standard behavior)
+    - `bit push` requires explicit remote if no upstream is set (matches `git push` with `push.default=simple`)
     - `bit pull` requires explicit remote if no upstream is set (no fallback)
+    - `bit fetch` falls back to "origin" if it exists and no upstream is configured (git-standard — fetch is read-only)
     This makes bit's remote behavior predictable for git users.
 
 15. **Strict ByteString IO exclusively**: All file operations use strict
@@ -1487,7 +1490,7 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
   already correct after the git operation; rescanning is redundant or harmful)
 - Use `git push` to a filesystem remote (git refuses to update checked-out
   branches; use fetch+merge at the remote instead)
-- Auto-set upstream tracking (`branch.main.remote`) on pull, fetch, or remote
+- Auto-set upstream tracking (`branch.main.remote`) on push, pull, fetch, or remote
   add operations — this must only be done via explicit `bit push -u <remote>`
 - Use lazy IO (`Prelude.readFile`, `writeFile`, `hGetContents`, `Data.ByteString.Lazy`,
   `Data.Text.Lazy.IO`) — causes "file is locked" errors on Windows; use strict

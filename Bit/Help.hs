@@ -41,8 +41,10 @@ printMainHelp = putStr $ unlines
     , ""
     , "File management:"
     , "  rm [options] <path>               Remove files from tracking"
+    , "  mv <src> <dst>                    Move or rename a tracked file"
     , "  restore [options] [--] <path>     Restore working tree files"
     , "  checkout [options] -- <path>      Checkout files from index"
+    , "  reset [options]                   Reset staging area"
     , "  ls-files                          List tracked files"
     , ""
     , "Syncing:"
@@ -198,6 +200,22 @@ commandRegistry =
         , cmdExamples = [HelpItem "bit checkout -- file.txt" "Restore file from index"]
         }
     , CommandHelp
+        { cmdName     = "mv"
+        , cmdSynopsis = "Move or rename a tracked file"
+        , cmdUsage    = "bit mv <src> <dst>"
+        , cmdDesc     = ["Move or rename a file in both the working tree and metadata."]
+        , cmdOptions  = []
+        , cmdExamples = [HelpItem "bit mv old.txt new.txt" "Rename a file"]
+        }
+    , CommandHelp
+        { cmdName     = "reset"
+        , cmdSynopsis = "Reset staging area"
+        , cmdUsage    = "bit reset [options]"
+        , cmdDesc     = ["Reset the staging area. Unstages changes without modifying files."]
+        , cmdOptions  = []
+        , cmdExamples = [HelpItem "bit reset" "Unstage all changes"]
+        }
+    , CommandHelp
         { cmdName     = "ls-files"
         , cmdSynopsis = "List tracked files"
         , cmdUsage    = "bit ls-files"
@@ -212,8 +230,8 @@ commandRegistry =
         , cmdDesc     = [ "Push metadata and files to a remote. Verifies local files match"
                         , "committed metadata before pushing (proof of possession)."
                         , ""
-                        , "If no remote is specified, pushes to the upstream remote or falls"
-                        , "back to 'origin' if it exists." ]
+                        , "If no remote is specified, pushes to the configured upstream remote."
+                        , "Use 'bit push -u <remote>' to set upstream tracking." ]
         , cmdOptions  = [ HelpItem "-u, --set-upstream <remote>" "Push and set upstream tracking"
                         , HelpItem "--force" "Force push (skip ancestry check)"
                         , HelpItem "--force-with-lease" "Force push if remote matches expected state" ]

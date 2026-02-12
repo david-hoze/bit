@@ -73,7 +73,7 @@ cd test\cli\output\work_unicode_remote & bit add . & bit commit -m "Add Unicode 
 # ---- Push to remote (this is where the bug would occur) ----
 # Before the fix, if any file had Unicode in its name, rclone JSON parsing would fail
 # This should succeed without "Failed to parse rclone JSON output" error
-cd test\cli\output\work_unicode_remote & bit push
+cd test\cli\output\work_unicode_remote & bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -123,9 +123,9 @@ cd test\cli\output\work_unicode_remote_b & bit remote add origin ..\fs_unicode_r
 >>> /Remote 'origin' added/
 >>>= 0
 
-# Pull should succeed and parse rclone JSON correctly
+# Pull should succeed and parse rclone JSON correctly (explicit remote, no upstream)
 # Before the fix, this would fail with "Failed to parse rclone JSON output"
-cd test\cli\output\work_unicode_remote_b & bit pull
+cd test\cli\output\work_unicode_remote_b & bit pull origin
 <<<
 >>> /Pull|Updating/
 >>>= 0

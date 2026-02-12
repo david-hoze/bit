@@ -29,7 +29,7 @@ Key types and conventions used throughout this codebase:
 | `Remote` | Opaque type — use `remoteName`/`remoteUrl`, not constructor | `Bit.Remote` |
 | `RemoteTarget` | `TargetCloud` / `TargetDevice` / `TargetLocalPath` | `Bit.Device` |
 | `isFilesystemTarget` | Predicate collapsing `TargetDevice` + `TargetLocalPath` | `Bit.Device` |
-| `RemoteState` | Classification of remote: `StateEmpty` / `StateValidRgit` / ... | `Bit.Remote` |
+| `RemoteState` | Classification of remote: `StateEmpty` / `StateValidBit` / `StateNonBitOccupied` / `StateNetworkError` | `Bit.Remote` |
 | `FetchResult` | `BundleFound FilePath` / `RemoteEmpty` / `NetworkError String` | `Bit.Remote` |
 | `FetchOutcome` | `UpToDate` / `Updated { foOldHash, foNewHash }` / `FetchedFirst` / `FetchError` | `Bit.Core.Fetch` |
 | `PushSeam` | Record of two functions abstracting cloud vs filesystem push transport (ptFetchHistory, ptPushMetadata) | `Bit.Core.Push` |

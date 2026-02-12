@@ -73,8 +73,8 @@ cd test\cli\output\work_merge_a & bit commit -m "Base: add data.bin"
 >>> /\[main|master|files? changed/
 >>>= 0
 
-# ---- Repo A: push base state to shared remote ----
-cd test\cli\output\work_merge_a & bit push
+# ---- Repo A: push base state to shared remote (set upstream) ----
+cd test\cli\output\work_merge_a & bit push -u origin
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
@@ -101,8 +101,8 @@ cd test\cli\output\work_merge_b & bit remote add origin ..\shared_merge_remote
 # Pull handles filesystem remotes and does its own fetch, so we skip separate fetch
 # cd test\cli\work_merge_b & bit fetch
 
-# ---- Repo B: pull (first pull — checkout remote as main) ----
-cd test\cli\output\work_merge_b & bit pull
+# ---- Repo B: pull (first pull — checkout remote as main, explicit remote) ----
+cd test\cli\output\work_merge_b & bit pull origin
 <<<
 >>> /first pull|Checking out|Syncing binaries/
 >>>= 0
@@ -149,13 +149,13 @@ cd test\cli\output\work_merge_a & bit push
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
 
-# ---- B: pull — should merge cleanly (B has no local divergence) ----
+# ---- B: pull — should merge cleanly (B has no local divergence, explicit remote) ----
 cd test\cli\output\work_merge_b & bit fetch
 <<<
 >>> /Fetch complete|Fetching from/
 >>>= 0
 
-cd test\cli\output\work_merge_b & bit pull
+cd test\cli\output\work_merge_b & bit pull origin
 <<<
 >>> /Updating|Merge made|Syncing binaries/
 >>>= 0
@@ -194,8 +194,8 @@ cd test\cli\output\work_merge_b & echo B only file> bonly.txt & bit add bonly.tx
 >>> /\[main|master|files? changed/
 >>>= 0
 
-# ---- B: pull — should merge cleanly since changes don't overlap ----
-cd test\cli\output\work_merge_b & bit pull
+# ---- B: pull — should merge cleanly since changes don't overlap (explicit remote) ----
+cd test\cli\output\work_merge_b & bit pull origin
 <<<
 >>> /Merge made|Syncing binaries|Updating/
 >>>= 0
@@ -226,8 +226,8 @@ cd test\cli\output\work_merge_b & bit status
 # (Mirrors Git's "merge c1 with c2 — content conflict" in t7600)
 # ======================================================================
 
-# ---- Synchronize: B pushes its current state so both are aligned ----
-cd test\cli\output\work_merge_b & bit push
+# ---- Synchronize: B pushes its current state so both are aligned (set upstream) ----
+cd test\cli\output\work_merge_b & bit push -u origin
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
@@ -254,7 +254,7 @@ cd test\cli\output\work_merge_b & echo conflict version B> text.txt & bit add te
 >>> /\[main|master|files? changed/
 >>>= 0
 
-# ---- B: pull — conflict expected; pipe "l" to keep local ----
+# ---- B: pull — conflict expected; pipe "l" to keep local (upstream set) ----
 cd test\cli\output\work_merge_b & bit pull
 <<<
 l
@@ -301,7 +301,7 @@ cd test\cli\output\work_merge_b & echo local loses version> text.txt & bit add t
 >>> /\[main|master|files? changed/
 >>>= 0
 
-# ---- B: pull — conflict expected; pipe "r" to take remote ----
+# ---- B: pull — conflict expected; pipe "r" to take remote (upstream set) ----
 cd test\cli\output\work_merge_b & bit pull
 <<<
 r
@@ -348,7 +348,7 @@ cd test\cli\output\work_merge_b & (echo B multi 1)> file1.txt & (echo B multi 2)
 >>> /\[main|master|files? changed/
 >>>= 0
 
-# ---- B: pull — two conflicts; pipe "l" then "r" ----
+# ---- B: pull — two conflicts; pipe "l" then "r" (upstream set) ----
 cd test\cli\output\work_merge_b & bit pull
 <<<
 l
@@ -400,7 +400,7 @@ cd test\cli\output\work_merge_b & echo B created this> shared_new.txt & bit add 
 >>> /\[main|master|files? changed/
 >>>= 0
 
-# ---- B: pull — add/add conflict; choose "r" (take remote) ----
+# ---- B: pull — add/add conflict; choose "r" (take remote, upstream set) ----
 cd test\cli\output\work_merge_b & bit pull
 <<<
 r

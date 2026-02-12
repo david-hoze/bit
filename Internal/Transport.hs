@@ -95,12 +95,14 @@ remoteFilePath remote relPath =
 -- Dumb transport-level data types
 data TransportItem = TransportItem
     { tiName  :: String
+    , tiPath  :: String   -- relative path from listing root (e.g. ".bit/bit.bundle")
     , tiIsDir :: Bool
     } deriving (Show, Eq)
 
--- Internal type for JSON parsing
+-- Internal type for JSON parsing (Path may be omitted; without -R it equals Name)
 data RcloneItem = RcloneItem 
     { name   :: String
+    , path   :: Maybe String
     , isDir  :: Bool 
     } deriving (Show, Generic)
 
@@ -108,6 +110,7 @@ data RcloneItem = RcloneItem
 instance Aeson.FromJSON RcloneItem where
     parseJSON = Aeson.withObject "RcloneItem" $ \v -> RcloneItem
         <$> v Aeson..: fromString "Name"
+        <*> v Aeson..:? fromString "Path"
         <*> v Aeson..: fromString "IsDir"
 
 -- Detailed copy result for domain-level error handling
@@ -178,11 +181,14 @@ mkdirRemote :: Remote -> FilePath -> IO ExitCode
 mkdirRemote remote relPath =
     (\(code, _, _) -> code) <$> readProcessWithExitCode "rclone" ["mkdir", remoteFilePath remote relPath] ""
 
--- | List remote directory as JSON (at remote root)
--- Returns (ExitCode, ByteString, String) where stdout is strict ByteString for proper UTF-8 handling
+-- | List remote directory as JSON (at remote root).
+-- When maxDepth > 1, uses -R so Path is the full relative path (e.g. ".bit/bit.bundle").
 listRemoteJson :: Remote -> Int -> IO (ExitCode, BS.ByteString, String)
 listRemoteJson remote maxDepth =
-    readProcessBytes "rclone" ["lsjson", "--max-depth", show maxDepth, remoteUrl remote]
+    let args = ["lsjson", "--max-depth", show maxDepth]
+             ++ (if maxDepth > 1 then ["-R"] else [])
+             ++ [remoteUrl remote]
+    in readProcessBytes "rclone" args
 
 -- | List remote directory items (at remote root, parsed)
 listRemoteItems :: Remote -> Int -> IO (Either String [TransportItem])
@@ -196,7 +202,7 @@ listRemoteItems remote maxDepth = do
         ExitSuccess -> do
             case Aeson.decodeStrict outBytes :: Maybe [RcloneItem] of
                 Nothing -> pure (Left "Failed to parse rclone JSON output")
-                Just items -> pure (Right [TransportItem (name item) (isDir item) | item <- items])
+                Just items -> pure (Right [TransportItem (name item) (maybe (name item) id (path item)) (isDir item) | item <- items])
 
 -- | List remote recursively with hashes
 -- Returns (ExitCode, ByteString, String) where stdout is strict ByteString for proper UTF-8 handling
@@ -300,10 +306,10 @@ checkRemote localPath remote mCounter = do
     parseCombinedOutput :: String -> (Char -> [FilePath])
     parseCombinedOutput raw =
         let lines' = lines raw
-            go sym = [ normalise path
+            go sym = [ normalise linePath
                      | line <- lines'
                      , not (null line)
-                     , let (symChar, path) = case span (/= ' ') line of
+                     , let (symChar, linePath) = case span (/= ' ') line of
                                (s, ' ' : r) -> (s, r)
                                (s, _)       -> (s, "")
                      , not (null symChar)

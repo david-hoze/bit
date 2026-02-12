@@ -143,9 +143,8 @@ getUpstreamRemote cwd = do
 -- | Classification of remote state (used by Bit.hs to determine what action to take)
 data RemoteState 
     = StateEmpty                        -- Case A: No files at all
-    | StateValidRgit                    -- Case B: .rgit/ exists and looks okay
-    | StateNonRgitOccupied [String]     -- Case C: Files exist, but no .rgit/ (stores sample filenames)
-    | StateCorruptedRgit String         -- Case D: .rgit/ exists but something is wrong
+    | StateValidBit                     -- Case B: .bit/bit.bundle exists
+    | StateNonBitOccupied [String]      -- Case C: Files exist, but no valid bit repo (sample filenames)
     | StateNetworkError String          -- Network/Auth failure
     deriving (Show, Eq)
 

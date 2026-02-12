@@ -44,8 +44,8 @@ cd test\cli\output\work_progress_a & echo binary content> data1.bin & echo binar
 >>> /\[main|files? changed/
 >>>= 0
 
-# ---- First push: sync all files ----
-cd test\cli\output\work_progress_a & bit push
+# ---- First push: sync all files (set upstream) ----
+cd test\cli\output\work_progress_a & bit push -u origin
 <<<
 >>> /Push complete|Pushing to filesystem remote/
 >>>= 0
@@ -72,8 +72,8 @@ cd test\cli\output\work_progress_b & bit remote add origin ..\fs_remote_progress
 >>> /Remote 'origin' added/
 >>>= 0
 
-# ---- Pull files from remote ----
-cd test\cli\output\work_progress_b & bit pull
+# ---- Pull files from remote (explicit remote, no upstream) ----
+cd test\cli\output\work_progress_b & bit pull origin
 <<<
 >>> /Pull|Checking out/
 >>>= 0
@@ -111,8 +111,8 @@ cd test\cli\output\work_progress_b & echo modified> data2.bin & bit add data2.bi
 >>> /\[main|files? changed/
 >>>= 0
 
-# Pull changes from remote (should merge)
-cd test\cli\output\work_progress_b & bit pull
+# Pull changes from remote (should merge, explicit remote)
+cd test\cli\output\work_progress_b & bit pull origin
 <<<
 >>> /Pull|Merging|Updating/
 >>>= 0

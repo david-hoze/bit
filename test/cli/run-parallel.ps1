@@ -16,7 +16,7 @@ $testDir = "test\cli"
 $serial = @("remote-flag.test", "remote-targeted.test")
 
 function Run-Shelltest($file) {
-    $output = shelltest $file 2>&1 | Out-String
+    $output = shelltest --debug $file 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
     $passed = 0; $failed = 0
     if ($output -match "Passed\s+(\d+)") { $passed = [int]$Matches[1] }
@@ -32,7 +32,7 @@ function Run-Shelltest($file) {
 
 # Run global cleanup first
 Write-Host "Running global cleanup..." -ForegroundColor Cyan
-$cleanupResult = shelltest "$testDir\000-cleanup.test" 2>&1
+$cleanupResult = shelltest --debug "$testDir\000-cleanup.test" 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Cleanup failed:" -ForegroundColor Red
     Write-Host $cleanupResult
@@ -56,7 +56,7 @@ $jobs = $parallelTests | ForEach-Object {
     $file = $_.FullName
     Start-Job -ScriptBlock {
         param($file)
-        $output = shelltest $file 2>&1 | Out-String
+        $output = shelltest --debug $file 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
         $passed = 0; $failed = 0
         if ($output -match "Passed\s+(\d+)") { $passed = [int]$Matches[1] }

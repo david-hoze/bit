@@ -38,7 +38,7 @@ cd test\cli\output\work_swap_a & echo content-of-alpha> alpha.txt & echo content
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_swap_a & bit push
+cd test\cli\output\work_swap_a & bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0

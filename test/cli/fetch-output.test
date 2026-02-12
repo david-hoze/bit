@@ -50,7 +50,7 @@ cd test\cli\output\work_fetch_a & echo initial> file1.txt & bit add file1.txt & 
 >>> /\[master|main|file changed/
 >>>= 0
 
-cd test\cli\output\work_fetch_a & bit push
+cd test\cli\output\work_fetch_a & bit push -u origin
 <<<
 >>> /Metadata push complete\.|Remote check passed/
 >>>= 0

@@ -49,11 +49,11 @@ cd test\cli\output\upstream-local & echo hello> test.txt & bit add test.txt & bi
 >>> /\[master|main|files? changed/
 >>>= 0
 
-# Test 1: bit push without upstream but with "origin" uses origin as fallback (git behavior)
+# Test 1: bit push without upstream should fail (requires explicit -u or remote name)
 cd test\cli\output\upstream-local & bit push
 <<<
->>> /Push complete/
->>>= 0
+>>>2 /fatal: No upstream configured/
+>>>= 1
 
 # Test 2: bit push <remote> should work without setting upstream
 cd test\cli\output\upstream-local & bit push origin
@@ -166,7 +166,7 @@ cd test\cli\output\upstream-local3 & git -C .bit\index config --get branch.main.
 myremote
 >>>= 0
 
-# Test 8: bit push fails with clear error when no upstream and no origin
+# Test 8: bit push fails with clear error when no upstream (even with non-origin remote)
 rmdir /s /q test\cli\output\upstream-local4 2>nul & mkdir test\cli\output\upstream-local4 & cd test\cli\output\upstream-local4 & bit init
 <<<
 >>> /.*[Ii]nitialized.*/

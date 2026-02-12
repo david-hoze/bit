@@ -54,7 +54,7 @@ cd test\cli\output\work_repair & echo hello> greet.txt & echo binarydata> data.b
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_repair & bit push
+cd test\cli\output\work_repair & bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0

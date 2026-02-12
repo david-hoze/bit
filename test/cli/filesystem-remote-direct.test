@@ -25,7 +25,7 @@ cd test\cli\output\work_direct & echo test content> file.txt & bit add file.txt 
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_direct & bit push
+cd test\cli\output\work_direct & bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -59,7 +59,7 @@ cd test\cli\output\work_direct & bit push
 >>>2 /error.*Remote history has diverged/
 >>>= 1
 
-# Local pull should work (merges remote changes)
+# Local pull should work (upstream set by push -u)
 cd test\cli\output\work_direct & bit pull
 <<<
 >>> /Pull|Merging|Updating/

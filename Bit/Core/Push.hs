@@ -184,7 +184,7 @@ push = withRemote $ \remote -> do
                 initializeRemoteRepoAt (RemotePath remotePath)
             executePush seam remote Nothing
 
-        StateValidRgit -> do
+        StateValidBit -> do
             liftIO $ putStrLn "Remote is a bit repo. Checking history..."
             -- Capture pre-fetch tracking hash BEFORE ptFetchHistory.
             -- ptFetchHistory updates the tracking ref as a side effect of git fetch.
@@ -196,13 +196,10 @@ push = withRemote $ \remote -> do
                 -- No remote commits yet (initialized but empty) — treat as first push
                 Nothing -> executePush seam remote Nothing
 
-        StateNonRgitOccupied samples -> handleNonRgit seam remote samples
+        StateNonBitOccupied samples -> handleNonBit seam remote samples
 
         StateNetworkError err ->
             liftIO $ hPutStrLn stderr $ "Aborting: Network error -> " ++ err
-
-        StateCorruptedRgit msg ->
-            liftIO $ hPutStrLn stderr $ "Aborting: [X] Corrupted remote -> " ++ msg
 
 -- ============================================================================
 -- Push state handlers
@@ -256,8 +253,8 @@ processExistingRemote remote seam preHash mRemoteHash = do
                     exitWith (ExitFailure 1)
 
 -- | Handle non-bit-occupied remote. Only --force allows overwriting.
-handleNonRgit :: PushSeam -> Remote -> [String] -> BitM ()
-handleNonRgit seam remote samples = do
+handleNonBit :: PushSeam -> Remote -> [String] -> BitM ()
+handleNonBit seam remote samples = do
     fMode <- asks envForceMode
     case fMode of
         Force -> do

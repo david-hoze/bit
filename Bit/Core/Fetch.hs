@@ -15,6 +15,7 @@ module Bit.Core.Fetch
     ) where
 
 import System.FilePath ((</>), takeDirectory)
+import Data.List (isPrefixOf)
 import Control.Monad (when, void)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
@@ -102,18 +103,32 @@ printFetchBanner fromName refLine = do
     hPutStrLn stderr $ "From " ++ fromName
     hPutStrLn stderr $ " * [new branch]      main       -> " ++ refLine
 
--- | Classify remote state (empty, valid bit, non-bit, corrupted, network error)
+-- | Classify remote state (empty, valid bit, non-bit, network error)
 -- This is domain logic: it knows what .bit/ means and interprets remote contents
 classifyRemoteState :: Remote -> IO RemoteState
 classifyRemoteState remote =
-    either StateNetworkError interpretRemoteItems <$> Transport.listRemoteItems remote 1
+    either StateNetworkError interpretRemoteItems <$> Transport.listRemoteItems remote 2
 
--- | Pure interpretation of remote items into domain state
+-- | Normalize path for comparison (rclone may return backslashes on Windows)
+normalizePath :: String -> String
+normalizePath = map (\c -> if c == '\\' then '/' else c)
+
+-- | Pure interpretation of remote items into domain state.
+-- Valid bit repo: cloud has .bit/bit.bundle; filesystem has .bit/index (no bundle file).
+-- Also accept ".bit" with any ".bit/..." path (covers filesystem when Path format varies).
 interpretRemoteItems :: [Transport.TransportItem] -> RemoteState
 interpretRemoteItems items
     | null items = StateEmpty
-    | ".bit" `elem` map Transport.tiName items = StateValidRgit
-    | otherwise = StateNonRgitOccupied (take 3 (map Transport.tiName items))
+    | hasValidBitRepo paths = StateValidBit
+    | otherwise = StateNonBitOccupied (take 3 paths)
+  where
+    paths = map (normalizePath . Transport.tiPath) items
+    names = map (normalizePath . Transport.tiName) items
+    hasValidBitRepo ps =
+        any (`elem` ps) [".bit/bit.bundle", ".bit/index"]
+        || any (".bit/" `isPrefixOf`) ps
+        || ".bit" `elem` ps
+        || ".bit" `elem` names  -- top-level .bit by name (Path may differ)
 
 -- | Download the remote bundle for comparison. Returns temp bundle path or error.
 -- This is domain logic: it knows about .bit/ layout and bundle files
@@ -140,7 +155,7 @@ fetchRemoteBundle remote = do
             hPutStrLn stderr "Aborting: Remote is empty. Run 'bit push' first."
             pure Nothing
         
-        StateNonRgitOccupied items -> do
+        StateNonBitOccupied items -> do
             let itemList = unlines $ map ("    " ++) items
             hPutStrLn stderr $ unlines
                 [ "fatal: The remote path is not empty and not a bit repository."
@@ -153,7 +168,7 @@ fetchRemoteBundle remote = do
                 ]
             pure Nothing
 
-        StateValidRgit -> do
+        StateValidBit -> do
             fetchResult <- fetchBundle remote
             case fetchResult of
                 BundleFound bPath -> pure $ Just bPath
@@ -169,11 +184,6 @@ fetchRemoteBundle remote = do
         StateNetworkError err ->
             do
                 hPutStrLn stderr $ "Aborting: Network error -> " ++ err
-                pure Nothing
-
-        StateCorruptedRgit msg ->
-            do
-                hPutStrLn stderr $ "Aborting: [X] Corrupted remote -> " ++ msg
                 pure Nothing
 
 saveFetchedBundle :: Remote -> Maybe FilePath -> IO FetchOutcome

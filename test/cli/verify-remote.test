@@ -28,7 +28,7 @@ cd test\cli\output\work_vr & echo hello> greet.txt & echo binarydata> data.bin &
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_vr & bit push
+cd test\cli\output\work_vr & bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
