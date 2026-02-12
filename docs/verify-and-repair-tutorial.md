@@ -51,8 +51,9 @@ $ bit verify
   Actual:   md5:9f8e7d6c5b4a...
 Checked 47 files. 1 issues found.
 1 issues found. Repair? [y/N] y
+Searching 1 source(s): 'origin'
 Repairing 1 file(s)...
-  (1/1) data/model.bin — 120.0 MB / 120.0 MB (100%)
+  (1/1) data/model.bin from 'origin' — 120.0 MB / 120.0 MB (100%)
   [REPAIRED] data/model.bin
 ```
 
@@ -123,8 +124,9 @@ Verifying local files...
 Collecting files... 47 found.
 Checking cache... 46 cached, 1 need hashing (120.0 MB).
 Comparing against committed metadata...
+Searching 1 source(s): 'origin'
 Repairing 1 file(s)...
-  (1/1) data/model.bin — 120.0 MB / 120.0 MB (100%)
+  (1/1) data/model.bin from 'origin' — 120.0 MB / 120.0 MB (100%)
   [REPAIRED] data/model.bin
 
 1 repaired, 0 failed, 0 unrepairable.
@@ -153,6 +155,14 @@ When repairing a target, bit searches **all other sources** for the correct file
 
 - **`bit repair`** (local target): searches all configured remotes
 - **`bit --remote origin repair`** (remote target): searches local files + all other remotes
+
+bit logs which sources it will search before planning repairs:
+```
+Searching 2 source(s): local, 'gdrive'
+```
+
+The progress bar for each file includes the source name, so you know where the
+correct copy is being fetched from.
 
 ### When Files Can't Be Repaired
 

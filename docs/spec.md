@@ -920,8 +920,9 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 **Repair** uses `rcloneCopyto` (single-file `rclone copyto`) for per-file progress:
 - Each file is copied individually with `--use-json-log --stats 0.5s -v`
 - JSON stats on stderr are parsed to update an `IORef Integer` byte counter
-- A reporter thread displays live progress: `(1/3) file.bin — 45.2 MB / 120.0 MB (37%)`
-- Remote-to-remote repairs use two legs (download to temp, upload from temp) with a pump thread that offsets the second leg's byte counter by the file size, giving smooth 0→100% across both legs
+- A reporter thread displays live progress: `(1/3) file.bin from 'gdrive' — 45.2 MB / 120.0 MB (37%)`
+- The label includes the source name so the user knows where the file is coming from
+- Remote-to-remote repairs use a single `rclone copyto` call — rclone handles the routing between remotes (e.g., downloading from cloud and writing directly to the destination)
 
 **Design Notes**:
 - Complies with project's strict IO rules: no lazy `ByteString`, no lazy IO
@@ -1069,7 +1070,10 @@ When issues are found:
 - `verify` prompts "Repair? [y/N]" on TTY, skips in non-interactive mode
 - `repair` repairs automatically without prompting
 
-Repair sources: local repo + all other configured remotes. Each source's metadata is loaded according to its type — filesystem remotes load from their `.bit/index/` directory, cloud remotes from their bundle.
+Repair sources: local repo + all other configured remotes. Each source's metadata is loaded according to its type — filesystem remotes load from their `.bit/index/` directory, cloud remotes from their bundle. Before planning repairs, bit logs the sources it will search:
+```
+Searching 2 source(s): local, 'gdrive'
+```
 
 ### `bit repair`
 
@@ -1077,12 +1081,12 @@ Same as `bit verify` but repairs automatically without prompting. Searches all c
 
 **Content-addressable repair**: Files are matched by (hash, size), not by path. If `photos/song.mp3` is corrupted locally but `backup/song_copy.mp3` on a remote has the same hash and size, it will be used as the repair source.
 
-**Per-file progress**: Each repair copy shows live progress on TTY:
+**Per-file progress**: Each repair copy shows live progress on TTY, including the source name:
 ```
 Repairing 3 file(s)...
-  (1/3) data/model.bin — 45.2 MB / 120.0 MB (37%)
+  (1/3) data/model.bin from 'gdrive' — 45.2 MB / 120.0 MB (37%)
 ```
-Repair uses `rclone copyto` with `--use-json-log` for byte-level progress parsing. Remote-to-remote repairs (source remote → target remote) go through a temp file with two legs; the progress bar shows both legs as a single 0–100% range.
+Repair uses `rclone copyto` with `--use-json-log` for byte-level progress parsing. Remote-to-remote repairs (source remote → target remote) use a single `rclone copyto` call — rclone handles the routing directly.
 
 ### `bit fsck`
 
