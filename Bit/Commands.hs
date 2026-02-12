@@ -241,6 +241,11 @@ runCommand args = do
         ["repair"]                      -> runBase $ Bit.verify Bit.VerifyLocal Bit.AutoRepair concurrency
 
         ("rm":rest)                     -> runBase (Bit.rm rest) >>= exitWith
+        ("mv":rest)                     -> Bit.mv rest >>= exitWith
+        ("reset":rest)                  -> Bit.reset rest >>= exitWith
+        ("branch":rest)                 -> Bit.branch rest >>= exitWith
+        ["merge", "--continue"]         -> runScanned Bit.mergeContinue
+        ("merge":rest)                  -> Bit.merge rest >>= exitWith
 
         -- ── Full scanned env (needs working directory state) ─
         ("add":rest)                    -> do
@@ -276,7 +281,6 @@ runCommand args = do
         ["fetch"]                       -> runScanned Bit.fetch
         ["fetch", name]                 -> runScannedWithRemote name Bit.fetch
         
-        ["merge", "--continue"]         -> runScanned Bit.mergeContinue
         _                               -> do
             hPutStrLn stderr $ "bit: '" ++ unwords cmd ++ "' is not a bit command. See 'bit help'."
             exitWith (ExitFailure 1)
