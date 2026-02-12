@@ -211,7 +211,7 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 | `Hash (a :: HashAlgo)` | `bit.Types` | Phantom-typed hash — compiler distinguishes MD5 vs SHA256 |
 | `Path` | `bit.Types` | Domain path (bit-tracked file path). `newtype` over `FilePath` to prevent transposition bugs. |
 | `FileEntry` | `bit.Types` | Tracked `Path` + `EntryKind` (hash, size, `ContentType`) |
-| `BitEnv` | `bit.Types` | Reader environment: cwd, local files, remote, force flags |
+| `BitEnv` | `bit.Types` | Reader environment: cwd, remote, force flags |
 | `BitM` | `bit.Types` | `ReaderT BitEnv IO` — the application monad |
 | `MetaContent` | `bit.Internal.Metadata` | Canonical metadata: hash + size, single parser/serializer |
 | `Remote` | `bit.Remote` | Resolved remote: name + URL. Smart constructor, `remoteUrl` for Transport only |
@@ -251,9 +251,16 @@ The pure middle (`diff >>> plan >>> resolveSwaps`) is factored into `bit.Pipelin
 
 ```haskell
 diffAndPlan :: [FileEntry] -> [FileEntry] -> [RcloneAction]  -- pure core
-pushSyncFiles :: [FileEntry] -> [FileEntry] -> [RcloneAction]
 pullSyncFiles :: [FileEntry] -> [FileEntry] -> [RcloneAction]
 ```
+
+**Push** uses a different approach: instead of scanning remote files and diffing
+file lists, it derives actions directly from the git metadata diff
+(`getDiffNameStatus remoteHash "HEAD"`). This avoids the expensive
+`rclone lsjson --hash --recursive` scan, which would read every byte on the
+remote just to plan the transfer. The `NameStatusChange` entries map directly
+to `RcloneAction` (Added/Modified → Copy, Deleted → Delete, Renamed → Move),
+followed by `resolveSwaps` for swap detection.
 
 ### Working Tree Sync: The `oldHead` Pattern
 
@@ -301,7 +308,7 @@ files go through the rclone batch.
 - `applyMergeToWorkingDir`: Merge pull — diffs oldHead..newHead, processes deletions, copies text from index, batches binary via `rcloneCopyFiles`
 
 **Push** (Bit.Core.Push):
-- `syncRemoteFiles`: Partitions Copy actions from Move/Delete/Swap. Copies are batched into a single `rcloneCopyFiles` call; non-copies are executed individually. Works for both cloud and filesystem remotes.
+- `syncRemoteFiles`: Derives file actions from `git diff -M --name-status` between the remote tracking hash and HEAD (no remote scan needed). Partitions Copy actions from Move/Delete/Swap. Copies are batched into a single `rcloneCopyFiles` call; non-copies are executed individually. Works for both cloud and filesystem remotes.
 
 Both cloud and filesystem paths use the same functions parameterized by a remote
 root string (`remoteUrl remote`). rclone handles both local-to-local and
@@ -504,8 +511,8 @@ data PushSeam = PushSeam
     }
 ```
 
-Everything else is shared: `classifyRemoteState`, `syncRemoteFiles` (rclone-based
-file sync), ancestry checks, `--force`/`--force-with-lease`, verification.
+Everything else is shared: `classifyRemoteState`, `syncRemoteFiles` (git-diff-based
+file sync — no remote scan), ancestry checks, `--force`/`--force-with-lease`, verification.
 
 **Cloud seam** (`mkCloudSeam`): Downloads/uploads git bundles via rclone. Bundles
 are stored per-remote at `.bit/index/.git/bundles/<name>.bundle` so `bit status`
@@ -521,7 +528,7 @@ via `git pull --ff-only` at the remote side.
 3. **Classify remote state** via rclone (`classifyRemoteState`)
 4. **Fetch remote history** via seam (`ptFetchHistory`)
 5. **Ancestry/force checks** (`processExistingRemote`)
-6. **Sync files** via rclone (`syncRemoteFiles`) — same for both
+6. **Sync files** via git diff + rclone (`syncRemoteFiles`) — derives actions from `getDiffNameStatus`, no remote scan
 7. **Push metadata** via seam (`ptPushMetadata`)
 8. **Update tracking ref** (`Git.updateRemoteTrackingBranchToHead`) — same for both
 
@@ -909,7 +916,7 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 - Human-readable byte formatting: `formatBytes` (B, KB, MB, GB, TB with 1 decimal place)
 
 **All remotes** (cloud and filesystem) use `rcloneCopyFiles` for binary sync:
-- **Push**: `syncRemoteFiles` (unified, works for both cloud and filesystem)
+- **Push**: `syncRemoteFiles` (unified, derives actions from git metadata diff, executes via rclone)
 - **Pull**: `syncAllFilesFromHEAD`, `applyMergeToWorkingDir` (both, parameterized by remote root)
 - Progress: counts binary files only (text files are small and fast via index copy)
 - Byte progress: parsed from rclone's `--use-json-log` output on stderr (stats block)
@@ -933,21 +940,19 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 
 **Solution**: Invert the logic — scan on demand, not by default. Commands are now classified into three tiers, with each command explicitly declaring its needs:
 
-**Implementation** (`bit/Commands.hs`):
+**Implementation** (`Bit/Commands.hs`):
 
 ```haskell
 -- Lightweight env (no scan) — for read-only commands
 let baseEnv = do
         mRemote <- getDefaultRemote cwd
-        return $ BitEnv cwd [] mRemote isForce isForceWithLease
+        pure $ BitEnv cwd mRemote forceMode
 
--- Full env (scan + bitignore sync + metadata write) — for write commands
-let scannedEnv = do
+-- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
+let scanAndWrite = do
         syncBitignoreToIndex cwd
         localFiles <- Scan.scanWorkingDir cwd
         Scan.writeMetadataFiles cwd localFiles
-        mRemote <- getDefaultRemote cwd
-        return $ BitEnv cwd localFiles mRemote isForce isForceWithLease
 
 case cmd of
     -- ── No env needed ────────────────────────────────────
@@ -955,44 +960,46 @@ case cmd of
     ["remote", "add", ...] -> Bit.remoteAdd name url
     ["fsck"]              -> Bit.fsck cwd ...
     ["merge", "--abort"]  -> Bit.mergeAbort
-    
+
     -- ── Lightweight env (no scan) ────────────────────────
     ("log":rest)          -> Bit.log rest >>= exitWith
     ("ls-files":rest)     -> Bit.lsFiles rest >>= exitWith
-    ["remote", "show"]    -> baseEnv >>= \env -> runBitM env $ Bit.remoteShow Nothing
-    ["verify"]            -> baseEnv >>= \env -> runBitM env $ Bit.verify Bit.VerifyLocal ...
-    
+    ["remote", "show"]    -> runBase $ Bit.remoteShow Nothing
+    ["verify"]            -> runBase $ Bit.verify Bit.VerifyLocal concurrency
+    ["push"]              -> runBase Bit.push
+
     -- ── Full scanned env (needs working directory state) ─
-    ("add":rest)          -> do _ <- scannedEnv; Bit.add rest >>= exitWith
-    ("status":rest)       -> scannedEnv >>= \env -> runBitM env (Bit.status rest) >>= exitWith
-    ("push":...)          -> scannedEnv >>= \env -> runBitM env Bit.push
-    ("pull":...)          -> scannedEnv >>= \env -> runBitM env $ Bit.pull ...
+    ("add":rest)          -> do scanAndWrite; Bit.add rest >>= exitWith
+    ("status":rest)       -> runScanned (Bit.status rest) >>= exitWith
+    ("pull":...)          -> runScanned $ Bit.pull Bit.defaultPullOptions
+    ("fetch":...)         -> runScanned Bit.fetch
 ```
 
 **Key Changes**:
 
 1. **No `skipScan` variable** — it no longer exists
-2. **Lazy env builders** — `baseEnv` and `scannedEnv` are `IO BitEnv` actions, only executed when called
-3. **Explicit tier assignment** — every command branch explicitly picks: no env, `baseEnv`, or `scannedEnv`
-4. **Safe by default** — new commands default to not scanning (if you forget to call `scannedEnv`, you just get an empty `localFiles` list, which is harmless)
-5. **Bitignore sync colocated with scan** — `syncBitignoreToIndex` only runs when `scannedEnv` is called, keeping related concerns together
+2. **Separated concerns** — `baseEnv` builds a lightweight `BitEnv`; `scanAndWrite` handles the expensive scan as a separate `IO ()` action, only called by commands that need it
+3. **Explicit tier assignment** — every command branch explicitly picks: no env, `baseEnv` (via `runBase`), or `scanAndWrite` + `baseEnv` (via `runScanned`)
+4. **Safe by default** — new commands default to not scanning; the scan is an explicit opt-in step
+5. **Push uses lightweight env** — push derives file actions from `git diff --name-status` against the remote HEAD, requiring no working directory scan
 
 **Command Classification**:
 
 1. **No env needed**: Commands that operate on simple config or don't need any environment (`init`, `remote add`, `fsck`, `merge --abort`)
 
-2. **Lightweight env (no scan)**: Read-only commands that read git history, index, or config without needing working directory state
+2. **Lightweight env (no scan)**: Commands that read git history, config, or derive actions from git metadata
    - `log`, `ls-files` — read git objects only
    - `remote show`, `remote repair` — read config/remote state
    - `verify`, `verify --remote` — compare against existing metadata
+   - `push` — derives file actions from `git diff --name-status` (no working directory scan needed)
 
 3. **Full scanned env**: Commands that need current working directory state
-   - `status`, `restore`, `checkout` — need `localFiles` from env
-   - `add`, `commit`, `diff` — need scan for side effects (metadata write), even though they don't use `localFiles` directly
-   - `push`, `pull`, `fetch` — need working directory state for sync
+   - `status`, `restore`, `checkout` — need working directory state for display/operations
+   - `add`, `commit`, `diff` — need scan for side effects (metadata write)
+   - `pull`, `fetch` — need working directory state for sync
    - `merge --continue` — needs working directory state to resolve conflicts
 
-**Performance Impact**: In large repositories, read-only commands now have instant response times. The old design would scan 860 files for `bit remote add`, the new design scans zero.
+**Performance Impact**: In large repositories, read-only commands now have instant response times. The old design would scan 860 files for `bit remote add`, the new design scans zero. Push performance is dramatically improved — it no longer scans the remote via `rclone lsjson --hash --recursive`, instead deriving file actions from git metadata diffs with zero network I/O for planning.
 
 ---
 
@@ -1285,7 +1292,7 @@ Interactive per-file conflict resolution:
 | `bit/Concurrency.hs` | Bounded parallelism helpers: concurrency level calculation, sequential/parallel mode switching |
 | `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
 | `bit/Plan.hs` | Pure plan: `planAction` (GitDiff → RcloneAction), `resolveSwaps` (detects pairwise Move swaps → Swap) |
-| `bit/Pipeline.hs` | Composed pipeline: diffAndPlan (applies resolveSwaps), pushSyncFiles, pullSyncFiles |
+| `bit/Pipeline.hs` | Composed pipeline: diffAndPlan (applies resolveSwaps), pullSyncFiles. Push uses git metadata diff directly instead of Pipeline. |
 | `bit/Verify.hs` | Local and remote verification; scan + git diff approach for local (compares against committed metadata); unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
 | `bit/Fsck.hs` | Passthrough to `git fsck` on `.bit/index` metadata repository |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
