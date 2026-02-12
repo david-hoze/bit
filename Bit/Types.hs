@@ -66,7 +66,6 @@ data ForceMode
 
 data BitEnv = BitEnv
     { envCwd            :: FilePath
-    , envLocalFiles     :: [FileEntry]
     , envRemote         :: Maybe Remote
     , envForceMode      :: ForceMode
     }

@@ -176,15 +176,13 @@ runCommand args = do
     -- Lightweight env (no scan) — for read-only commands
     let baseEnv = do
             mRemote <- getDefaultRemote cwd
-            pure $ BitEnv cwd [] mRemote forceMode
+            pure $ BitEnv cwd mRemote forceMode
 
-    -- Full env (scan + bitignore sync + metadata write) — for write commands
-    let scannedEnv = do
+    -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
+    let scanAndWrite = do
             syncBitignoreToIndex cwd
             localFiles <- Scan.scanWorkingDir cwd
             Scan.writeMetadataFiles cwd localFiles
-            mRemote <- getDefaultRemote cwd
-            pure $ BitEnv cwd localFiles mRemote forceMode
 
     -- Repo existence check (skip for init)
     let needsRepo = cmd /= ["init"]
@@ -193,17 +191,18 @@ runCommand args = do
         exitWith (ExitFailure 1)
 
     -- Helper functions for running commands
-    let runScanned action = scannedEnv >>= \env -> runBitM env action
+    let runScanned action = do { scanAndWrite; env <- baseEnv; runBitM env action }
     let runBase action = baseEnv >>= \env -> runBitM env action
     let runScannedWithRemote name action = do
-            env <- scannedEnv
+            scanAndWrite
+            env <- baseEnv
             mNamedRemote <- resolveRemote cwd name
             runBitM env { envRemote = mNamedRemote } action
     let runBaseWithRemote name action = do
             env <- baseEnv
             mNamedRemote <- resolveRemote cwd name
             runBitM env { envRemote = mNamedRemote } action
-    let runPushWithUpstream name = scannedEnv >>= \env -> pushWithUpstream env cwd name
+    let runPushWithUpstream name = baseEnv >>= \env -> pushWithUpstream env cwd name
     let optsAcceptRemote = Bit.PullOptions Bit.PullAcceptRemote
     let optsManualMerge = Bit.PullOptions Bit.PullManualMerge
 
@@ -229,23 +228,23 @@ runCommand args = do
 
         -- ── Full scanned env (needs working directory state) ─
         ("add":rest)                    -> do
-            void scannedEnv
+            scanAndWrite
             Bit.add rest >>= exitWith
         ("commit":rest)                 -> do
-            void scannedEnv
+            scanAndWrite
             Bit.commit rest >>= exitWith
         ("diff":rest)                   -> do
-            void scannedEnv
+            scanAndWrite
             Bit.diff rest >>= exitWith
         ("status":rest)                 -> runScanned (Bit.status rest) >>= exitWith
         ("restore":rest)                -> runScanned (Bit.restore rest) >>= exitWith
         ("checkout":rest)               -> runScanned (Bit.checkout rest) >>= exitWith
         
-        -- push
-        ["push"]                        -> runScanned Bit.push
+        -- push (no scan needed — uses git metadata diff)
+        ["push"]                        -> runBase Bit.push
         ["push", "-u", name]            -> runPushWithUpstream name
         ["push", "--set-upstream", name] -> runPushWithUpstream name
-        ["push", name]                  -> runScannedWithRemote name Bit.push
+        ["push", name]                  -> runBaseWithRemote name Bit.push
         
         -- pull
         ["pull"]                        -> runScanned $ Bit.pull Bit.defaultPullOptions

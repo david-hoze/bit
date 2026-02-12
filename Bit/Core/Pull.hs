@@ -30,7 +30,6 @@ import System.Exit (ExitCode(..), exitWith)
 import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (bitIndexPath, bundleForRemote)
-import qualified Bit.Scan as Scan
 import qualified Bit.Verify as Verify
 import qualified Bit.Conflict as Conflict
 import qualified Bit.Remote.Scan as Remote.Scan
@@ -41,7 +40,7 @@ import Control.Exception (try, SomeException, throwIO)
 import Bit.Utils (toPosix, filterOutBitPaths, trimGitOutput, shortRefDisplay)
 import Data.Maybe (maybeToList)
 import Bit.Remote (Remote, remoteName, remoteUrl, RemotePath(..))
-import Bit.Types (BitM, BitEnv(..), ForceMode(..), Hash, HashAlgo(..), EntryKind(..), syncHash, runBitM, unPath)
+import Bit.Types (BitM, BitEnv(..), ForceMode(..), Hash, HashAlgo(..), FileEntry(..), EntryKind(..), syncHash, runBitM, unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
@@ -146,8 +145,7 @@ filesystemPull cwd remote opts = do
                 dieRemoteVerifyFailed "hint: Run 'bit verify' in the remote repo to see all mismatches."
 
     -- Create a minimal BitEnv to call the shared logic
-    localFiles <- Scan.scanWorkingDir cwd
-    let env = BitEnv cwd localFiles (Just remote) NoForce
+    let env = BitEnv cwd (Just remote) NoForce
 
     -- Delegate to the unified path
     case pullMode opts of

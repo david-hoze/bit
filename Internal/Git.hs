@@ -504,7 +504,7 @@ parseNameStatusOutput = mapMaybe parseLine . lines
 -- | Get the list of file changes between two commits.
 getDiffNameStatus :: String -> String -> IO [NameStatusChange]
 getDiffNameStatus oldHead newHead = do
-    (code, out, _) <- runGitWithOutput ["diff", "--name-status", oldHead, newHead]
+    (code, out, _) <- runGitWithOutput ["diff", "-M", "--name-status", oldHead, newHead]
     pure $ case code of
         ExitSuccess -> parseNameStatusOutput out
         _ -> []

@@ -74,24 +74,13 @@ cd test\cli\output\work_gdrive_b & bit verify --remote
 >>> /Missing:|issues found|ERROR|\[OK\] All files match|Verifying 0/
 >>>= 0
 
-# --- Restore remote: push from A again (re-syncs files + bundle) ---
-cd test\cli\output\work_gdrive_a & bit push
+# --- Restore remote: repair from A (push won't re-upload externally-deleted files) ---
+cd test\cli\output\work_gdrive_a & bit remote repair
 <<<
->>> /Metadata push complete\.|Remote check passed|Pulling changes|up to date/
+>>> /repaired|REPAIRED|Nothing to repair/
 >>>= 0
 
-# --- B: fetch and pull to get restored state ---
-cd test\cli\output\work_gdrive_b & bit fetch
-<<<
->>>
->>>= 0
-
-cd test\cli\output\work_gdrive_b & bit pull
-<<<
->>> /up to date|Merge made|Syncing binaries|first pull/
->>>= 0
-
-# --- B: verify --remote should be clean again ---
+# --- B: verify --remote should be clean again after repair ---
 cd test\cli\output\work_gdrive_b & bit verify --remote
 <<<
 >>> /\[OK\] All.*files match|Checked.*files/

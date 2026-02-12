@@ -20,13 +20,11 @@ import qualified Internal.Git as Git
 import qualified Internal.Transport as Transport
 import Internal.Config (bundleForRemote, bundleCwdPath, fromCwdPath, bundleGitRelPath, fromGitRelPath)
 import Bit.Utils (toPosix)
-import qualified Bit.Pipeline as Pipeline
-import qualified Bit.Remote.Scan as Remote.Scan
 import qualified Data.List as List
 import System.IO (stderr, hPutStrLn)
 import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), displayRemote, RemotePath(..))
-import Bit.Plan (RcloneAction(..))
-import Bit.Types (BitM, BitEnv(..), ForceMode(..), unPath)
+import Bit.Plan (RcloneAction(..), resolveSwaps)
+import Bit.Types (BitM, BitEnv(..), ForceMode(..), Path(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
@@ -184,7 +182,7 @@ push = withRemote $ \remote -> do
                 let remotePath = remoteUrl remote
                 Platform.createDirectoryIfMissing True remotePath
                 initializeRemoteRepoAt (RemotePath remotePath)
-            executePush seam remote
+            executePush seam remote Nothing
 
         StateValidRgit -> do
             liftIO $ putStrLn "Remote is a bit repo. Checking history..."
@@ -196,7 +194,7 @@ push = withRemote $ \remote -> do
             case mRemoteHash of
                 Just _ -> processExistingRemote remote seam preHash mRemoteHash
                 -- No remote commits yet (initialized but empty) — treat as first push
-                Nothing -> executePush seam remote
+                Nothing -> executePush seam remote Nothing
 
         StateNonRgitOccupied samples -> handleNonRgit seam remote samples
 
@@ -218,15 +216,15 @@ processExistingRemote remote seam preHash mRemoteHash = do
     case fMode of
         Force -> do
             lift $ tellErr "Warning: --force used. Overwriting remote history..."
-            executePush seam remote
+            executePush seam remote mRemoteHash
 
         ForceWithLease -> case (preHash, mRemoteHash) of
             (Just pre, Just post) | pre == post -> do
                 lift $ tell "Remote check passed (--force-with-lease). Proceeding..."
-                executePush seam remote
+                executePush seam remote mRemoteHash
             (Nothing, _) -> do
                 lift $ tellErr "Warning: No previous tracking ref. Proceeding..."
-                executePush seam remote
+                executePush seam remote mRemoteHash
             (Just _, Just _) -> liftIO $ do
                 hPutStrLn stderr "---------------------------------------------------"
                 hPutStrLn stderr "ERROR: Remote has changed since last fetch!"
@@ -246,7 +244,7 @@ processExistingRemote remote seam preHash mRemoteHash = do
                     if isAhead
                         then do
                             lift $ tell "Remote check passed. Proceeding with push..."
-                            executePush seam remote
+                            executePush seam remote mRemoteHash
                         else liftIO $ do
                             hPutStrLn stderr "---------------------------------------------------"
                             hPutStrLn stderr "error: Remote history has diverged or is ahead!"
@@ -264,7 +262,7 @@ handleNonRgit seam remote samples = do
     case fMode of
         Force -> do
             liftIO $ hPutStrLn stderr "Warning: --force used. Overwriting non-bit remote..."
-            executePush seam remote
+            executePush seam remote Nothing
         _ -> liftIO $ do
             hPutStrLn stderr "-------------------------------------------------------"
             hPutStrLn stderr "[!] STOP: Remote is NOT a bit repository!"
@@ -277,46 +275,53 @@ handleNonRgit seam remote samples = do
 -- ============================================================================
 
 -- | Execute a push: sync files, push metadata, update local tracking ref.
-executePush :: PushSeam -> Remote -> BitM ()
-executePush seam remote = do
-    syncRemoteFiles
+-- mRemoteHash: the remote's HEAD hash (Nothing for first push / empty remote).
+executePush :: PushSeam -> Remote -> Maybe String -> BitM ()
+executePush seam remote mRemoteHash = do
+    syncRemoteFiles mRemoteHash
     liftIO $ ptPushMetadata seam
     liftIO $ void $ Git.updateRemoteTrackingBranchToHead (remoteName remote)
     liftIO $ putStrLn "Push complete."
 
 -- ============================================================================
--- File sync (shared, rclone-based, works for both cloud and filesystem)
+-- File sync: derive actions from git metadata diff, execute via rclone
 -- ============================================================================
 
-syncRemoteFiles :: BitM ()
-syncRemoteFiles = withRemote $ \remote -> do
+syncRemoteFiles :: Maybe String -> BitM ()
+syncRemoteFiles mRemoteHash = withRemote $ \remote -> do
     cwd <- asks envCwd
-    localFiles <- asks envLocalFiles
-    remoteResult <- liftIO $ Remote.Scan.fetchRemoteFiles remote
-    either
-        (const $ liftIO $ hPutStrLn stderr "Error: Failed to fetch remote file list.")
-        (\remoteFiles -> do
-            let actions = Pipeline.pushSyncFiles localFiles remoteFiles
-            liftIO $ putStrLn "--- Pushing Changes to Remote ---"
-            if null actions
-                then liftIO $ putStrLn "Remote is already up to date."
-                else do
-                    let (copies, others) = List.partition isCopy actions
-                        copyPaths = [toPosix (unPath src) | Copy src _ <- copies]
-                    -- Create progress tracker for all actions
-                    progress <- liftIO $ CopyProgress.newSyncProgress (length actions)
-                    liftIO $ CopyProgress.withSyncProgressReporter progress $ do
-                        -- Batch all copies into a single rclone subprocess
-                        unless (null copyPaths) $
-                            CopyProgress.rcloneCopyFiles cwd (remoteUrl remote) copyPaths progress
-                        -- Non-copy actions individually
-                        forM_ others $ \a -> do
-                            executeCommand cwd remote a
-                            CopyProgress.incrementFilesComplete progress)
-        remoteResult
+    -- Derive file changes from git metadata diff (no remote scan needed)
+    changes <- liftIO $ case mRemoteHash of
+        Just remoteHash -> Git.getDiffNameStatus remoteHash "HEAD"
+        Nothing         -> map Git.Added <$> Git.getFilesAtCommit "HEAD"
+    let actions = resolveSwaps (map nameStatusToAction changes)
+    liftIO $ putStrLn "--- Pushing Changes to Remote ---"
+    if null actions
+        then liftIO $ putStrLn "Remote is already up to date."
+        else do
+            let (copies, others) = List.partition isCopy actions
+                copyPaths = [toPosix (unPath src) | Copy src _ <- copies]
+            -- Create progress tracker for all actions
+            progress <- liftIO $ CopyProgress.newSyncProgress (length actions)
+            liftIO $ CopyProgress.withSyncProgressReporter progress $ do
+                -- Batch all copies into a single rclone subprocess
+                unless (null copyPaths) $
+                    CopyProgress.rcloneCopyFiles cwd (remoteUrl remote) copyPaths progress
+                -- Non-copy actions individually
+                forM_ others $ \a -> do
+                    executeCommand cwd remote a
+                    CopyProgress.incrementFilesComplete progress
   where
     isCopy (Copy _ _) = True
     isCopy _          = False
+
+-- | Convert a git metadata diff entry to an rclone action.
+nameStatusToAction :: Git.NameStatusChange -> RcloneAction
+nameStatusToAction (Git.Added p)        = Copy (Path p) (Path p)
+nameStatusToAction (Git.Modified p)     = Copy (Path p) (Path p)
+nameStatusToAction (Git.Deleted p)      = Delete (Path p)
+nameStatusToAction (Git.Renamed old new) = Move (Path old) (Path new)
+nameStatusToAction (Git.Copied _ new)   = Copy (Path new) (Path new)
 
 -- ============================================================================
 -- Bundle helpers (cloud transport)
