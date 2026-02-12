@@ -300,8 +300,9 @@ getTrackedRemoteName = do
 
 -- | Get the explicitly configured upstream remote name (branch.main.remote).
 -- Returns Nothing if no upstream is configured. Does NOT fall back to "origin".
--- Use this for pull/fetch which require explicit upstream (spec: "bit pull and
--- bit fetch require explicit remote (no fallback)").
+-- Used by pull which requires explicit upstream (spec: "bit pull requires
+-- explicit remote (no fallback)"). Fetch uses getTrackedRemoteName instead
+-- (falls back to "origin", git-standard behavior).
 getConfiguredRemoteName :: IO (Maybe String)
 getConfiguredRemoteName = do
     (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["config", "--get", "branch.main.remote"]) ""

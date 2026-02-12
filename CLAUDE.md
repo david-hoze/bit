@@ -31,7 +31,7 @@ Consult these docs when modifying `.hs` files:
 
 ### Architecture Boundaries
 - Never call `git` via `rawSystem` or `readProcessWithExitCode` outside `Internal/Git.hs`
-- Never call `rclone` outside `Internal/Rclone.hs`
+- Never call `rclone` outside `Internal/Transport.hs`
 - Use `Git.runGitRaw`, `Git.runGitRawAt`, or `Git.runGitAt` instead
 - `.bit/index/` files are mutable working state — every scan overwrites them. To read what the user **committed**, use git (`git diff`, `git show HEAD:<path>`), not the filesystem files.
 

@@ -214,7 +214,7 @@ bit/Commands.hs → Bit/Core/*.hs → Internal/Transport.hs → rclone (only her
 | `BitM` | `bit.Types` | `ReaderT BitEnv IO` — the application monad |
 | `MetaContent` | `bit.Internal.Metadata` | Canonical metadata: hash + size, single parser/serializer |
 | `Remote` | `bit.Remote` | Resolved remote: name + URL. Smart constructor, `remoteUrl` for Transport only |
-| `RemoteState` | `bit.Remote` | Remote classification: Empty, ValidRgit, NonRgitOccupied, Corrupted, NetworkError |
+| `RemoteState` | `bit.Remote` | Remote classification: StateEmpty, StateValidRgit, StateNonRgitOccupied, StateCorruptedRgit, StateNetworkError |
 | `FetchResult` | `bit.Remote` | Bundle fetch result: BundleFound, RemoteEmpty, NetworkError |
 | `FetchOutcome` | `bit.Core.Fetch` | UpToDate, Updated { foOldHash, foNewHash }, FetchedFirst, FetchError |
 | `RcloneAction` | `bit.Plan` | Copy, Move, Delete, Swap — concrete rclone operations. Swap is produced by `resolveSwaps`. |
@@ -1217,8 +1217,8 @@ Interactive per-file conflict resolution:
     `bit push -u <remote>` to establish upstream tracking. This includes:
     - `bit remote add` does NOT set upstream (unlike old bit behavior)
     - First pull uses `git checkout -B main --no-track` to prevent auto-tracking
-    - `bit push` falls back to "origin" if it exists and no upstream is configured
-    - `bit pull` and `bit fetch` require explicit remote if no upstream is set
+    - `bit push` and `bit fetch` fall back to "origin" if it exists and no upstream is configured (git-standard behavior)
+    - `bit pull` requires explicit remote if no upstream is set (no fallback)
     This makes bit's remote behavior predictable for git users.
 
 15. **Strict ByteString IO exclusively**: All file operations use strict
