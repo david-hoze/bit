@@ -57,12 +57,13 @@ cloudFetch remote = do
     liftIO $ renderFetchOutcome remote outcome
 
 -- | Fetch from a filesystem remote using named git remote.
+-- Returns a FetchOutcome and routes through renderFetchOutcome,
+-- so filesystem fetch is silent when up-to-date (same as cloud fetch).
 filesystemFetch :: FilePath -> Remote -> IO ()
 filesystemFetch _cwd remote = do
     let name = remoteName remote
         rp = RemotePath (remoteUrl remote)
         remotePath = unRemotePath rp
-    putStrLn $ "Fetching from filesystem remote: " ++ remotePath
 
     -- Check if remote has .bit/ directory
     checkFilesystemRemoteIsRepo rp
@@ -70,16 +71,26 @@ filesystemFetch _cwd remote = do
     -- Ensure git remote URL is current (device may have moved)
     void $ Git.addRemote name (remotePath </> ".bit" </> "index")
 
-    -- Native git fetch — handles refspec automatically
-    putStrLn "Fetching remote commits..."
+    -- Read tracking ref before fetch
+    maybeOldHash <- Git.getRemoteTrackingHash name
+
+    -- Native git fetch
     (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput ["fetch", name]
 
     when (fetchCode /= ExitSuccess) $ do
         hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
         exitWith fetchCode
 
-    printFetchBanner name (name ++ "/main")
-    putStrLn "Fetch complete."
+    -- Read tracking ref after fetch
+    maybeNewHash <- Git.getRemoteTrackingHash name
+
+    -- Determine outcome and render (silent when up-to-date)
+    let outcome = case (maybeOldHash, maybeNewHash) of
+            (Just old, Just new) | old == new -> UpToDate
+            (Just old, Just new) -> Updated { foOldHash = old, foNewHash = new }
+            (Nothing, Just new)  -> FetchedFirst new
+            _                    -> FetchError "Could not determine remote state"
+    renderFetchOutcome remote outcome
 
 -- ============================================================================
 -- Helper functions for fetch operations

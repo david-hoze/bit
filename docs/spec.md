@@ -148,7 +148,7 @@ The existing divergence resolution mechanisms (`--accept-remote`, `--force`, `--
 - `bit push` always verifies local working tree before pushing (unconditional — `--force` only affects ancestry check)
 - `bit pull` verifies remote before pulling (unless `--accept-remote` or `--manual-merge`)
 - `bit fetch` does NOT verify (fetch only transfers metadata, no file sync happens)
-- `bit fetch` (cloud) is silent when already up to date (no stdout), similar to `git fetch`. Filesystem fetch prints progress messages regardless of outcome.
+- `bit fetch` is silent when already up to date (no stdout), similar to `git fetch`
 - Cloud remotes: verified via `Verify.verifyRemote` using `rclone lsjson --hash`
 - Filesystem remotes: verified via `Verify.verifyLocalAt` which hashes the remote's working tree
 - Verification runs in parallel using bounded concurrency (`Parallel 0` = auto-detect based on CPU cores)
