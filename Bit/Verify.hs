@@ -393,6 +393,7 @@ verifyRemote cwd remote mCounter _concurrency = do
           -- Checkout expected state from the remote's bundle
           let absBundlePath = cwd </> fetchedPath
           void $ Git.runGitAt vremoteDir ["init", "-q"]
+          void $ Git.runGitAt vremoteDir ["config", "core.quotePath", "false"]
           void $ Git.runGitAt vremoteDir ["fetch", "-q", absBundlePath, "refs/heads/main:refs/heads/main"]
           void $ Git.runGitAt vremoteDir ["checkout", "-q", "main"]
 
