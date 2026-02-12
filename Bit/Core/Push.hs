@@ -23,8 +23,8 @@ import Bit.Utils (toPosix)
 import qualified Data.List as List
 import System.IO (stderr, hPutStrLn)
 import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), displayRemote, RemotePath(..))
-import Bit.Plan (RcloneAction(..), resolveSwaps)
-import Bit.Types (BitM, BitEnv(..), ForceMode(..), Path(..), unPath)
+import Bit.Plan (RcloneAction(..))
+import Bit.Types (BitM, BitEnv(..), ForceMode(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
@@ -44,7 +44,7 @@ import Bit.Core.Helpers
     , safeRemove
     )
 import Bit.Core.Init (initializeRemoteRepoAt)
-import Bit.Core.Transport (executeCommand)
+import Bit.Core.Transport (deriveActions, executeCommand)
 import Bit.Core.Fetch (classifyRemoteState, fetchBundle)
 
 -- ============================================================================
@@ -290,11 +290,7 @@ executePush seam remote mRemoteHash = do
 syncRemoteFiles :: Maybe String -> BitM ()
 syncRemoteFiles mRemoteHash = withRemote $ \remote -> do
     cwd <- asks envCwd
-    -- Derive file changes from git metadata diff (no remote scan needed)
-    changes <- liftIO $ case mRemoteHash of
-        Just remoteHash -> Git.getDiffNameStatus remoteHash "HEAD"
-        Nothing         -> map Git.Added <$> Git.getFilesAtCommit "HEAD"
-    let actions = resolveSwaps (map nameStatusToAction changes)
+    actions <- liftIO $ deriveActions mRemoteHash "HEAD"
     liftIO $ putStrLn "--- Pushing Changes to Remote ---"
     if null actions
         then liftIO $ putStrLn "Remote is already up to date."
@@ -314,14 +310,6 @@ syncRemoteFiles mRemoteHash = withRemote $ \remote -> do
   where
     isCopy (Copy _ _) = True
     isCopy _          = False
-
--- | Convert a git metadata diff entry to an rclone action.
-nameStatusToAction :: Git.NameStatusChange -> RcloneAction
-nameStatusToAction (Git.Added p)        = Copy (Path p) (Path p)
-nameStatusToAction (Git.Modified p)     = Copy (Path p) (Path p)
-nameStatusToAction (Git.Deleted p)      = Delete (Path p)
-nameStatusToAction (Git.Renamed old new) = Move (Path old) (Path new)
-nameStatusToAction (Git.Copied _ new)   = Copy (Path new) (Path new)
 
 -- ============================================================================
 -- Bundle helpers (cloud transport)

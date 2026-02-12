@@ -2,8 +2,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Bit.Core.Transport
-    ( -- Working directory sync operations
-      syncAllFilesFromHEAD
+    ( -- Shared action derivation
+      deriveActions
+    , nameStatusToAction
+      -- Working directory sync operations
+    , syncAllFilesFromHEAD
     , applyMergeToWorkingDir
     , safeDeleteWorkFile
     , copyFromIndexToWorkTree
@@ -20,16 +23,14 @@ import Control.Monad (when, void, forM, forM_, unless)
 import Control.Exception (try, SomeException)
 import Bit.Concurrency (ioConcurrency, mapConcurrentlyBounded)
 import Data.Foldable (traverse_)
-import System.Exit (ExitCode(..))
 import qualified Internal.Git as Git
-import Internal.Git (NameStatusChange(Added, Deleted, Modified, Renamed, Copied))
 import qualified Internal.Transport as Transport
 import Internal.Config (bitIndexPath, bundleForRemote)
 import Data.List (isPrefixOf)
 import Bit.Utils (toPosix)
-import Bit.Plan (RcloneAction(..))
+import Bit.Plan (RcloneAction(..), resolveSwaps)
 import Bit.Remote (Remote, remoteName, remoteUrl)
-import Bit.Types (BitM, BitEnv(..), unPath)
+import Bit.Types (BitM, BitEnv(..), Path(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import qualified Bit.CopyProgress as CopyProgress
@@ -54,6 +55,72 @@ data FileToSync
     deriving (Show, Eq)
 
 -- ============================================================================
+-- Shared action derivation (used by both push and pull)
+-- ============================================================================
+
+-- | Derive rclone actions from a git ref range. Nothing = first sync (all files).
+deriveActions :: Maybe String -> String -> IO [RcloneAction]
+deriveActions mOldRef newRef = do
+    changes <- case mOldRef of
+        Just oldRef -> Git.getDiffNameStatus oldRef newRef
+        Nothing     -> map Git.Added <$> Git.getFilesAtCommit newRef
+    pure $ resolveSwaps (map nameStatusToAction changes)
+
+-- | Convert a git metadata diff entry to an rclone action.
+nameStatusToAction :: Git.NameStatusChange -> RcloneAction
+nameStatusToAction (Git.Added p)         = Copy (Path p) (Path p)
+nameStatusToAction (Git.Modified p)      = Copy (Path p) (Path p)
+nameStatusToAction (Git.Deleted p)       = Delete (Path p)
+nameStatusToAction (Git.Renamed old new) = Move (Path old) (Path new)
+nameStatusToAction (Git.Copied _ new)    = Copy (Path new) (Path new)
+
+-- | Execute pull actions: apply rclone actions to the local working directory.
+-- Deletions are processed first (from Delete, Move src, Swap), then copies
+-- (from Copy, Move dest, Swap both).
+-- Text files are copied from the index; binary files are batched via rclone.
+executePullActions :: String -> FilePath -> [RcloneAction] -> IO ()
+executePullActions remoteRoot cwd actions = do
+    -- Phase 1: Process all deletions
+    forM_ actions $ \action -> case action of
+        Delete p            -> safeDeleteWorkFile cwd (unPath p)
+        Move src _          -> safeDeleteWorkFile cwd (unPath src)
+        Swap _ src dest     -> do
+            safeDeleteWorkFile cwd (unPath src)
+            safeDeleteWorkFile cwd (unPath dest)
+        _                   -> pure ()
+
+    -- Phase 2: Collect all files to copy
+    let filesToCopy = concatMap copyTargets actions
+    classifyAndSync remoteRoot cwd filesToCopy
+  where
+    copyTargets (Copy _ dest)       = [unPath dest]
+    copyTargets (Move _ dest)       = [unPath dest]
+    copyTargets (Swap _ src dest)   = [unPath src, unPath dest]
+    copyTargets (Delete _)          = []
+
+-- | Classify files as text/binary and sync them to the working directory.
+-- Text files are copied from the index; binary files are batched via rclone.
+classifyAndSync :: String -> FilePath -> [FilePath] -> IO ()
+classifyAndSync remoteRoot cwd filePaths = do
+    -- Classify text vs binary
+    let classify filePath = do
+            fromIndex <- isTextFileInIndex cwd filePath
+            pure $ if fromIndex then TextToSync filePath else BinaryToSync filePath
+    fileInfo <- forM filePaths classify
+
+    -- Copy text from index in parallel
+    let textPaths = [p | TextToSync p <- fileInfo]
+    concLevel <- ioConcurrency
+    void $ mapConcurrentlyBounded concLevel (copyFromIndexToWorkTree cwd) textPaths
+
+    -- Batch binary via rcloneCopyFiles
+    let binaryPaths = [p | BinaryToSync p <- fileInfo]
+    unless (null binaryPaths) $ do
+        progress <- CopyProgress.newSyncProgress (length binaryPaths)
+        CopyProgress.withSyncProgressReporter progress $
+            CopyProgress.rcloneCopyFiles remoteRoot cwd binaryPaths progress
+
+-- ============================================================================
 -- Unified sync operations (work for both cloud and filesystem remotes)
 -- ============================================================================
 
@@ -66,28 +133,8 @@ data FileToSync
 -- Text files are copied from the index; binary files are batched via rclone.
 syncAllFilesFromHEAD :: String -> FilePath -> IO ()
 syncAllFilesFromHEAD remoteRoot localRoot = do
-    let localIndex = localRoot </> ".bit" </> "index"
-    (code, out, _) <- Git.runGitWithOutput ["ls-tree", "-r", "--name-only", "HEAD"]
-    when (code == ExitSuccess) $ do
-        let paths = filter (not . null) (lines out)
-
-        -- Classify text vs binary
-        fileInfo <- forM paths $ \filePath -> do
-            let metaPath = localIndex </> filePath
-            isText <- isTextMetadataFile metaPath
-            pure $ if isText then TextToSync filePath else BinaryToSync filePath
-
-        -- Copy text from index in parallel
-        let textPaths = [p | TextToSync p <- fileInfo]
-        concLevel <- ioConcurrency
-        void $ mapConcurrentlyBounded concLevel (copyFromIndexToWorkTree localRoot) textPaths
-
-        -- Batch binary via rcloneCopyFiles
-        let binaryPaths = [p | BinaryToSync p <- fileInfo]
-        unless (null binaryPaths) $ do
-            progress <- CopyProgress.newSyncProgress (length binaryPaths)
-            CopyProgress.withSyncProgressReporter progress $
-                CopyProgress.rcloneCopyFiles remoteRoot localRoot binaryPaths progress
+    actions <- deriveActions Nothing "HEAD"
+    executePullActions remoteRoot localRoot actions
 
 -- | After a merge, mirror git's metadata changes onto the actual working directory.
 -- Uses `git diff --name-status oldHead newHead` to determine what changed,
@@ -103,42 +150,11 @@ applyMergeToWorkingDir :: String -> FilePath -> String -> IO ()
 applyMergeToWorkingDir remoteRoot cwd oldHead = do
     newHead <- getLocalHeadE
     traverse_ (\newH -> do
-        changes <- Git.getDiffNameStatus oldHead newH
+        actions <- deriveActions (Just oldHead) newH
         putStrLn "--- Pulling changes from remote ---"
-        if null changes
+        if null actions
             then putStrLn "Working tree already up to date with remote."
-            else do
-                -- Process deletions first
-                forM_ changes $ \change -> case change of
-                    Deleted p -> safeDeleteWorkFile cwd p
-                    Renamed oldPath _ -> safeDeleteWorkFile cwd oldPath
-                    _ -> pure ()
-
-                -- Collect files to copy
-                let filesToCopy = concatMap (\change -> case change of
-                        Added p -> [p]
-                        Modified p -> [p]
-                        Renamed _ newPath -> [newPath]
-                        Copied _ newPath -> [newPath]
-                        Deleted _ -> []) changes
-
-                -- Classify text vs binary
-                let classify filePath = do
-                        fromIndex <- isTextFileInIndex cwd filePath
-                        pure $ if fromIndex then TextToSync filePath else BinaryToSync filePath
-                fileInfo <- forM filesToCopy classify
-
-                -- Copy text from index in parallel
-                let textPaths = [p | TextToSync p <- fileInfo]
-                concLevel <- ioConcurrency
-                void $ mapConcurrentlyBounded concLevel (copyFromIndexToWorkTree cwd) textPaths
-
-                -- Batch binary via rcloneCopyFiles
-                let binaryPaths = [p | BinaryToSync p <- fileInfo]
-                unless (null binaryPaths) $ do
-                    progress <- CopyProgress.newSyncProgress (length binaryPaths)
-                    CopyProgress.withSyncProgressReporter progress $
-                        CopyProgress.rcloneCopyFiles remoteRoot cwd binaryPaths progress
+            else executePullActions remoteRoot cwd actions
         ) newHead
 
 -- ============================================================================

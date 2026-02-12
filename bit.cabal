@@ -21,12 +21,10 @@ executable bit
                       Bit.CopyProgress,
                       Bit.Device,
                       Bit.DevicePrompt,
-                      Bit.Diff,
                       Bit.Process,
                       Bit.Progress,
                       Bit.Utils,
                       Bit.Plan,
-                      Bit.Pipeline,
                       Bit.Remote,
                       Bit.Remote.Scan,
                       Bit.RemoteWorkspace,
@@ -106,18 +104,15 @@ test-suite device-prompt
                         tasty-hunit
     default-language:    Haskell2010
 
-test-suite pipeline
+test-suite plan
     type:                exitcode-stdio-1.0
-    main-is:             PipelineSpec.hs
+    main-is:             PlanSpec.hs
     hs-source-dirs:      test, .
     other-modules:       Bit.AtomicWrite,
                          Bit.Types,
-                         Bit.Diff,
                          Bit.Plan,
-                         Bit.Pipeline,
-                         Bit.Utils,
-                         Bit.Internal.Metadata,
                          Bit.Device,
+                         Bit.Path,
                          Bit.Remote,
                          Internal.Git,
                          Internal.Config,

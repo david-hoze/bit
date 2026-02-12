@@ -218,9 +218,7 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 | `RemoteState` | `bit.Remote` | Remote classification: Empty, ValidRgit, NonRgitOccupied, Corrupted, NetworkError |
 | `FetchResult` | `bit.Remote` | Bundle fetch result: BundleFound, RemoteEmpty, NetworkError |
 | `FetchOutcome` | `bit.Core.Fetch` | UpToDate, Updated { foOldHash, foNewHash }, FetchedFirst, FetchError |
-| `GitDiff` | `bit.Diff` | Added, Modified, Deleted, Renamed — pure diff result |
-| `RcloneAction` | `bit.Plan` | Copy, Move, Delete, Swap — concrete rclone operations. Swap is produced by `resolveSwaps` (not `planAction`). |
-| `FileIndex` | `bit.Diff` | Dual-indexed file map (byPath + byHash) for efficient diff/rename detection |
+| `RcloneAction` | `bit.Plan` | Copy, Move, Delete, Swap — concrete rclone operations. Swap is produced by `resolveSwaps`. |
 | `Resolution` | `bit.Conflict` | KeepLocal or TakeRemote — conflict resolution choice |
 | `DeletedSide` | `Internal.Git` (re-exported by `bit.Conflict`) | DeletedInOurs or DeletedInTheirs — which side deleted in modify/delete conflict |
 | `ConflictInfo` | `bit.Conflict` | ContentConflict, ModifyDelete path DeletedSide, AddAdd — conflict type from git ls-files -u |
@@ -236,31 +234,22 @@ bit/Commands.hs → Bit.hs → Internal/Transport.hs → rclone (only here!)
 
 ### Sync Pipeline
 
-The sync pipeline is composed as pure function composition with effectful endpoints:
-
-```
-scan          :: FilePath → IO [FileEntry]              -- effectful (reads filesystem)
-diff          :: FileIndex → FileIndex → [GitDiff]      -- pure!
-plan          :: GitDiff → RcloneAction                  -- pure!
-resolveSwaps  :: [RcloneAction] → [RcloneAction]         -- pure! (detects pairwise path swaps)
-exec          :: RcloneAction → IO ()                    -- effectful (calls rclone)
-```
-
-The pure middle (`diff >>> plan >>> resolveSwaps`) is factored into `bit.Pipeline` and is fully property-testable.
-`resolveSwaps` is a post-pass that detects mirrored `Move` pairs (A→B and B→A) and replaces each pair with a single `Swap` action, preventing the overwrite bug that occurs when sequential Moves clobber each other's source files.
+Both push and pull derive file actions from `git diff --name-status` via a
+shared `deriveActions` function in `Bit.Core.Transport`:
 
 ```haskell
-diffAndPlan :: [FileEntry] -> [FileEntry] -> [RcloneAction]  -- pure core
-pullSyncFiles :: [FileEntry] -> [FileEntry] -> [RcloneAction]
+deriveActions    :: Maybe String -> String -> IO [RcloneAction]  -- Nothing = first sync
+nameStatusToAction :: NameStatusChange -> RcloneAction           -- Added/Modified → Copy, Deleted → Delete, Renamed → Move
+resolveSwaps     :: [RcloneAction] → [RcloneAction]              -- pure! (detects pairwise path swaps)
 ```
 
-**Push** uses a different approach: instead of scanning remote files and diffing
-file lists, it derives actions directly from the git metadata diff
-(`getDiffNameStatus remoteHash "HEAD"`). This avoids the expensive
-`rclone lsjson --hash --recursive` scan, which would read every byte on the
-remote just to plan the transfer. The `NameStatusChange` entries map directly
-to `RcloneAction` (Added/Modified → Copy, Deleted → Delete, Renamed → Move),
-followed by `resolveSwaps` for swap detection.
+`deriveActions` calls `getDiffNameStatus oldRef newRef` (or `getFilesAtCommit`
+for first sync), maps each change to an `RcloneAction` via `nameStatusToAction`,
+then applies `resolveSwaps` to detect mirrored Move pairs (A→B and B→A) and
+replace each pair with a single `Swap` action.
+
+This avoids expensive remote scanning — all planning is derived from git
+metadata diffs with zero network I/O.
 
 ### Working Tree Sync: The `oldHead` Pattern
 
@@ -1098,7 +1087,7 @@ Interactive per-file conflict resolution:
 
 3. **`ReaderT BitEnv IO` (no free monad)**: The application monad is `ReaderT BitEnv IO`. A free monad effect system was considered (for testability and dry-run mode) but rejected as premature — no pure tests or dry-run usage existed to justify the complexity. Direct IO with `ReaderT` for environment threading is cleaner for now.
 
-4. **Pure sync pipeline**: `diff` and `plan` are pure functions composed in `bit.Pipeline`. The intermediate `[GitDiff]` is preserved (not merged with `plan`) for display and testing. Property tests in `test/PipelineSpec.hs` verify the pipeline.
+4. **Shared `deriveActions`**: Both push and pull derive `[RcloneAction]` from `git diff --name-status` via the shared `deriveActions` function in `Bit.Core.Transport`. `resolveSwaps` (in `Bit.Plan`) detects pairwise Move swaps. Property tests in `test/PlanSpec.hs` verify swap detection.
 
 5. **Structured conflict resolution**: Conflict handling is a fold over a conflict list (`bit.Conflict`), not an imperative block. Decision logic is separated from IO mechanics.
 
@@ -1212,8 +1201,7 @@ Interactive per-file conflict resolution:
 ### What We Deliberately Do NOT Do
 
 - **`RemoteState` does not need a typed state machine.** The pattern match in push logic is clear and total.
-- **`FileIndex` does not need a Representable functor.** The dual indices (`byPath`/`byHash`) are an implementation detail.
-- **`GitDiff` does not need a Group structure.** bit computes diffs fresh each time; inverse/compose would be dead code.
+- **`RcloneAction` does not need a Group structure.** Actions are derived fresh from git each time; inverse/compose would be dead code.
 - **No Arrow syntax.** Plain `>>=` and function composition are clearer.
 - **No MTL-style type classes** (`MonadGit`, `MonadRclone`). Everything is concrete.
 - **No post-sync metadata rescanning.** After syncing files to the working
@@ -1259,7 +1247,7 @@ Interactive per-file conflict resolution:
 - `bit verify --remote` — remote file verification against committed remote metadata
 - `bit fsck` — passthrough to `git fsck` on internal metadata repository
 - `bit --remote <name>` / `bit @<remote>` — ephemeral remote workspace commands (`init`, `add`, `commit`, `status`, `log`, `ls-files`); each command fetches bundle, inflates into temp dir, operates, re-bundles if changed, pushes, and cleans up
-- Pipeline: pure diff → plan → action generation with property tests
+- Shared `deriveActions` for push/pull with `resolveSwaps` swap detection and property tests
 - Device-identity system for filesystem remotes (UUID + hardware serial)
 - Filesystem remote transport (full bit repo at remote, direct git fetch/merge)
 - Conflict resolution module with structured fold (always commits when MERGE_HEAD exists)
@@ -1290,9 +1278,7 @@ Interactive per-file conflict resolution:
 | `bit/Internal/Metadata.hs` | Canonical metadata parser/serializer |
 | `bit/Scan.hs` | Working directory scanning, hash computation (`hashAndClassifyFile` returns `ContentType`), cache entries use `ContentType`, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO). `readMetadataFile`, `getFileHashAndSize` return `Maybe MetaContent`. |
 | `bit/Concurrency.hs` | Bounded parallelism helpers: concurrency level calculation, sequential/parallel mode switching |
-| `bit/Diff.hs` | Pure diff: FileIndex → FileIndex → [GitDiff] |
-| `bit/Plan.hs` | Pure plan: `planAction` (GitDiff → RcloneAction), `resolveSwaps` (detects pairwise Move swaps → Swap) |
-| `bit/Pipeline.hs` | Composed pipeline: diffAndPlan (applies resolveSwaps), pullSyncFiles. Push uses git metadata diff directly instead of Pipeline. |
+| `bit/Plan.hs` | `RcloneAction` type and `resolveSwaps` (detects pairwise Move swaps → Swap) |
 | `bit/Verify.hs` | Local and remote verification; scan + git diff approach for local (compares against committed metadata); unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
 | `bit/Fsck.hs` | Passthrough to `git fsck` on `.bit/index` metadata repository |
 | `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
@@ -1422,7 +1408,7 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
 - Track symlinks or empty directories
 - Implement CAS yet (that's bit-solid, mark as TODO)
 - Add MTL-style type classes or free monad effects (premature)
-- Merge `diff` and `plan` into a single function
+- Bypass `deriveActions` by writing custom diff/plan logic in push or pull code paths
 - Write metadata to `.bit/index/` directly and then commit (bypasses git;
   rclone scans set `fContentType = BinaryContent` for everything, producing wrong metadata
   for text files)

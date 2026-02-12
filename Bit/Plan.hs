@@ -1,13 +1,8 @@
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE OverloadedRecordDot #-}
-
 module Bit.Plan
   ( RcloneAction(..)
-  , planAction
   , resolveSwaps
   ) where
 
-import Bit.Diff (GitDiff(..), LightFileEntry(..))
 import Bit.Types
 import Data.List (foldl')
 import qualified Data.Map.Strict as Map
@@ -19,13 +14,6 @@ data RcloneAction
     | Delete Path
     | Swap Path Path Path  -- Move via a temporary file (TempPath, Source, Dest)
     deriving (Eq, Show)
-
--- | The Planner: Translates abstract Diffs into concrete Rclone actions
-planAction :: GitDiff -> RcloneAction
-planAction (Modified f)      = Copy f.filePath f.filePath -- Upload over existing
-planAction (Renamed old new) = Move old.filePath new.filePath
-planAction (Added f)         = Copy f.filePath f.filePath
-planAction (Deleted f)       = Delete f.filePath
 
 -- | Detect mirrored Move pairs (A→B and B→A) and replace each pair with a
 -- single Swap action that uses a temporary path to avoid overwriting.
