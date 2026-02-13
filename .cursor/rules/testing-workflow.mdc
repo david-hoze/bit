@@ -43,7 +43,7 @@ When running the full test suite (new features, refactors, or final verification
 
 3. **Run parallel tests with PowerShell** (background immediately with `block_until_ms: 0`):
    ```
-   powershell -ExecutionPolicy Bypass -File test\cli\run-parallel.ps1 -Exclude "gdrive"
+   powershell -ExecutionPolicy Bypass -File test\cli\run-parallel.ps1
    ```
 
 4. Fix all failures, and go to step 3.
