@@ -357,8 +357,8 @@ measureThroughput filePath = do
     pure (fromIntegral bytesRead / max 0.001 elapsed)
 
 -- | Main scan function. Always hashes all files (no bandwidth abort).
-scanWorkingDir :: FilePath -> IO [FileEntry]
-scanWorkingDir root = do
+scanWorkingDir :: FilePath -> Concurrency -> IO [FileEntry]
+scanWorkingDir root concurrencyMode = do
     let bitRoot = root </> ".bit"
     bitExists <- doesDirectoryExist bitRoot
     if not bitExists then pure []
@@ -376,8 +376,10 @@ scanWorkingDir root = do
       let total = length filesToHash
       counter <- newIORef (0 :: Int)
 
-      caps <- getNumCapabilities
-      let concurrency = max 4 (caps * 4)
+      concurrency <- case concurrencyMode of
+        Sequential  -> pure 1
+        Parallel 0  -> ioConcurrency
+        Parallel n  -> pure n
 
       let hashWithProgress (rel, fullPath) = do
               size <- getFileSize fullPath

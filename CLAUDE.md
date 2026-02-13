@@ -89,6 +89,13 @@ powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # Full suit
 - `gdrive-test` is a configured rclone remote for cloud tests (`test/cli/gdrive-remote.test`)
 - Cloud tests are included in the parallel test runner — do NOT exclude them
 
+### Network / Slow-Device Tests
+- See `docs/network-test-benchmark.md` for full analysis
+- **Never run bit/git directly on a slow device** (UNC, USB, NAS) — git's many small I/Os are 10-50x slower over high-latency links
+- **Use `rclone copy` to stage a bit repo** on the device instead of `bit push` for test setup — batches all `.bit/index/.git/` files in one pass
+- **Use `rclone purge`** for cleanup instead of `rmdir /s /q` — faster over network paths
+- **Only test transport-layer operations** (push, verify, repair) against slow devices — merge, conflict resolution, status, and multi-repo workflows are already covered by fast local filesystem tests
+
 ## Commit Messages
 
 - Always `git pull` before committing

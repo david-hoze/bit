@@ -205,7 +205,7 @@ runCommand args = do
     -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
     let scanAndWrite = do
             syncBitignoreToIndex cwd
-            localFiles <- Scan.scanWorkingDir cwd
+            localFiles <- Scan.scanWorkingDir cwd concurrency
             Scan.writeMetadataFiles cwd localFiles
 
     -- Repo existence check (skip for init)

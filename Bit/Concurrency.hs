@@ -60,9 +60,13 @@ networkConcurrency = min 8 . max 2 . (* 2) <$> getNumCapabilities
 -- | Run an action over a list with the specified concurrency level.
 --
 -- When 'Sequential', operations run one at a time with 'mapM'.
+-- When 'Parallel 0', auto-detects based on CPU cores (IO-bound level).
 -- When 'Parallel n', operations run with bounded parallelism using 'mapConcurrentlyBounded'.
 runConcurrently :: Concurrency -> (a -> IO b) -> [a] -> IO [b]
 runConcurrently Sequential f xs = mapM f xs
+runConcurrently (Parallel 0) f xs = do
+  n <- ioConcurrency
+  mapConcurrentlyBounded n f xs
 runConcurrently (Parallel n) f xs = mapConcurrentlyBounded n f xs
 
 -- | Like 'runConcurrently' but takes the bound as a direct Int parameter.

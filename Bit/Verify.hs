@@ -296,8 +296,8 @@ findIssuesFromScan root entries = do
 -- | Verify working tree at an arbitrary root path against its committed metadata.
 -- Scans the working directory (always hashes all files) then finds issues via git diff.
 verifyLocalAt :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
-verifyLocalAt root mCounter _concurrency = do
-  entries <- Scan.scanWorkingDir root
+verifyLocalAt root mCounter concurrency = do
+  entries <- Scan.scanWorkingDir root concurrency
   result <- findIssuesFromScan root entries
   traverse_ (\ref -> atomicModifyIORef' ref (\_ -> (vrCount result, ()))) mCounter
   pure result
@@ -366,7 +366,7 @@ loadMetadataFromBundle bundleName = do
 -- Returns (number of files checked, list of issues).
 -- If an IORef counter is provided, it will be incremented after each file is checked.
 verifyRemote :: FilePath -> Bit.Remote.Remote -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
-verifyRemote cwd remote mCounter _concurrency = do
+verifyRemote cwd remote mCounter concurrency = do
   -- 1. Fetch the remote bundle if needed (per-remote bundle path)
   let bundleName = bundleForRemote (Bit.Remote.remoteName remote)
       fetchedPath = fromCwdPath (bundleCwdPath bundleName)
@@ -418,20 +418,20 @@ verifyRemote cwd remote mCounter _concurrency = do
           --    Binary: construct metadata from rclone ls data
           --    Text: download actual content from remote
           --    Missing: delete the checked-out file
-          mapM_ (\entry -> do
-            let p = entryPath entry
-                destFile = vremoteDir </> unPath p
-            case entry of
-              BinaryEntry _ _ _ ->
-                case Map.lookup (normalise (unPath p)) remoteFileMap of
-                  Just (h, File _ sz _) ->
-                    writeFile destFile (serializeMetadata (MetaContent h sz))
-                  _ -> safeRemove destFile
-              TextEntry _ -> do
-                code <- Transport.copyFromRemote remote (toPosix (unPath p)) destFile
-                when (code /= ExitSuccess) $ safeRemove destFile
-            traverse_ (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
-            ) entries
+          let processEntry entry = do
+                let p = entryPath entry
+                    destFile = vremoteDir </> unPath p
+                case entry of
+                  BinaryEntry _ _ _ ->
+                    case Map.lookup (normalise (unPath p)) remoteFileMap of
+                      Just (h, File _ sz _) ->
+                        writeFile destFile (serializeMetadata (MetaContent h sz))
+                      _ -> safeRemove destFile
+                  TextEntry _ -> do
+                    code <- Transport.copyFromRemote remote (toPosix (unPath p)) destFile
+                    when (code /= ExitSuccess) $ safeRemove destFile
+                traverse_ (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
+          void $ runConcurrently concurrency (\e -> processEntry e) entries
 
           -- 6. Single git diff: compares actual working tree against expected (HEAD)
           (_, diffOut, _) <- Git.runGitAt vremoteDir
