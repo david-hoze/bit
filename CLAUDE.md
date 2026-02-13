@@ -65,6 +65,7 @@ powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # Full suit
 
 ## Commit Messages
 
+- Always `git pull` before committing
 - Imperative mood: "Add feature" not "Added feature"
 - Concise: under 72 characters
 - Examples: `Add safe.directory config for USB drives`, `Fix memory leak in pipeline`

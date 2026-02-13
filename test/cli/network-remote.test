@@ -1,0 +1,155 @@
+# Network Remote Tests
+# Tests bit push/pull/repair to a UNC network path (\\tsclient\c\users\david\bit-testing).
+# Exercises absolute UNC path handling, which differs from relative filesystem remotes.
+# NOTE: CMD cannot cd to UNC paths; use pushd/popd to map a temporary drive letter.
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_network 2>nul & rmdir /s /q \\tsclient\c\users\david\bit-testing 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: init local repo, add network remote, push
+# ======================================================================
+
+mkdir test\cli\output\work_network
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_network & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+mkdir \\tsclient\c\users\david\bit-testing
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_network & bit remote add origin \\tsclient\c\users\david\bit-testing
+<<<
+>>> /Remote 'origin' added/
+>>>= 0
+
+cd test\cli\output\work_network & echo binary data> data.bin & echo hello world> greet.txt & bit add data.bin greet.txt & bit commit -m "Initial commit"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_network & bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# TEST: Files arrived at network remote
+# ======================================================================
+
+if exist "\\tsclient\c\users\david\bit-testing\data.bin" (echo data exists) else (echo missing)
+<<<
+>>>
+data exists
+>>>= 0
+
+if exist "\\tsclient\c\users\david\bit-testing\greet.txt" (echo greet exists) else (echo missing)
+<<<
+>>>
+greet exists
+>>>= 0
+
+# ======================================================================
+# TEST: bit status shows up-to-date after push
+# ======================================================================
+
+cd test\cli\output\work_network & bit status
+<<<
+>>> /up to date/
+>>>= 0
+
+# ======================================================================
+# TEST: Modify locally, push again
+# ======================================================================
+
+cd test\cli\output\work_network & echo updated binary> data.bin & bit add data.bin & bit commit -m "Update data"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_network & bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# TEST: Verify and repair against network remote
+# ======================================================================
+
+cd test\cli\output\work_network & bit verify
+<<<
+>>> /\[OK\] All.*files match/
+>>>= 0
+
+# Corrupt local file, repair from network remote
+cd test\cli\output\work_network & echo corrupted> data.bin
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_network & bit repair
+<<<
+>>> /REPAIRED.*data\.bin/
+>>>= 0
+
+# Verify clean after repair
+cd test\cli\output\work_network & bit verify
+<<<
+>>> /\[OK\] All.*files match/
+>>>= 0
+
+# ======================================================================
+# TEST: Run bit commands directly at the network remote (pushd maps UNC)
+# ======================================================================
+
+pushd \\tsclient\c\users\david\bit-testing & bit status & popd
+<<<
+>>> /nothing to commit|working tree clean|On branch/
+>>>= 0
+
+pushd \\tsclient\c\users\david\bit-testing & bit log --oneline & popd
+<<<
+>>> /Update data/
+>>>= 0
+
+# ======================================================================
+# TEST: Edit at remote, pull locally
+# ======================================================================
+
+pushd \\tsclient\c\users\david\bit-testing & echo remote new file> remote.bin & bit add remote.bin & bit commit -m "Add remote file" & popd
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_network & bit pull
+<<<
+>>> /Pull|Merging|Updating/
+>>>= 0
+
+# Verify the remote file arrived locally
+if exist "test\cli\output\work_network\remote.bin" (echo remote.bin exists) else (echo missing)
+<<<
+>>>
+remote.bin exists
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_network 2>nul & rmdir /s /q \\tsclient\c\users\david\bit-testing 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
