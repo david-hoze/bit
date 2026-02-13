@@ -405,7 +405,7 @@ Help (`bit help`, `bit -h`, `bit --help`, and `bit help <command>`) works withou
 | `bit --remote <name> ls-files` | — | Show tracked files on remote (read-only, ephemeral) |
 | `bit @<remote> <cmd>` | — | Shorthand for `--remote` (needs quoting in PowerShell) |
 
-**Remote show:** For the given remote (or default), bit prints the remote name, Fetch URL, and Push URL. For cloud remotes, Push URL is N/A (push goes via rclone to the same target). For filesystem remotes, both URLs are shown. When the local branch has an upstream, status (ahead/behind) is also shown.
+**Remote show:** For the given remote (or default), bit prints the remote name, Fetch URL, and Push URL. For cloud remotes, Push URL is N/A (push goes via rclone to the same target). For filesystem remotes, both URLs are shown. When the local branch has an upstream, status (ahead/behind) is also shown. **Cloud remotes:** Status is derived from the local bundle at `.bit/index/.git/bundles/<name>.bundle`. If that bundle does not exist, `bit remote show <name>` fetches it first (same as `bit fetch`), then shows status; the user may see fetch output (e.g. "Updated: …" or "Fetched: …") as a side effect. If the fetch fails (e.g. network error), bit prints only the URLs and reports status as (unknown) — "HEAD branch: (unknown)", "main pushes to main (unknown)" — so the command still completes without crashing.
 
 ---
 
