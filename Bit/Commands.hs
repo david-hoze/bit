@@ -7,6 +7,7 @@ import qualified Bit.Core as Bit
 import Bit.Types (BitEnv(..), ForceMode(..), runBitM)
 import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
 import Bit.Remote (getDefaultRemote, getUpstreamRemote, resolveRemote)
+import qualified Bit.Device as Device
 import Bit.Utils (atomicWriteFileStr)
 import Bit.Concurrency (Concurrency(..))
 import qualified Bit.RemoteWorkspace as RemoteWorkspace
@@ -78,34 +79,41 @@ runRemoteCommand remoteName args = do
         Nothing -> do
             hPutStrLn stderr $ "fatal: remote '" ++ remoteName ++ "' not found."
             exitWith (ExitFailure 1)
-        Just remote ->
+        Just remote -> do
             let isSequential = "--sequential" `elem` args
                 concurrency = if isSequential then Sequential else Parallel 0
                 cmd = filter (/= "--sequential") args
                 runVerifyCmd repairMode = do
                     let env = BitEnv cwd (Just remote) NoForce
                     runBitM env $ Bit.verify (Bit.VerifyRemotePath remote) repairMode concurrency
-            in case cmd of
-            ["init"] ->
-                RemoteWorkspace.initRemote remote remoteName
-            ("add":paths) ->
-                RemoteWorkspace.addRemote remote paths >>= exitWith
-            ("commit":commitArgs) ->
-                RemoteWorkspace.commitRemote remote commitArgs >>= exitWith
-            ("status":rest) ->
-                RemoteWorkspace.statusRemote remote rest >>= exitWith
-            ("log":rest) ->
-                RemoteWorkspace.logRemote remote rest >>= exitWith
-            ("ls-files":rest) ->
-                RemoteWorkspace.lsFilesRemote remote rest >>= exitWith
-            ["verify"] ->
-                runVerifyCmd Bit.PromptRepair
-            ["repair"] ->
-                runVerifyCmd Bit.AutoRepair
-            _ -> do
-                hPutStrLn stderr $ "error: command not supported in remote context: " ++ unwords cmd
-                hPutStrLn stderr "Supported: init, add, commit, status, log, ls-files, verify, repair"
-                exitWith (ExitFailure 1)
+                rejectFilesystem = do
+                    mType <- Device.readRemoteType cwd remoteName
+                    let isFs = maybe False Device.isFilesystemType mType
+                    when isFs $ do
+                        hPutStrLn stderr "Remote workspaces are only supported for cloud remotes."
+                        hPutStrLn stderr "For filesystem remotes, navigate to the directory and run bit commands there."
+                        exitWith (ExitFailure 1)
+            case cmd of
+                ["init"] ->
+                    rejectFilesystem >> RemoteWorkspace.initRemote remote remoteName
+                ("add":paths) ->
+                    rejectFilesystem >> RemoteWorkspace.addRemote remote paths >>= exitWith
+                ("commit":commitArgs) ->
+                    rejectFilesystem >> RemoteWorkspace.commitRemote remote commitArgs >>= exitWith
+                ("status":rest) ->
+                    rejectFilesystem >> RemoteWorkspace.statusRemote remote rest >>= exitWith
+                ("log":rest) ->
+                    rejectFilesystem >> RemoteWorkspace.logRemote remote rest >>= exitWith
+                ("ls-files":rest) ->
+                    rejectFilesystem >> RemoteWorkspace.lsFilesRemote remote rest >>= exitWith
+                ["verify"] ->
+                    runVerifyCmd Bit.PromptRepair
+                ["repair"] ->
+                    runVerifyCmd Bit.AutoRepair
+                _ -> do
+                    hPutStrLn stderr $ "error: command not supported in remote context: " ++ unwords cmd
+                    hPutStrLn stderr "Supported: init, add, commit, status, log, ls-files, verify, repair"
+                    exitWith (ExitFailure 1)
 
 -- | Helper function to push with upstream tracking
 pushWithUpstream :: BitEnv -> FilePath -> String -> IO ()

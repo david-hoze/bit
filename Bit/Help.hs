@@ -65,7 +65,7 @@ printMainHelp = putStr $ unlines
     , "  merge --continue|--abort          Continue or abort merge"
     , "  branch --unset-upstream           Unset upstream tracking"
     , ""
-    , "Remote workspace:"
+    , "Remote workspace (cloud remotes only):"
     , "  --remote <name> <cmd>             Target a remote workspace (portable)"
     , "  @<remote> <cmd>                   Shorthand (needs quoting in PowerShell)"
     , "  Supported: init, add, commit, status, log, ls-files, verify, repair"

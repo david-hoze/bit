@@ -584,7 +584,7 @@ This is wasteful when the files are already at the destination. The user wants t
 
 ### Solution: Ephemeral Remote Workspaces
 
-The `--remote <name>` flag (or its `@<remote>` shorthand) allows commands to operate against a remote as if it were a working directory, while only downloading small files (for text classification). Large binary files stay on the remote — bit just reads their hashes from `rclone lsjson --hash`.
+The `--remote <name>` flag (or its `@<remote>` shorthand) allows commands to operate against a cloud remote as if it were a working directory, while only downloading small files (for text classification). Large binary files stay on the remote — bit just reads their hashes from `rclone lsjson --hash`. Remote workspaces are only supported for cloud remotes; for filesystem remotes, navigate to the directory and run bit commands there. (`verify` and `repair` work for both types via `--remote`.)
 
 **Key architectural property**: Each command is fully ephemeral. The workflow for every command is:
 1. Fetch the bundle from the remote
@@ -772,7 +772,7 @@ The existing pull flow handles this transparently.
 
 - **Remote is empty**: `scanAndWriteMetadata` finds zero files, auto-commit has nothing to stage — reports "Nothing to add."
 - **Network failure during classification**: Failed downloads treated as binary, warning printed
-- **Filesystem remotes**: `--remote <name>` works for filesystem remotes too, though less useful (user could just `cd` there)
+- **Filesystem remotes**: Remote workspaces (init, add, commit, status, log, ls-files) are only supported for cloud remotes. For filesystem remotes, navigate to the directory and run bit commands there. `verify` and `repair` work for both cloud and filesystem remotes via `--remote`.
 - **Both `@<remote>` and `--remote` specified**: Error with clear message
 - **`--remote` without argument**: Error explaining that a name is required
 
