@@ -194,7 +194,7 @@ bit runs Git with:
 - Git repository initialized in `.bit/index/.git` during `bit init`
 - All git operations use the repo at `.bit/index/.git`
 - Working tree is `.bit/index` (not the project root)
-- Ignore rules: user creates `.bitignore` in the project root; `syncBitignoreToIndex` copies it to `.bit/index/.gitignore` (the standard gitignore location for git's working tree)
+- Ignore rules: user creates `.bitignore` in the project root. Before any command that uses working tree state (add, commit, status, diff, restore, checkout, merge, reset, mv), bit runs **syncBitignoreToIndex**: if `.bitignore` exists it is copied to `.bit/index/.gitignore` with normalization (line endings, trim, drop empty lines); if `.bitignore` does not exist, `.bit/index/.gitignore` is removed if present so the index has no ignore file. The index working tree is thus always in sync with the user's ignore rules for those commands.
 
 **Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes.
 
@@ -356,7 +356,9 @@ Pull uses `applyMergeToWorkingDir` to sync after a merge; when the user runs **m
 
 ## Command Line Interface (Git-Compatible)
 
-**CRITICAL**: The CLI mirrors Git's interface. Users familiar with Git should feel immediately at home.
+**CRITICAL**: The CLI mirrors Git's interface. Users familiar with Git should feel immediately at home. Exit codes follow git's convention: 0 for success, 1 for failure.
+
+Help (`bit help`, `bit -h`, `bit --help`, and `bit help <command>`) works without a repository; all other commands require `.bit` to exist (except `bit init`).
 
 ### Command Mapping
 
@@ -1176,6 +1178,12 @@ metadata instead of their actual content.
 ### Resolution Option 2: Force Local (`bit push --force`)
 
 Upload all local files, overwriting remote. Push metadata bundle. Requires confirmation.
+
+**Push force flags:** `--force` and `--force-with-lease` are mutually exclusive; if both (or `-f` with `--force-with-lease`) are given, bit exits with "fatal: Cannot use both --force and --force-with-lease". Neither flag affects verification — push always verifies local working tree first; they only affect ancestry and overwrite policy.
+
+**`--force`:** Skips the ancestry check. Push proceeds even when remote has diverged or is ahead. For a **non-bit-occupied** remote (path contains files but not a bit repo), only `--force` allows overwriting; without it, bit prints the existing paths and suggests "To initialize anyway (destructive): bit push --force".
+
+**`--force-with-lease`:** Proceeds only if nobody else has pushed since our last fetch. Implementation: (1) Before fetching, read the current **tracking ref** `refs/remotes/<name>/main` (call this the pre-fetch value; it may not exist on first push). (2) Fetch remote history via the push seam and obtain the **post-fetch remote ref** (the hash the remote actually has). (3) If we had no previous tracking ref, proceed (first push or no ref yet). (4) If we have both, proceed only if pre-fetch and post-fetch are equal — meaning the remote has not changed since we last fetched. (5) If they differ, error: "Remote has changed since last fetch! Someone else pushed to the remote. Run 'bit fetch' to update your local view." and exit 1. (6) If the remote state cannot be determined after fetch, error with "Could not determine remote state." So re-implementing requires capturing the tracking ref before the seam fetch, then comparing it to the ref returned by the fetch; only then decide to execute push or abort.
 
 ### Resolution Option 3: Manual Merge (`--manual-merge`)
 

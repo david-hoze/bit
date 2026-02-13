@@ -264,7 +264,7 @@ handleNonBit seam remote samples = do
             hPutStrLn stderr "-------------------------------------------------------"
             hPutStrLn stderr "[!] STOP: Remote is NOT a bit repository!"
             hPutStrLn stderr $ "Found existing files: " ++ List.intercalate ", " samples
-            hPutStrLn stderr "To initialize anyway (destructive): bit init --force"
+            hPutStrLn stderr "To initialize anyway (destructive): bit push --force"
             hPutStrLn stderr "-------------------------------------------------------"
 
 -- ============================================================================
