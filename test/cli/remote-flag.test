@@ -1,11 +1,11 @@
 # =============================================================================
-# --remote Flag Test (Ephemeral Workspace)
+# --remote Flag Test
 #
-# Tests the --remote <name> flag as a portable alternative to @<remote> syntax.
-# Verifies equivalence with @<remote> for all remote workspace commands, and
-# tests error handling for misuse.
-# Uses ephemeral workspace pattern: no persistent workspace between commands.
-# Prerequisites: filesystem remote support, rclone
+# Tests the --remote <name> flag behavior.
+# Workspace commands (init, add, status, commit, log, ls-files) are rejected
+# for filesystem remotes. Verify and repair bypass that restriction.
+# Error handling for misuse is also tested.
+# Prerequisites: filesystem remote support
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
@@ -16,38 +16,13 @@ cleanup done
 >>>= 0
 
 # ======================================================================
-# SECTION 1: SETUP - Create a filesystem remote with test files
+# SECTION 1: SETUP
 # ======================================================================
 
-# ---- Create remote directory with test files ----
 mkdir test\cli\output\fs_remote_rflag
 <<<
 >>>
 >>>= 0
-
-echo Text file 1 > test\cli\output\fs_remote_rflag\file1.txt
-<<<
->>>
->>>= 0
-
-echo Binary content > test\cli\output\fs_remote_rflag\data.bin
-<<<
->>>
->>>= 0
-
-mkdir test\cli\output\fs_remote_rflag\subdir
-<<<
->>>
->>>= 0
-
-echo Subdir text > test\cli\output\fs_remote_rflag\subdir\file2.txt
-<<<
->>>
->>>= 0
-
-# ======================================================================
-# SECTION 2: INIT LOCAL REPO AND ADD REMOTE
-# ======================================================================
 
 mkdir test\cli\output\work_rflag_a
 <<<
@@ -65,75 +40,47 @@ cd test\cli\output\work_rflag_a & bit remote add origin ..\fs_remote_rflag
 >>>= 0
 
 # ======================================================================
-# SECTION 3: TEST --remote <name> init (creates empty bundle, no scan)
+# SECTION 2: Workspace commands rejected for filesystem remotes
 # ======================================================================
 
-# ---- --remote origin init should create an empty bundle on remote ----
+# ---- --remote origin init rejected ----
 cd test\cli\output\work_rflag_a & bit --remote origin init
 <<<
->>> /[Ii]nitialized.*bit.*repository.*on.*remote/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ---- Verify NO persistent workspace was created ----
-cd test\cli\output\work_rflag_a & if exist .bit\remote-workspaces\origin\.git (echo workspace exists) else (echo no workspace)
-<<<
->>>
-no workspace
->>>= 0
-
-# ---- Verify bundle was created on remote ----
-cd test\cli\output\work_rflag_a & if exist ..\fs_remote_rflag\.bit\bit.bundle echo bundle exists
-<<<
->>>
-bundle exists
->>>= 0
-
-# ======================================================================
-# SECTION 4: TEST --remote <name> add (scans, writes metadata, auto-commits)
-# ======================================================================
-
-# ---- Stage all files in remote workspace (scans and auto-commits) ----
+# ---- --remote origin add rejected ----
 cd test\cli\output\work_rflag_a & bit --remote origin add .
 <<<
->>> /Scanning remote|Remote metadata updated/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ======================================================================
-# SECTION 5: TEST --remote <name> status (scans remote and shows status)
-# ======================================================================
-
+# ---- --remote origin status rejected ----
 cd test\cli\output\work_rflag_a & bit --remote origin status
 <<<
->>> /Scanning remote|On branch main/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ======================================================================
-# SECTION 6: TEST --remote <name> commit (amend use case)
-# ======================================================================
-
-cd test\cli\output\work_rflag_a & bit --remote origin commit --amend -m "Commit via --remote flag"
+# ---- --remote origin commit rejected ----
+cd test\cli\output\work_rflag_a & bit --remote origin commit -m "test"
 <<<
->>> /Commit via --remote flag/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ---- Verify bundle was updated on remote ----
-cd test\cli\output\work_rflag_a & if exist ..\fs_remote_rflag\.bit\bit.bundle echo bundle exists
-<<<
->>>
-bundle exists
->>>= 0
-
-# ======================================================================
-# SECTION 7: TEST --remote <name> log
-# ======================================================================
-
+# ---- --remote origin log rejected ----
 cd test\cli\output\work_rflag_a & bit --remote origin log --oneline
 <<<
->>> /Commit via --remote flag/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
+
+# ---- --remote origin ls-files rejected ----
+cd test\cli\output\work_rflag_a & bit --remote origin ls-files
+<<<
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
 # ======================================================================
-# SECTION 8: ERROR CASES
+# SECTION 3: ERROR CASES
 # ======================================================================
 
 # ---- --remote without argument ----
@@ -153,6 +100,16 @@ cd test\cli\output\work_rflag_a & bit --remote origin push
 <<<
 >>>2 /not supported in remote context/
 >>>= 1
+
+# ======================================================================
+# SECTION 4: verify via --remote still works for filesystem remotes
+# ======================================================================
+
+# ---- Push so remote is a valid bit repo ----
+cd test\cli\output\work_rflag_a & echo test content > file.txt & bit add file.txt & bit commit -m "Initial" & bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
 
 # ---- verify via --remote prefix should work ----
 cd test\cli\output\work_rflag_a & bit --remote origin verify

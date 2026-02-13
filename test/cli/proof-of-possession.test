@@ -9,6 +9,7 @@
 # - Push verification blocks even with --force (force only skips ancestry check)
 # - Pull verification blocks when remote files don't match remote metadata
 # - --accept-remote bypasses verification on pull
+# - --manual-merge bypasses verification on pull
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
@@ -99,6 +100,12 @@ cd test\cli\output\work_pop_remote & echo corrupted content > file.txt & cd ..\w
 cd test\cli\output\work_pop_remote & echo corrupted again > file.txt & cd ..\work_pop_local & bit pull origin --accept-remote
 <<<
 >>> /Accepting remote file state/
+>>>= 0
+
+# ---- Verify --manual-merge bypasses verification (remote still corrupted from above) ----
+cd test\cli\output\work_pop_remote & echo corrupted for manual merge > file.txt & cd ..\work_pop_local & bit pull origin --manual-merge
+<<<
+>>> /Scanning remote files|Comparing|No remote divergence/
 >>>= 0
 
 # ======================================================================

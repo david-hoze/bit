@@ -1,11 +1,11 @@
 # =============================================================================
-# Remote-Targeted Commands Test (Ephemeral Workspace)
+# Remote-Targeted Commands Test
 #
 # Tests the @<remote> / --remote syntax for operating on remote repositories.
-# Uses an ephemeral workspace pattern: each command fetches the bundle from
-# the remote, inflates into a temp dir, operates, re-bundles, and pushes back.
-# No persistent workspace between commands.
-# Prerequisites: rclone (for remote file operations)
+# Workspace commands (init, add, status, commit, log, ls-files) are rejected
+# for filesystem remotes. Verify and repair bypass that restriction.
+# Error handling is also tested.
+# Prerequisites: filesystem remote support
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
@@ -16,48 +16,14 @@ cleanup done
 >>>= 0
 
 # ======================================================================
-# SECTION 1: SETUP - Create a filesystem remote with test files
+# SECTION 1: SETUP
 # ======================================================================
 
-# ---- Create remote directory with test files ----
 mkdir test\cli\output\fs_remote_rmt
 <<<
 >>>
 >>>= 0
 
-# ---- Create some text files in the remote ----
-echo Text file 1 > test\cli\output\fs_remote_rmt\file1.txt
-<<<
->>>
->>>= 0
-
-echo Text file 2 > test\cli\output\fs_remote_rmt\file2.md
-<<<
->>>
->>>= 0
-
-# ---- Create a subdirectory with files ----
-mkdir test\cli\output\fs_remote_rmt\subdir
-<<<
->>>
->>>= 0
-
-echo Subdir text > test\cli\output\fs_remote_rmt\subdir\file3.txt
-<<<
->>>
->>>= 0
-
-# ---- Create a binary file (simulated) ----
-echo Binary content > test\cli\output\fs_remote_rmt\data.bin
-<<<
->>>
->>>= 0
-
-# ======================================================================
-# SECTION 2: INIT LOCAL REPO AND ADD REMOTE
-# ======================================================================
-
-# ---- Create local repo ----
 mkdir test\cli\output\work_rmt_a
 <<<
 >>>
@@ -68,21 +34,20 @@ cd test\cli\output\work_rmt_a & bit init
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-# ---- Add filesystem remote ----
 cd test\cli\output\work_rmt_a & bit remote add origin ..\fs_remote_rmt
 <<<
 >>> /Remote.*added/
 >>>= 0
 
 # ======================================================================
-# SECTION 3: TEST REMOTE-TARGETED INIT
+# SECTION 2: @remote workspace commands rejected for filesystem remotes
 # ======================================================================
 
-# ---- Test @origin init - creates empty bundle on remote ----
+# ---- @origin init rejected ----
 cd test\cli\output\work_rmt_a & bit @origin init
 <<<
->>> /[Ii]nitialized.*bit.*repository.*on.*remote/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
 # ---- Verify NO persistent workspace was created ----
 cd test\cli\output\work_rmt_a & if exist .bit\remote-workspaces\origin\.git (echo workspace exists) else (echo no workspace)
@@ -91,151 +56,77 @@ cd test\cli\output\work_rmt_a & if exist .bit\remote-workspaces\origin\.git (ech
 no workspace
 >>>= 0
 
-# ---- Verify bundle was created on remote ----
-cd test\cli\output\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
+# ---- @origin add rejected ----
+cd test\cli\output\work_rmt_a & bit @origin add .
 <<<
->>>
-bundle exists
->>>= 0
-
-# ---- Test error: init when already initialized ----
-cd test\cli\output\work_rmt_a & bit @origin init
-<<<
->>>2 /already has a bit repository/
+>>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
-# ======================================================================
-# SECTION 4: TEST REMOTE-TARGETED ADD (scans remote, writes metadata)
-# ======================================================================
-
-# ---- Test add . — scans remote files, writes metadata, auto-commits ----
-cd test\cli\output\work_rmt_a & bit @origin add .
-<<<
->>> /Scanning remote|Remote metadata updated/
->>>= 0
-
-# ---- Verify bundle was updated on remote ----
-cd test\cli\output\work_rmt_a & if exist ..\fs_remote_rmt\.bit\bit.bundle echo bundle exists
-<<<
->>>
-bundle exists
->>>= 0
-
-# ---- Test add again with no changes (should report up to date) ----
-cd test\cli\output\work_rmt_a & bit @origin add .
-<<<
->>> /Nothing to add|up to date/
->>>= 0
-
-# ---- Test error: add with non-existent remote ----
+# ---- @nonexistent add error (remote not found) ----
 cd test\cli\output\work_rmt_a & bit @nonexistent add .
 <<<
 >>>2 /not found/
 >>>= 1
 
-# ======================================================================
-# SECTION 5: TEST REMOTE-TARGETED STATUS (read-only, ephemeral)
-# ======================================================================
-
-# ---- Check status — scans remote and shows git status ----
+# ---- @origin status rejected ----
 cd test\cli\output\work_rmt_a & bit @origin status
 <<<
->>> /Scanning remote|On branch main/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ---- Add a new file to the remote (simulating untracked file) ----
-echo New untracked file > test\cli\output\fs_remote_rmt\newfile.txt
-<<<
->>>
->>>= 0
-
-# ---- Status should now show the untracked file ----
-cd test\cli\output\work_rmt_a & bit @origin status
-<<<
->>> /newfile\.txt/
->>>= 0
-
-# ---- Add and commit the new file ----
-cd test\cli\output\work_rmt_a & bit @origin add .
-<<<
->>> /Remote metadata updated/
->>>= 0
-
-# ======================================================================
-# SECTION 6: TEST REMOTE-TARGETED LOG (read-only, ephemeral)
-# ======================================================================
-
-# ---- View commit history — should show initial + add commits ----
+# ---- @origin log rejected ----
 cd test\cli\output\work_rmt_a & bit @origin log --oneline
 <<<
->>> /Initial remote repository|Update remote metadata/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ======================================================================
-# SECTION 7: TEST REMOTE-TARGETED LS-FILES
-# ======================================================================
-
-# ---- List tracked files — should show all committed files ----
+# ---- @origin ls-files rejected ----
 cd test\cli\output\work_rmt_a & bit @origin ls-files
 <<<
->>> /file1\.txt/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ---- ls-files with --remote flag ----
+# ---- --remote origin ls-files also rejected ----
 cd test\cli\output\work_rmt_a & bit --remote origin ls-files
 <<<
->>> /file2\.md/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ======================================================================
-# SECTION 8: TEST REMOTE-TARGETED COMMIT (amend use case)
-# ======================================================================
-
-# ---- Amend the last commit message ----
-cd test\cli\output\work_rmt_a & bit @origin commit --amend -m "Initial metadata scan"
+# ---- @origin commit rejected ----
+cd test\cli\output\work_rmt_a & bit @origin commit -m "test"
 <<<
->>> /Initial metadata scan/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ---- Verify the amended message shows in log ----
-cd test\cli\output\work_rmt_a & bit @origin log --oneline
-<<<
->>> /Initial metadata scan/
->>>= 0
-
-# ======================================================================
-# SECTION 9: TEST --remote FLAG (portable alternative to @)
-# ======================================================================
-
-# ---- Test --remote flag for status ----
+# ---- --remote origin status also rejected ----
 cd test\cli\output\work_rmt_a & bit --remote origin status
 <<<
->>> /Scanning remote|On branch main/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
-# ---- Test --remote flag for log ----
+# ---- --remote origin log also rejected ----
 cd test\cli\output\work_rmt_a & bit --remote origin log --oneline
 <<<
->>> /Initial metadata scan/
->>>= 0
+>>>2 /Remote workspaces are only supported for cloud remotes/
+>>>= 1
 
 # ======================================================================
-# SECTION 10: TEST ERROR CASES
+# SECTION 3: ERROR CASES
 # ======================================================================
 
-# ---- Test unsupported command in remote context ----
+# ---- Unsupported command in remote context ----
 cd test\cli\output\work_rmt_a & bit @origin push
 <<<
 >>>2 /not supported in remote context/
 >>>= 1
 
-# ---- Test with non-existent remote ----
+# ---- Non-existent remote ----
 cd test\cli\output\work_rmt_a & bit @fake init
 <<<
 >>>2 /remote.*not found/
 >>>= 1
 
-# ---- Test @remote commands without a bit repository ----
+# ---- @remote commands without a bit repository ----
 mkdir test\cli\output\work_rmt_a\notrepo
 <<<
 >>>

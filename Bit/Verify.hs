@@ -29,8 +29,7 @@ import Bit.Types (Hash(..), HashAlgo(..), Path(..), FileEntry(..), EntryKind(..)
 import Bit.Utils (filterOutBitPaths, toPosix)
 import Bit.Concurrency (Concurrency(..), runConcurrently, ioConcurrency)
 import System.FilePath ((</>), makeRelative, normalise, takeDirectory)
-import System.Directory (doesFileExist, listDirectory, doesDirectoryExist, removeFile, createDirectoryIfMissing, removeDirectoryRecursive, getPermissions, setPermissions, setOwnerWritable, setModificationTime)
-import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
+import System.Directory (doesFileExist, listDirectory, doesDirectoryExist, removeFile, createDirectoryIfMissing, removeDirectoryRecursive, getPermissions, setPermissions, setOwnerWritable)
 import Data.List (isPrefixOf)
 import Data.Maybe (maybeToList, isJust)
 import qualified Data.ByteString as BS
@@ -223,10 +222,12 @@ findIssuesFromScan root entries = do
   -- 1. Write metadata
   Scan.writeMetadataFiles root entries
 
-  -- 2. Defeat racy git: set mtime to epoch so git always re-reads content.
-  let metaFiles = [indexDir </> unPath (path e) | e <- entries
-                  , case kind e of File{} -> True; _ -> False]
-  mapM_ (\f -> setModificationTime f (posixSecondsToUTCTime 0)) metaFiles
+  -- 2. Reset git's index to HEAD to clear cached stat data.
+  --    git diff caches (mtime, size) for unchanged files.  read-tree HEAD
+  --    recreates all index entries with zeroed stat fields (size=0), so
+  --    git always sees a size mismatch against the actual metadata files
+  --    and is forced to re-read their content on the subsequent diff.
+  void $ Git.runGitAt indexDir ["read-tree", "HEAD"]
 
   -- 3. git diff in the index repo to find files changed from committed state
   (diffCode, diffOut, _) <- Git.runGitAt indexDir ["diff", "--name-only"]
@@ -234,16 +235,16 @@ findIssuesFromScan root entries = do
         | diffCode == ExitSuccess = filter (not . null) (lines diffOut)
         | otherwise               = []
 
-  -- 4. Also check for missing files: committed paths not in working tree
+  -- 5. Also check for missing files: committed paths not in working tree
   (lsCode, lsOut, _) <- Git.runGitAt indexDir ["ls-tree", "-r", "--name-only", "HEAD"]
   let committedPaths
         | lsCode == ExitSuccess = filter isUserFile $ filter (not . null) (lines lsOut)
         | otherwise             = []
 
-  -- 5. Build issues from changed files (hash mismatches)
+  -- 6. Build issues from changed files (hash mismatches)
   mismatchIssues <- concat <$> mapM (checkChanged indexDir) changedPaths
 
-  -- 6. Build issues from missing files (committed but not in working tree)
+  -- 7. Build issues from missing files (committed but not in working tree)
   missingFiltered <- fmap concat $ mapM (\p -> do
     exists <- doesFileExist (root </> p)
     pure [Missing (Path p) | not exists]

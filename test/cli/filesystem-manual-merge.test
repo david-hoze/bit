@@ -1,0 +1,113 @@
+# =============================================================================
+# Filesystem Manual Merge Tests
+#
+# Tests that --manual-merge is properly dispatched for filesystem remotes
+# (not silently treated as a normal pull).
+#
+# Covers:
+# - --manual-merge with no divergence falls through to normal pull
+# - --manual-merge with divergence creates conflict directories
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_mm_local 2>nul & rmdir /s /q test\cli\output\work_mm_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP (use .bin files for binary classification)
+# ======================================================================
+
+mkdir test\cli\output\work_mm_local
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_mm_local & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Create a binary file (.bin extension forces binary classification) ----
+cd test\cli\output\work_mm_local & echo original binary content> data.bin & bit add data.bin & bit commit -m "Initial"
+<<<
+>>> /.*1 file changed.*/
+>>>= 0
+
+mkdir test\cli\output\work_mm_remote
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_mm_local & bit remote add origin ..\work_mm_remote
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\output\work_mm_local & bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: --manual-merge with no divergence (falls through to normal pull)
+# ======================================================================
+
+# ---- Make a change at the remote so there's something to pull ----
+cd test\cli\output\work_mm_remote & echo remote binary change> data.bin & bit add data.bin & bit commit -m "Remote edit"
+<<<
+>>> /.*1 file changed.*/
+>>>= 0
+
+# ---- Pull with --manual-merge: no divergence, should proceed with normal pull ----
+cd test\cli\output\work_mm_local & bit pull origin --manual-merge
+<<<
+>>> /No remote divergence detected.*Proceeding with normal pull/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: --manual-merge with divergence (creates conflict directories)
+# ======================================================================
+
+# ---- Push current state to re-sync ----
+cd test\cli\output\work_mm_local & bit add data.bin & bit commit -m "Re-sync" & bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ---- Corrupt binary file at remote (actual file doesn't match metadata) ----
+cd test\cli\output\work_mm_remote & echo corrupted by external tool> data.bin
+<<<
+>>>
+>>>= 0
+
+# ---- Make a new commit at remote so local has something to merge ----
+cd test\cli\output\work_mm_remote & echo new tracked file> other.bin & bit add other.bin & bit commit -m "Add other"
+<<<
+>>> /.*1 file changed.*/
+>>>= 0
+
+# ---- Pull with --manual-merge: should detect divergence and create conflict dirs ----
+cd test\cli\output\work_mm_local & bit pull origin --manual-merge
+<<<
+>>> /Remote divergence detected|conflicts/
+>>>= 0
+
+# ---- Verify conflict directory was created ----
+if exist "test\cli\output\work_mm_local\.bit\conflicts" (echo conflicts exist) else (echo no conflicts)
+<<<
+>>>
+conflicts exist
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_mm_local 2>nul & rmdir /s /q test\cli\output\work_mm_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

@@ -34,6 +34,21 @@ bit occupies a different niche than git-lfs and git-annex:
 
 bit's killer feature is **clarity** — users always know what state their files are in, what bit is about to do, and how to recover from errors.
 
+### Design Philosophy: Stand on git and rclone
+
+bit's architecture rests on one principle: **use git and rclone as primitives, never reimplement what they already do.**
+
+Git is an extraordinarily capable metadata engine — branching, merging, diffing, conflict detection, reflog, gc. rclone is a battle-tested file mover that speaks every cloud protocol. bit's job is to wire them together, not to compete with them.
+
+In practice this means:
+- **Git bundles** for serializing history over dumb cloud storage — one file, full DAG, `git fetch` unpacks it. No custom wire format.
+- **Git native remotes** for filesystem peers — `git fetch /path/to/.bit/index` and `git merge`, just like two ordinary repos.
+- **`git diff --name-status`** for deriving sync actions — no remote file scan, no directory diff algorithm.
+- **`rclone copy --files-from`** for bulk file transfer — one subprocess call for all files, works identically for local and cloud destinations.
+- **`git merge --no-commit --no-ff`** for three-way merge — git handles the hard work, bit reads the result.
+
+When you find yourself writing logic that git or rclone already handles, stop and wire into the existing tool instead. Every custom reimplementation is a surface area for bugs that git/rclone have already fixed.
+
 ---
 
 ## Core Architecture
@@ -527,6 +542,23 @@ For filesystem remotes, bit creates a **complete bit repository** at the remote:
 
 **Filesystem remote receives pushes via direct path**: The remote side does not need a named git remote pointing back. Different machines with different local paths can push to the same filesystem remote; the pusher passes its path directly to `git fetch`.
 
+#### Git Native Remotes
+
+bit registers each bit remote as a **git native remote** inside `.bit/index/.git/`, using the same name. This is how git fetch/push/merge and tracking refs work for free.
+
+The remote URL depends on the transport:
+
+| Remote type | git remote URL | Example |
+|---|---|---|
+| Filesystem | `<remotePath>/.bit/index` | `/mnt/usb/project/.bit/index` |
+| Cloud | `.git/bundles/<name>.bundle` (relative to `.bit/index/`) | `.git/bundles/gdrive.bundle` |
+
+When `bit remote add origin /mnt/usb/project` runs, it calls `Git.addRemote "origin" "/mnt/usb/project/.bit/index"` — after that, `git fetch origin` inside `.bit/index/` talks directly to the remote's index repo.
+
+When `bit remote add gdrive gdrive:projects/video` runs, it calls `Git.addRemote "gdrive" ".git/bundles/gdrive.bundle"` — the bundle file at `.bit/index/.git/bundles/gdrive.bundle` is downloaded from the cloud via rclone before each fetch, and `git fetch gdrive` unpacks it into `refs/remotes/gdrive/main`.
+
+This means `git log --all`, `git diff refs/remotes/origin/main`, `bit status` comparison — all of these work because git already knows about the remote refs. bit does not maintain its own ref database.
+
 #### Unified Push Architecture
 
 Push uses a single code path for both cloud and filesystem remotes. The only
@@ -558,27 +590,37 @@ can compare against them.
 7. **Push metadata** via seam (`ptPushMetadata`)
 8. **Update tracking ref** (`Git.updateRemoteTrackingBranchToHead`) — same for both
 
-#### Filesystem Pull Flow
+#### Unified Pull Architecture
 
+Pull mirrors the push design — a single code path for both cloud and filesystem
+remotes, with only the metadata fetch abstracted behind a `PullSeam`:
+
+```haskell
+data PullSeam = PullSeam
+    { psFetchMetadata :: IO Bool       -- Fetch remote metadata, return success
+    , psVerifyRemote  :: FilePath -> IO ()  -- Verify remote before merge
+    }
 ```
-filesystemPull :: FilePath -> Remote -> PullOptions -> IO ()
-```
 
-1. **Fetch remote into local**: `git -C local/.bit/index fetch remote/.bit/index/.git main:refs/remotes/origin/main`
-2. **Proof of possession**: Verify remote working tree matches remote metadata (unless `--accept-remote`)
-3. **Merge locally**: Delegate to unified `pullLogic` or `pullAcceptRemoteImpl`
-   - Note: Upstream tracking (`branch.main.remote`) is NOT auto-set; user must use `bit push -u <remote>`
-5. **Sync files**: The unified logic uses the filesystem transport to copy files
-   - Text files: Copy from local index (git merged the content there)
-   - Binary files: Copy from remote working tree
-6. **Update tracking ref**: Set `refs/remotes/origin/main` to the remote's HEAD hash
+**Cloud seam** (`mkCloudPullSeam`): Downloads the bundle via rclone, saves to
+`.bit/index/.git/bundles/<name>.bundle`, runs `git fetch <name>` to populate
+`refs/remotes/<name>/main`.
 
-**Key change**: Filesystem pull uses the same merge orchestration as cloud pull,
-parameterized by a remote root string (`remoteUrl remote`). The merge follows the same patterns:
-- First pull (unborn branch): `checkoutRemoteAsMain` (with `--no-track` to prevent auto-setting upstream) then `syncAllFilesFromHEAD`
-- Normal: `git merge --no-commit --no-ff` then `applyMergeToWorkingDir remoteRoot cwd oldHead`
-- Conflicts: Same `Conflict.resolveAll` flow with (l)ocal/(r)emote choices
-- `--accept-remote`: Force-checkout (with `--no-track`) then sync files via `syncAllFilesFromHEAD`/`applyMergeToWorkingDir`
+**Filesystem seam** (`mkFilesystemPullSeam`): Runs `git fetch <remotePath>/.bit/index`
+directly — no bundle, no rclone, git talks repo-to-repo.
+
+Everything else is shared: merge orchestration, conflict resolution, file sync,
+`--accept-remote`, `--manual-merge`, tracking ref updates.
+
+**Pull flow** (both transports):
+1. **Fetch remote metadata** via seam (`psFetchMetadata`)
+2. **Verify remote** via seam (`psVerifyRemote`) — unless `--accept-remote` or `--manual-merge`
+3. **Dispatch by mode**:
+   - Normal: `git merge --no-commit --no-ff`, then `applyMergeToWorkingDir`
+   - `--accept-remote`: Force-checkout (with `--no-track`), then sync files
+   - `--manual-merge`: Detect divergence, create conflict directories
+4. **Sync files**: Text from index, binary via rclone (same `rcloneCopyFiles`)
+5. **Update tracking ref**: Set `refs/remotes/<name>/main` to the fetched hash
 
 #### Text vs Binary File Sync
 
@@ -1201,17 +1243,15 @@ Interactive per-file conflict resolution:
     (`--accept-remote`, `--force`, `--manual-merge`) serve as escape hatches when
     verification fails.
 
-12. **Transport strategy split**: Push and pull dispatch based on `RemoteType`
-    classification. Cloud remotes use bundle + rclone (dumb storage). Filesystem
-    remotes use direct git fetch/merge (smart storage — full bit repo at remote).
-    This split is keyed off `Device.readRemoteType`/`isFilesystemType` and happens
-    in `Bit.Core.push` and `Bit.Core.pull`. **Merge orchestration is unified**: Both
-    cloud and filesystem pull paths use the same `pullLogic` and
-    `pullAcceptRemoteImpl` functions, parameterized by a remote root string
-    (`remoteUrl remote`). File transfers use `rcloneCopyFiles` (batch via
-    `rclone copy --files-from`) which handles both local and cloud destinations.
-    All `oldHead` capture, conflict resolution, tracking ref updates, and MERGE_HEAD
-    handling is shared.
+12. **Seam pattern for transport differences**: Both push and pull use a single
+    code path for cloud and filesystem remotes. The only difference — how
+    metadata is fetched/pushed — is isolated behind a small seam record
+    (`PushSeam` for push, `PullSeam` for pull). Everything else is shared:
+    remote state classification, file sync via `deriveActions` + rclone,
+    merge orchestration, conflict resolution, `oldHead` capture, tracking
+    ref updates, MERGE_HEAD handling. This split is keyed off
+    `Device.readRemoteType`/`isFilesystemType` and happens once at the top
+    of `Bit.Core.push` and `Bit.Core.pull`.
 
 13. **Filesystem remotes are full repos**: When pushing to a filesystem path,
     bit creates a complete bit repository at the remote (via `initializeRepoAt`).
@@ -1525,6 +1565,16 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
 - Use `git clone` in bundle inflation on Windows — temp directory cleanup may
   not fully complete due to file locking, causing "directory already exists"
   errors; use `git init` + `git fetch` + `git reset --hard` instead
+- Call `git` directly via `readProcessWithExitCode "git"` or `System.Process`
+  outside `Internal/Git.hs` — all git commands must go through `Git.runGitRaw`,
+  `Git.runGitAt`, or the typed wrappers in `Internal/Git.hs`. This keeps the
+  git interface in one place, makes the `-C .bit/index` base flags consistent,
+  and prevents accidental git calls against the wrong working directory
+- Copy or transfer files without rclone outside `Internal/Transport.hs` —
+  all file transfers between local and remote (cloud or filesystem) must use
+  rclone via Transport. The only exception is small local-to-local copies
+  that are part of internal bookkeeping (e.g., copying a text file from
+  `.bit/index/` to the working tree, or writing a metadata file)
 - Create `.bit/` from non-init code paths — only `init` and `initializeRepoAt`
   may create `.bit/` from scratch. All other functions (`scanWorkingDir`,
   `writeMetadataFiles`, `saveCacheEntry`) must check that `.bit/` already
@@ -1540,9 +1590,13 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
 - Use strict `ByteString` operations for all file IO — never `Prelude.readFile`, `writeFile`, or lazy ByteString/Text
 - Use `Bit.ConcurrentFileIO.readFileBinaryStrict` / `readFileUtf8Strict` for reading
 - Match Git's CLI conventions and output format
+- Route all git commands through `Internal/Git.hs` (`runGitRaw`, `runGitAt`, etc.)
+- Route all file transfers through `Internal/Transport.hs` (rclone wrappers)
 - Keep Transport dumb — no domain knowledge in Transport
 - Keep Git.hs dumb — no domain interpretation
 - All business logic in Bit/Core/*.hs
+- Prefer git/rclone primitives over custom implementations — if git or rclone
+  already solves the problem, wire into it instead of reimplementing
 - Use the unified metadata parser from `bit/Internal/Metadata.hs`
 - After pull/merge, set refs/remotes/origin/main to the bundle hash, not HEAD
 - Capture `oldHead` before any git operation that changes HEAD, then use
