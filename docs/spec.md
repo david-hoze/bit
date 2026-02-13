@@ -198,7 +198,7 @@ bit/Commands.hs → Bit/Core/*.hs → Internal/Transport.hs → rclone (only her
                    Internal/Git.hs → git (only here!)
 ```
 
-- **Internal/Transport.hs** — Dumb rclone wrapper. Knows how to `copyTo`, `moveTo`, `deleteFile`, `listJson`, `check`. Takes `Remote` + relative paths. Does NOT know about `.bit/`, bundles, `RemoteState`, or `FetchResult`. Captures rclone JSON output as raw UTF-8 bytes to correctly handle non-ASCII filenames (Hebrew, Chinese, emoji, etc.). Uses `bracket` for exception-safe subprocess resource cleanup.
+- **Internal/Transport.hs** — Dumb rclone wrapper. Exposes `copyToRemote`, `copyFromRemote`, `moveRemote`, `deleteRemote`, `listRemoteJson`, `listRemoteJsonWithHash`, `checkRemote`, etc. Takes `Remote` + relative paths. Does NOT know about `.bit/`, bundles, `RemoteState`, or `FetchResult`. Captures rclone JSON output as raw UTF-8 bytes to correctly handle non-ASCII filenames (Hebrew, Chinese, emoji, etc.). Uses `bracket` for exception-safe subprocess resource cleanup.
 - **Internal/Git.hs** — Dumb git wrapper. Knows how to run git commands. Takes args. Does NOT interpret results in domain terms.
 - **Bit/Core/*.hs** — Smart business logic, split by concern. `Bit.Core` re-exports the public API. Sub-modules: `Bit.Core.Push` (push logic + PushSeam), `Bit.Core.Pull` (pull + merge + conflict), `Bit.Core.Fetch` (fetch + remote state classification), `Bit.Core.Transport` (shared action derivation + working-tree sync), `Bit.Core.Verify` (verify + repair), `Bit.Core.Init` (repo initialization), `Bit.Core.Helpers` (shared types + utilities), `Bit.Core.RemoteManagement` (remote add/show), `Bit.Core.GitPassthrough` (git command delegation). All domain knowledge lives here. Calls Transport and Git, never calls `readProcessWithExitCode` directly.
 - **bit/Commands.hs** — Entry point. Parses CLI, resolves the remote, builds `BitEnv`, dispatches to `Bit.Core`.
@@ -370,6 +370,7 @@ past the merge).
 | `bit --remote <name> commit -m <msg>` | — | Commit in ephemeral workspace and push bundle |
 | `bit --remote <name> status` | — | Scan remote and show status including untracked files (read-only, ephemeral) |
 | `bit --remote <name> log` | — | Show remote workspace history (read-only, ephemeral) |
+| `bit --remote <name> ls-files` | — | Show tracked files on remote (read-only, ephemeral) |
 | `bit @<remote> <cmd>` | — | Shorthand for `--remote` (needs quoting in PowerShell) |
 
 ---
@@ -394,7 +395,7 @@ past the merge).
    - If not set and "origin" exists, **`bit fetch` uses it as fallback** (git-standard behavior — fetch is read-only)
    - If neither upstream nor "origin", commands fail with error suggesting `bit push <remote>` or `bit push -u <remote>`
 
-5. **First pull does NOT set upstream**: When pulling for the first time (unborn branch), `checkoutRemoteAsMain` uses `git checkout -B main --no-track refs/remotes/origin/main`. This prevents automatic upstream tracking setup. Users must use `bit push -u <remote>` to explicitly configure tracking.
+5. **First pull does NOT set upstream**: When pulling for the first time (unborn branch), `checkoutRemoteAsMain` uses `git checkout -B main --no-track refs/remotes/<name>/main` (where `<name>` is the remote being pulled from, e.g. `origin`). This prevents automatic upstream tracking setup. Users must use `bit push -u <remote>` to explicitly configure tracking.
 
 6. **Internal git remote vs upstream tracking**: bit's internal git repo has a remote named "origin" (used for fetching refs from bundles), but this is distinct from upstream tracking config (`branch.main.remote`). The internal remote is set up automatically; upstream tracking is never automatic. This distinction is critical: `Git.addRemote` configures the internal git remote (required for bundle operations), while `Git.setupBranchTrackingFor` sets `branch.main.remote` (must only be called from `push -u`).
 
@@ -944,72 +945,35 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 2. **Duplication** — the command must be listed in *both* `skipScan` and the `case` dispatch
 3. **Fragile** — easy to miss commands (e.g., `remote add` was discovered to be missing from `skipScan`, causing 860 files to be scanned for a config-only operation)
 
-**Solution**: Invert the logic — scan on demand, not by default. Commands are now classified into three tiers, with each command explicitly declaring its needs:
+**Solution**: Invert the logic — scan on demand, not by default. Commands are classified by whether they need env, scan, or both; each branch in the dispatch explicitly declares its needs.
 
-**Implementation** (`Bit/Commands.hs`):
-
-```haskell
--- Lightweight env (no scan) — for fetch, verify, and explicit-remote commands (falls back to "origin")
-let baseEnv = do
-        mRemote <- getDefaultRemote cwd
-        pure $ BitEnv cwd mRemote forceMode
-
--- Strict upstream env — requires branch.main.remote (for push and pull without explicit remote)
-let upstreamEnv = do
-        mRemote <- getUpstreamRemote cwd
-        pure $ BitEnv cwd mRemote forceMode
-
--- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
-let scanAndWrite = do
-        syncBitignoreToIndex cwd
-        localFiles <- Scan.scanWorkingDir cwd
-        Scan.writeMetadataFiles cwd localFiles
-
-case cmd of
-    -- ── No env needed ────────────────────────────────────
-    ["init"]              -> Bit.init
-    ["remote", "add", ...] -> Bit.remoteAdd name url
-    ["fsck"]              -> Bit.fsck cwd
-    ["merge", "--abort"]  -> Bit.mergeAbort
-
-    -- ── Lightweight env (no scan) ────────────────────────
-    ("log":rest)          -> Bit.log rest >>= exitWith
-    ("ls-files":rest)     -> Bit.lsFiles rest >>= exitWith
-    ["remote", "show"]    -> runBase $ Bit.remoteShow Nothing
-    ["verify"]            -> runBase $ Bit.verify Bit.VerifyLocal Bit.PromptRepair concurrency
-    ["push"]              -> runUpstream Bit.push
-
-    -- ── Full scanned env (needs working directory state) ─
-    ("add":rest)          -> do scanAndWrite; Bit.add rest >>= exitWith
-    ("status":rest)       -> runScanned (Bit.status rest) >>= exitWith
-    ("pull":...)          -> runScannedUpstream $ Bit.pull Bit.defaultPullOptions
-    ("fetch":...)         -> runScanned Bit.fetch   -- falls back to "origin" like git
-```
+**Implementation** (`Bit/Commands.hs`): `baseEnv` (via `getDefaultRemote`, falls back to `"origin"`), `upstreamEnv` (via `getUpstreamRemote`, no fallback), and `scanAndWrite` (sync bitignore, scan working dir, write metadata) are defined separately. Dispatch uses: no env (direct call), `runBase` (baseEnv), `runUpstream` (upstreamEnv), `runBaseWithRemote` / `runScannedWithRemote` (named remote), `runScanned` (scanAndWrite + baseEnv), or `runScannedUpstream` (scanAndWrite + upstreamEnv).
 
 **Key Changes**:
 
 1. **No `skipScan` variable** — it no longer exists
-2. **Separated concerns** — `baseEnv` builds a lightweight `BitEnv`; `scanAndWrite` handles the expensive scan as a separate `IO ()` action, only called by commands that need it
-3. **Explicit tier assignment** — every command branch explicitly picks: no env, `baseEnv` (via `runBase`), or `scanAndWrite` + `baseEnv` (via `runScanned`)
-4. **Safe by default** — new commands default to not scanning; the scan is an explicit opt-in step
-5. **Push requires upstream** — `bit push` (without args) requires `branch.main.remote` to be configured (via `bit push -u`); `bit push <remote>` works without upstream. Push derives file actions from `git diff --name-status` against the remote HEAD, requiring no working directory scan
+2. **Separated concerns** — `baseEnv` builds a lightweight `BitEnv`; `scanAndWrite` is a separate `IO ()` action, only invoked by commands that need it
+3. **Explicit tier assignment** — every command branch picks one of: no env, env only (runBase/runUpstream/runBaseWithRemote), scan only (scanAndWrite then direct call), or scan + env (runScanned/runScannedUpstream/runScannedWithRemote)
+4. **Safe by default** — new commands do not scan unless the branch explicitly runs `scanAndWrite` or a runScanned variant
+5. **Push requires upstream** — bare `bit push` uses `runUpstream` and requires `branch.main.remote`; `bit push <remote>` uses `runBaseWithRemote`. Push derives file actions from `git diff --name-status`, so no working directory scan is needed
 
 **Command Classification**:
 
-1. **No env needed**: Commands that operate on simple config or don't need any environment (`init`, `remote add`, `fsck`, `merge --abort`)
+1. **No env needed**: `init`, `remote add`, `fsck`, `merge --abort`, `branch --unset-upstream`. Also `log`, `ls-files`, and `branch` (with args) — in the code they are invoked directly (no `runBase`); they call `Git.runGitRaw` and only require process cwd to be the repo root. They do not build or use a `BitEnv`.
 
-2. **Lightweight env (no scan)**: Commands that read git history, config, or derive actions from git metadata
-   - `log`, `ls-files` — read git objects only
-   - `remote show` — read config/remote state
-   - `verify`, `repair` — compare against existing metadata
-   - `push <remote>` — explicit remote, derives file actions from `git diff --name-status`
-   - Note: `push` (no args) uses strict upstream env (not baseEnv) — requires `branch.main.remote`
+2. **Env, no scan** (runBase or runUpstream or runBaseWithRemote):
+   - `remote show` — runBase; read config/remote state
+   - `verify`, `repair` — runBase; compare against existing metadata
+   - `rm` — runBase
+   - `push` (no args) — runUpstream; requires `branch.main.remote`
+   - `push <remote>` — runBaseWithRemote; explicit remote
 
-3. **Full scanned env**: Commands that need current working directory state
-   - `status`, `restore`, `checkout` — need working directory state for display/operations
-   - `add`, `commit`, `diff` — need scan for side effects (metadata write)
-   - `pull`, `fetch` — need working directory state for sync
-   - `merge --continue` — needs working directory state to resolve conflicts
+3. **Scan only, no env**: `add`, `commit`, `diff`, `mv`, `reset`, `merge` (generic). Each runs `scanAndWrite` then calls `Bit.add` / `Bit.commit` / etc. directly (no `BitEnv`). Scan is for metadata write or for git operations that need up-to-date index. `merge` (generic) is a pure git passthrough (`Git.runGitRaw`); remote or conflict context is only used in `merge --continue`.
+
+4. **Scan + env** (runScanned, runScannedUpstream, or runScannedWithRemote):
+   - `status`, `restore`, `checkout`, `merge --continue` — runScanned (scan + baseEnv); need working directory state
+   - `fetch` — runScanned; falls back to `"origin"` like git
+   - `pull` — runScannedUpstream (scan + upstreamEnv) or runScannedWithRemote when a remote is given; need working directory state for sync
 
 **Performance Impact**: In large repositories, read-only commands now have instant response times. The old design would scan 860 files for `bit remote add`, the new design scans zero. Push performance is dramatically improved — it no longer scans the remote via `rclone lsjson --hash --recursive`, instead deriving file actions from git metadata diffs with zero network I/O for planning.
 
