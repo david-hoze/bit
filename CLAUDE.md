@@ -1,5 +1,36 @@
 # Claude Code Guidelines for bit
 
+## Design Philosophy
+
+**bit = Git(metadata) + rclone(sync).** Use git and rclone as primitives, never reimplement what they already do.
+
+- **Git bundles** for serializing history over dumb cloud storage — one file, full DAG, `git fetch` unpacks it
+- **Git native remotes** for filesystem peers — `git fetch /path/to/.bit/index` and `git merge`, like two ordinary repos
+- **`git diff --name-status`** for deriving sync actions — no remote file scan, no directory diff algorithm
+- **`rclone copy --files-from`** for bulk file transfer — one subprocess, works identically for local and cloud
+- **`git merge --no-commit --no-ff`** for three-way merge — git handles the hard work, bit reads the result
+
+**The golden rule:** when you find yourself writing logic that git or rclone already handles, stop and wire into the existing tool instead.
+
+### Layer Contract
+
+```
+Commands.hs → Bit/Core/*.hs → Internal/Transport.hs → rclone (only here!)
+                   ↓
+                Internal/Git.hs → git (only here!)
+```
+
+- **Internal/Git.hs** — the ONLY place that calls `git`. Use `Git.runGitRaw`, `Git.runGitRawAt`, or `Git.runGitAt`.
+- **Internal/Transport.hs** — the ONLY place that calls `rclone`. Exposes `copyToRemote`, `copyFromRemote`, etc.
+- **Bit/Core/*.hs** — all business logic. Never calls `readProcessWithExitCode` directly.
+- Push and pull use seam types (`PushSeam`, `PullSeam`) to share one code path across cloud and filesystem remotes — only the metadata transport differs.
+
+### Key Invariants
+
+- **Proof of possession**: a repo must not transfer metadata it cannot back up with actual content. Verify before push; verify remote before pull.
+- **Index invariant**: git is the sole authority over `.bit/index/`. After any git operation that changes HEAD, `.bit/index/` is correct by definition.
+- `.bit/index/` files are mutable working state — every scan overwrites them. To read what the user **committed**, use git (`git diff`, `git show HEAD:<path>`), not the filesystem files.
+
 ## Build Tool
 
 This project uses **cabal** exclusively. Never use stack.
@@ -29,12 +60,6 @@ Consult these docs when modifying `.hs` files:
 - `foldl'` never lazy `foldl`
 - Consolidate multiple `liftIO` calls into `liftIO $ do`
 
-### Architecture Boundaries
-- Never call `git` via `rawSystem` or `readProcessWithExitCode` outside `Internal/Git.hs`
-- Never call `rclone` outside `Internal/Transport.hs`
-- Use `Git.runGitRaw`, `Git.runGitRawAt`, or `Git.runGitAt` instead
-- `.bit/index/` files are mutable working state — every scan overwrites them. To read what the user **committed**, use git (`git diff`, `git show HEAD:<path>`), not the filesystem files.
-
 ### Key Project Types
 - `BitM` = `ReaderT BitEnv IO` — main monad
 - `Path` — newtype over FilePath, unwrap with `unPath`
@@ -47,6 +72,7 @@ Consult these docs when modifying `.hs` files:
 When tests fail, analyze which is wrong — the test or the implementation. Fix the wrong one, not the convenient one.
 
 ### CLI Tests
+- Follow `.cursor/rules/creating-cli-tests.mdc` for format, directory naming, cleanup, and output matching
 - Use shelltest Format 3 syntax
 - Each directive (`<<<`, `>>>`, `>>>2`, `>>>=`) appears at most once per test case
 - All test directories under `test\cli\output\`
@@ -73,6 +99,9 @@ powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # Full suit
 ## After Implementation
 
 1. Build: `cabal install --overwrite-policy=always`
-2. Add tests following `test/cli/` patterns
-3. Update `docs/spec.md` if behavior changed
-4. Provide a commit message (do not offer to commit — the user will commit)
+2. Add tests that test the feature, follow `.cursor/rules/creating-cli-tests.mdc`
+3. Test the feature and fix if necessary, follow `.cursor/rules/testing-principles.mdc`
+4. Test the entire suite, follow `.cursor/rules/testing-workflow.mdc`
+5. Update `docs/spec.md` accordingly
+6. Review the entire implementation process — if you introduced bugs, follow `.cursor/rules/review.mdc`
+7. Give a commit message, follow `.cursor/rules/commit-messages.mdc`
