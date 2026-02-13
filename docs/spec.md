@@ -51,15 +51,19 @@ project/
 └── .bit/
     ├── index/              # Metadata files live here (Git working tree)
     │   ├── .git/           # Git's internal directory
+    │   │   └── bundles/    # Per-remote bundle files (cloud: <name>.bundle)
     │   ├── src/
     │   │   └── video.mp4   # Metadata file (NOT the actual video)
     │   └── data/
     │       └── dataset.bin # Metadata file (NOT the actual data)
+    ├── cache/              # Scan/verify cache (mtime+size) to skip re-hashing
     ├── remotes/            # Named remote configs (typed)
     │   └── origin          # Remote type + optional target
     ├── devices/            # Device identity files
     └── target              # Legacy: single remote URL
 ```
+
+**Transient paths (created and removed by operations):** Fetch downloads the cloud bundle to `.bit/temp_remote.bundle` before copying it to `.bit/index/.git/bundles/<name>.bundle`. Cloud text-file repair uses a temp file under `.bit/` when uploading restored content.
 
 ### The Index Invariant
 
@@ -176,6 +180,8 @@ bit runs Git with:
 - All git operations use the repo at `.bit/index/.git`
 - Working tree is `.bit/index` (not the project root)
 - Ignore rules: user creates `.bitignore` in the project root; `syncBitignoreToIndex` copies it to `.bit/index/.gitignore` (the standard gitignore location for git's working tree)
+
+**Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes.
 
 ### File Handling
 
@@ -373,6 +379,8 @@ past the merge).
 | `bit --remote <name> ls-files` | — | Show tracked files on remote (read-only, ephemeral) |
 | `bit @<remote> <cmd>` | — | Shorthand for `--remote` (needs quoting in PowerShell) |
 
+**Remote show:** For the given remote (or default), bit prints the remote name, Fetch URL, and Push URL. For cloud remotes, Push URL is N/A (push goes via rclone to the same target). For filesystem remotes, both URLs are shown. When the local branch has an upstream, status (ahead/behind) is also shown.
+
 ---
 
 ## Upstream Tracking (Git-Standard Behavior)
@@ -465,6 +473,14 @@ resolveRemote :: FilePath -> String -> IO (Maybe Remote)
 --   Nothing          → backward-compat fallback (infers type from old format)
 ```
 
+### Remote state classification
+
+Before push or fetch, the implementation classifies the remote with `classifyRemoteState`: it lists the remote at **depth 2** (`listRemoteItems remote 2`), then interprets the result purely:
+
+- **StateEmpty** — No items. Push will create and initialize the remote (e.g. `initializeRepoAt`). Fetch/pull abort with "Remote is empty. Run 'bit push' first."
+- **StateValidBit** — Any of: path `.bit/bit.bundle`, path `.bit/index`, any path with prefix `.bit/`, or name `.bit` (covers path format differences). Push and fetch proceed.
+- **StateNonBitOccupied** — Otherwise; up to 3 paths are shown. Push and fetch abort with "The remote path is not empty and not a bit repository" and the listed paths.
+
 ### Transport Strategies
 
 The transport strategy is determined by `RemoteType` classification:
@@ -482,6 +498,13 @@ For cloud remotes (Google Drive, S3, etc.), bit uses **dumb storage**:
 - Metadata is serialized as a Git bundle and uploaded via rclone
 - Files are synced via rclone copy/move/delete operations
 - The remote is just a directory of files — no Git repo, no bit commands work there
+
+**Cloud bundle lifecycle:**
+
+- **On the remote:** The metadata bundle is always stored at **`.bit/bit.bundle`** (single file).
+- **Fetch:** (1) Download from remote to staging path `.bit/temp_remote.bundle`. (2) Copy to per-remote path `.bit/index/.git/bundles/<sanitized-name>.bundle` and remove the temp file. (3) Register the bundle as a git remote and run `git fetch <name>` to populate `refs/remotes/<name>/main`. (4) If `git fetch` does not set the ref (e.g. bundle format), the implementation uses `git bundle list-heads` and manually updates the tracking ref so status and pull still work.
+- **Push:** Create the bundle at `.bit/index/.git/bundles/<name>.bundle` (`git bundle create ... --all`), then upload it via rclone to the remote as `.bit/bit.bundle`.
+- **Per-remote local bundles:** Each remote has its own local bundle file so that sequential fetches (e.g. `bit fetch gdrive` then `bit fetch backup`) do not overwrite one another.
 
 #### Filesystem Transport (Full Repo)
 
@@ -1038,7 +1061,7 @@ Comparing against committed metadata...
 Verifies a remote's files match the committed metadata. Routes by remote type:
 
 - **Filesystem remotes**: Scans the remote working directory using `Verify.verifyWithAbort` (bandwidth-aware scan + git diff), the same approach as local verification. Phase messages appear on stderr.
-- **Cloud remotes**: Fetches the remote bundle (committed metadata), scans remote files via `rclone lsjson --hash`, and compares.
+- **Cloud remotes**: Uses the **already-fetched** local bundle at `.bit/index/.git/bundles/<name>.bundle` for committed metadata (no fetch is performed during verify). Scans remote files via `rclone lsjson --hash` and compares. If the local bundle is stale (e.g. someone else updated the remote), verify compares against that stale metadata. Progress "Checking files: n/total" is shown on stderr when there are more than 5 files.
 
 When issues are found:
 - `verify` prompts "Repair? [y/N]" on TTY, skips in non-interactive mode
@@ -1048,6 +1071,13 @@ Repair sources: local repo + all other configured remotes. Each source's metadat
 ```
 Searching 2 source(s): local, 'gdrive'
 ```
+
+**Verify and repair implementation details:**
+
+- **Verify paths:** Local and filesystem-remote verify use `verifyWithAbort` (bandwidth-aware scan, cache, optional size-only fallback). Cloud remote verify uses the local bundle only (no re-fetch) and `rclone lsjson --hash`; there is no bandwidth-abort path for cloud.
+- **Repair is two-phase.** (1) **Text files:** Restored from git, then copied to the target. Locally: `git restore` in `.bit/index`, then copy from index to working dir. Filesystem remote: same in the remote's `.bit/index`, then copy to remote working dir. Cloud remote: content is read from the bundle commit (`git show <hash>:<path>`), written to a temp file under `.bit/`, uploaded via rclone, then temp removed. Text repair does not use other remotes. (2) **Binary files:** Content-addressable: (hash, size) → (source, path). When repairing **local**, only remotes are used as sources (target excluded). When repairing a **remote**, local plus all other remotes (target remote excluded). After a successful binary copy, **metadata is restored:** for local or a filesystem remote, the `.bit/index/` metadata file is written. For **cloud remotes**, metadata is not written on the remote (it lives in the bundle; the next fetch/push uses the bundle).
+- **Unrepairable:** Binary issues with no (hash, size) match in any source are reported as "UNREPAIRABLE".
+- **Prompt:** With `bit verify`, on a TTY the user is asked "Repair? [y/N]". In non-interactive mode repair is skipped and the user is told to run `bit repair`.
 
 ### `bit repair`
 
