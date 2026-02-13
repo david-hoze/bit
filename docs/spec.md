@@ -169,7 +169,7 @@ The existing divergence resolution mechanisms (`--accept-remote`, `--force`, `--
 - `bit fetch` is silent when already up to date (no stdout), similar to `git fetch`
 - Cloud remotes: verified via `Verify.verifyRemote` using `rclone lsjson --hash`
 - Filesystem remotes: verified via `Verify.verifyLocalAt` which hashes the remote's working tree
-- Verification runs in parallel using bounded concurrency (`Parallel 0` = auto-detect based on CPU cores)
+- Verification runs in parallel using bounded concurrency (`Parallel 0` = auto-detect). **Concurrency levels** (from `Bit/Concurrency.hs`): file IO and hashing use **ioConcurrency** = max(4, 4 × getNumCapabilities); network-bound work (rclone, transport) uses **networkConcurrency** = min(8, max(2, 2 × getNumCapabilities)).
 
 ### Metadata File Format
 
@@ -960,7 +960,7 @@ HLint errors appear in IDE and CI, preventing lazy IO from being reintroduced.
 The file scanner (`Bit/Scan.hs`) uses bounded parallelism for both scanning and writing:
 
 **Scanning**:
-- `QSem` limits concurrent file reads (default: `numCapabilities * 4`)
+- `QSem` limits concurrent file reads to **ioConcurrency** (4× cores, min 4)
 - Each file is fully read, hashed, and closed before moving to next
 - Progress reporting uses `IORef` with `atomicModifyIORef'` for thread-safe updates
 - Per-chunk byte tracking: `hashAndClassifyFile` accepts `Maybe (IORef Integer)` and updates it every 64 KB chunk, giving smooth progress even for large files
