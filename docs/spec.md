@@ -204,7 +204,7 @@ bit/Commands.hs → Bit/Core/*.hs → Internal/Transport.hs → rclone (only her
                    Internal/Git.hs → git (only here!)
 ```
 
-- **Internal/Transport.hs** — Dumb rclone wrapper. Exposes `copyToRemote`, `copyFromRemote`, `moveRemote`, `deleteRemote`, `listRemoteJson`, `listRemoteJsonWithHash`, `checkRemote`, etc. Takes `Remote` + relative paths. Does NOT know about `.bit/`, bundles, `RemoteState`, or `FetchResult`. Captures rclone JSON output as raw UTF-8 bytes to correctly handle non-ASCII filenames (Hebrew, Chinese, emoji, etc.). Uses `bracket` for exception-safe subprocess resource cleanup.
+- **Internal/Transport.hs** — Dumb rclone wrapper. Exposes `copyToRemote`, `copyFromRemote`, `copyFromRemoteDetailed`, `moveRemote`, `deleteRemote`, `listRemoteJson`, `listRemoteJsonWithHash`, `checkRemote`, etc. Takes `Remote` + relative paths. Does NOT know about `.bit/`, bundles, `RemoteState`, or `FetchResult`. Captures rclone JSON output as raw UTF-8 bytes to correctly handle non-ASCII filenames (Hebrew, Chinese, emoji, etc.). Uses `bracket` for exception-safe subprocess resource cleanup. **copyFromRemoteDetailed** returns **CopyResult** (NotFound, NetworkError, OtherError) by parsing rclone stderr so fetch and remote-workspace can distinguish "no bundle" from network or other errors for user-facing messaging and retry.
 - **Internal/Git.hs** — Dumb git wrapper. Knows how to run git commands. Takes args. Does NOT interpret results in domain terms.
 - **Bit/Core/*.hs** — Smart business logic, split by concern. `Bit.Core` re-exports the public API. Sub-modules: `Bit.Core.Push` (push logic + PushSeam), `Bit.Core.Pull` (pull + merge + conflict), `Bit.Core.Fetch` (fetch + remote state classification), `Bit.Core.Transport` (shared action derivation + working-tree sync), `Bit.Core.Verify` (verify + repair), `Bit.Core.Init` (repo initialization), `Bit.Core.Helpers` (shared types + utilities), `Bit.Core.RemoteManagement` (remote add/show), `Bit.Core.GitPassthrough` (git command delegation). All domain knowledge lives here. Calls Transport and Git, never calls `readProcessWithExitCode` directly.
 - **bit/Commands.hs** — Entry point. Parses CLI, resolves the remote, builds `BitEnv`, dispatches to `Bit.Core`.
@@ -327,6 +327,15 @@ command always succeeds when `MERGE_HEAD` exists (it knows it's recording a
 merge), even if the tree is identical to HEAD's tree. Skipping the commit
 breaks the next push (ancestry check fails because HEAD was never advanced
 past the merge).
+
+**merge --continue and merge --abort (implementation):** Understanding the control flow here is important for maintainers; getting it wrong can lead to data loss.
+
+- **merge --continue** has two branches:
+  1. **No git conflicts and no `.bit/conflicts` directory:** If `MERGE_HEAD` exists, create the merge commit ("Merge remote"), print "Merge complete.", then sync the working tree by calling **syncBinariesAfterMerge(remote, oldHead)** — which diffs oldHead vs current HEAD and copies binaries from the remote (and text from the index) so the working tree matches the merged metadata. This is the path when the user resolved conflicts via the interactive (l)ocal/(r)emote prompt during pull.
+  2. **`.bit/conflicts` directory exists** (e.g. after `bit pull --manual-merge` with remote divergence): Before committing, **validateMetadataDir** is run on `.bit/index`. If any metadata file contains conflict markers (e.g. from a bad manual edit), the merge is aborted with "fatal: Metadata files contain conflict markers. Merge aborted." — this gate prevents committing corrupted metadata. If validation passes, the merge commit is created ("Merge remote (manual merge resolved)"), ".bit/conflicts" is removed, "Conflict directories cleaned up." is printed, then syncBinariesAfterMerge(remote, oldHead) runs as above.
+- **merge --abort:** Runs `git merge --abort`. If `.bit/conflicts` exists, it is removed and "Conflict directories cleaned up." is printed.
+
+Pull uses `applyMergeToWorkingDir` to sync after a merge; when the user runs **merge --continue** on its own (e.g. after resolving conflicts manually), sync is done by syncBinariesAfterMerge so the working tree still matches HEAD.
 
 ---
 
@@ -455,6 +464,7 @@ The `bit.Device` module handles remote type classification and device resolution
   - `type: filesystem` (path lives only in git config as named remote)
   - `type: cloud\ntarget: gdrive:Projects/foo` (rclone path for transport)
   - `type: device\ntarget: black_usb:Backup` (device identity for resolution)
+- **Device add fallback:** When adding a removable or network path, bit may prompt for a device name and write `.bit-store` at the volume root. If writing `.bit-store` fails (e.g. permission denied on `C:\`), the remote is added as path-only (RemoteFilesystem) so the user still has a working remote; device identity is not persisted. This silent degradation is worth specifying so users and maintainers know the fallback exists.
 
 All remote types get a **named git remote** inside `.bit/index/.git`:
 - Filesystem: `git remote add dok1 /path/to/remote/.bit/index` — Git talks directly to the remote repo.
