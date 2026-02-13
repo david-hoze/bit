@@ -310,7 +310,7 @@ and tracking ref updates.
 
 ### Conflict Resolution
 
-Conflict resolution is structured as a fold over a list of conflicts (`bit.Conflict`). Each conflict is resolved identically via `resolveConflict`, and the traversal guarantees every conflict is visited exactly once with correct progress tracking (1/N, 2/N, ...). The decision logic (KeepLocal vs TakeRemote) is cleanly separated from the git checkout/merge mechanics.
+Conflict resolution is structured as a traversal over a list of conflicts (`bit.Conflict`): `resolveAll` maps over the list with `resolveConflict`, so each conflict is visited exactly once with correct progress tracking (1/N, 2/N, ...). The decision logic (KeepLocal vs TakeRemote) is cleanly separated from the git checkout/merge mechanics.
 
 **Critical**: After resolving all conflicts, the merge commit must **always** be
 created, regardless of whether the index has staged changes. When the user
@@ -512,9 +512,7 @@ file sync — no remote scan), ancestry checks, `--force`/`--force-with-lease`, 
 are stored per-remote at `.bit/index/.git/bundles/<name>.bundle` so `bit status`
 can compare against them.
 
-**Filesystem seam** (`mkFilesystemSeam`): Uses native git fetch/pull. The local
-index registers the remote's `.bit/index` as a named git remote; metadata is pushed
-via `git pull --ff-only` at the remote side.
+**Filesystem seam** (`mkFilesystemSeam`): Takes current working directory and remote; uses native git fetch/pull. The local index registers the remote's `.bit/index` as a named git remote; metadata is pushed via `git pull --ff-only` at the remote side.
 
 **Push flow** (both transports):
 1. **Verify local** (proof of possession)
@@ -656,15 +654,17 @@ All temporary directories are exception-safe via `bracket` — cleanup runs even
 
 #### Bundle Inflation
 
-Inflating a bundle into a workspace uses a three-step sequence designed to avoid Git pitfalls:
+Inflating a bundle into a workspace uses a short sequence designed to avoid Git pitfalls:
 
 ```
 git init --initial-branch=main
+git config core.quotePath false
 git fetch <bundle> +refs/heads/*:refs/remotes/bundle/*
 git reset --hard refs/remotes/bundle/main
 ```
 
 **Why this specific sequence:**
+- `core.quotePath false` ensures non-ASCII paths (e.g. Hebrew, emoji) are not quoted in git output
 - Fetching into `refs/remotes/bundle/*` (not `refs/heads/*`) avoids Git's "refusing to fetch into checked out branch" error
 - `git reset --hard` (not `checkout -B`) ensures the working tree is populated — `checkout -B` can skip the working tree update when already on the same branch name
 - `git clone` was avoided because on Windows, `removeDirectoryRecursive` can fail to fully clean up temp directories due to file locking, causing "directory already exists" errors
@@ -821,14 +821,14 @@ Both functions:
 - Constructor is **not exported** to prevent `liftIO` smuggling
 - Only whitelisted strict operations are exposed
 - No `MonadIO` instance (intentional restriction)
-- Provides `MonadUnliftIO` for `async` integration
+- Async integration is handled by explicit unwrapping via `runConcurrentIO` at concurrency boundaries (e.g. where `mapConcurrently` is called), preserving the newtype's encapsulation. The codebase does **not** use `MonadUnliftIO`: that would require the monad to be isomorphic to `ReaderT env IO`, and would let any async combinator round-trip back to `IO`, defeating the wrapper's discipline. Explicit unwrapping makes the escape hatch visible at the call site.
 - Includes concurrency primitives: `mapConcurrentlyBoundedC`, `QSem` operations
 
 **`Bit.AtomicWrite`** — Atomic file writes with Windows retry logic:
 - `atomicWriteFile` — temp file + rename pattern
 - `DirWriteLock` — directory-level locking (MVar-based thread coordination)
 - `LockRegistry` — process-wide lock registry for multiple workers
-- Retry logic for Windows transient "permission denied" errors (up to 5 retries with exponential backoff)
+- Retry logic for Windows transient "permission denied" errors: up to 5 retries with linear backoff (rationale in Design Decisions #16).
 
 #### 2. Module Updates
 
@@ -869,7 +869,7 @@ HLint errors appear in IDE and CI, preventing lazy IO from being reintroduced.
 
 **Why atomic writes?**
 - Crash safety — partial writes leave temp file, not corrupt destination
-- Windows retry logic handles transient locking from antivirus/indexing
+- Windows retry logic (linear backoff; see Design Decisions #16) handles transient locking from antivirus/indexing
 - Directory-level locking coordinates concurrent writes within process
 
 **Why HLint rules?**
@@ -1052,14 +1052,15 @@ Comparing against committed metadata...
 
 **Bandwidth-aware hashing** (`scanWorkingDirWithAbort`):
 1. **Cache check**: Each file's mtime+size is compared against `.bit/cache/` entries. Cache hits skip re-hashing entirely.
-2. **Throughput measurement**: If >100 MB of uncached files remain, reads a 10 MB sample and estimates total time.
-3. **Abort prompt**: If estimated time exceeds 60 seconds, prompts the user:
+2. **Threshold**: If total uncached bytes are below 20 MB, the bandwidth check is skipped and all files are hashed. Otherwise:
+3. **Throughput measurement**: If >100 MB of uncached files remain, reads a 10 MB sample and estimates total time.
+4. **Abort prompt**: If estimated time exceeds 60 seconds, prompts the user:
    ```
    Hashing is slow (329.0 KB/s). Estimated: 12 min for 5 files.
    Size-only verification covers most corruption cases.
    Continue full hashing? [y/N]
    ```
-4. **Size-only fallback**: If the user declines, uncached files are verified by size only — the committed hash is kept, but the actual file size is written to the metadata entry. `git diff` then detects any size changes. Same-size content corruption is not detected in this mode, but this covers the vast majority of real-world corruption (partial writes, truncation, failed transfers).
+5. **Size-only fallback**: If the user declines, uncached files are verified by size only — the committed hash is kept, but the actual file size is written to the metadata entry. `git diff` then detects any size changes. Same-size content corruption is not detected in this mode, but this covers the vast majority of real-world corruption (partial writes, truncation, failed transfers).
 
 **Per-chunk progress**: Hashing progress updates every 64 KB chunk, not per-file. This gives smooth progress even for large files on slow storage. The byte counter (`IORef Integer`) is updated via `atomicModifyIORef'` from the `hashAndClassifyFile` streaming loop.
 
@@ -1234,17 +1235,26 @@ Interactive per-file conflict resolution:
 
 16. **Atomic writes with retry logic**: All important writes use the temp-file +
     rename pattern (`Bit.AtomicWrite.atomicWriteFile`). On Windows, includes
-    retry logic (5 attempts with exponential backoff) to handle transient
-    "permission denied" errors from antivirus and file indexing. Directory-level
-    locking coordinates concurrent writers within the process.
+    retry logic (up to 5 retries, 6 total attempts) with linear backoff (e.g.
+    50ms, 100ms, 150ms, 200ms, 250ms; total window ~750ms). Linear backoff is
+    intentional: exponential backoff matters when hitting a shared remote
+    service where thundering-herd effects are real — many clients backing off
+    need to spread out over an increasingly wide window to let the service
+    recover. For local filesystem atomic writes, contention is brief lock or
+    transient OS-level conflicts; the total retry window is small and there is
+    no amplification from concurrent clients hammering a network endpoint.
+    Directory-level locking coordinates concurrent writers within the process.
 
 17. **ConcurrentIO newtype without MonadIO**: For modules that need type-level
     IO restrictions, `Bit.ConcurrentIO` provides a newtype wrapper where the
     constructor is not exported. This prevents smuggling arbitrary lazy IO via
-    `liftIO`. Only whitelisted strict operations are exposed. Used where the
-    type system should enforce IO discipline (currently available but not widely
-    adopted; `Bit.ConcurrentFileIO` with plain `MonadIO` is used in most places
-    for simplicity).
+    `liftIO`. Only whitelisted strict operations are exposed. Async integration
+    is by explicit unwrapping via `runConcurrentIO` at concurrency boundaries,
+    not via `MonadUnliftIO` (which would let any async combinator escape the
+    wrapper and defeat its discipline). Used where the type system should
+    enforce IO discipline (currently available but not widely adopted;
+    `Bit.ConcurrentFileIO` with plain `MonadIO` is used in most places for
+    simplicity).
 
 18. **Ephemeral remote workspaces (no persistent state)**: Remote-targeted
     commands (`bit @remote init/add/commit/status/log/ls-files`) use an ephemeral
@@ -1315,11 +1325,11 @@ Interactive per-file conflict resolution:
 - Shared `deriveActions` for push/pull with `resolveSwaps` swap detection and property tests
 - Device-identity system for filesystem remotes (UUID + hardware serial)
 - Filesystem remote transport (full bit repo at remote, direct git fetch/merge)
-- Conflict resolution module with structured fold (always commits when MERGE_HEAD exists)
+- Conflict resolution module with structured traversal (always commits when MERGE_HEAD exists)
 - Unified metadata parsing/serialization
 - `oldHead` pattern for diff-based working-tree sync across all pull/merge paths
 - Strict ByteString IO throughout — no lazy IO, eliminates Windows file locking issues
-- Atomic file writes with Windows retry logic — crash-safe, handles antivirus/indexing conflicts
+- Atomic file writes with Windows retry logic (linear backoff; see Design Decisions #16) — crash-safe, handles antivirus/indexing conflicts
 - Concurrent file scanning with bounded parallelism and progress reporting
 - HLint enforcement of IO safety rules
 - Proof of possession verification for push and pull operations
