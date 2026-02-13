@@ -153,7 +153,7 @@ The existing divergence resolution mechanisms (`--accept-remote`, `--force`, `--
 
 **Why this matters:** Without this rule, corruption propagates silently through metadata. Repo A has a corrupted file, pushes metadata claiming the file is fine, Repo B pulls that metadata, and now both repos have a lie in their history. The proof of possession rule stops corruption at the boundary — you cannot export claims you can't substantiate.
 
-**Cost:** Verification requires hashing every binary file, which means reading the entire working tree. For a repo with 100GB of binary files, this takes real time. This is the price of not having an object store — the working tree must be checked because it's the only source of truth. Future optimization: cache verification results keyed on (path, mtime, size) to skip re-hashing unchanged files.
+**Cost:** Verification requires hashing every binary file, which means reading the entire working tree. For a repo with 100GB of binary files, this takes real time. This is the price of not having an object store — the working tree must be checked because it's the only source of truth. Mitigation: scan caching (keyed on path, mtime, size) skips re-hashing unchanged files, so only modified files pay the hashing cost.
 
 **Remote verification cost by transport type:**
 
@@ -1345,7 +1345,6 @@ Interactive per-file conflict resolution:
 - **Transaction logging**: For resumable push/pull operations.
 - **Error messages**: Some need polish to match Git's style and include actionable hints.
 - **`isTextFileInIndex` fragility**: The current check (looking for `"hash: "` prefix) works but is indirect. A more robust approach might check whether the file parses as metadata vs. has arbitrary content. Low priority since current approach works correctly.
-- **Verification caching**: Cache verification results keyed on (path, mtime, size) to skip re-hashing unchanged files on subsequent push/pull operations. Would significantly speed up verification for large repos where most files haven't changed.
 
 ### Future (bit-solid)
 
