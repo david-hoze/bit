@@ -13,8 +13,8 @@ module Bit.Remote
   , RemotePath(..)  -- re-export for convenience
   ) where
 
-import qualified Internal.Git as Git
-import qualified Bit.Device as Device
+import qualified Bit.Git.Run as Git
+import qualified Bit.Device.Identity as Device
 import Data.List (isSuffixOf)
 import Bit.Path (RemotePath(..))
 
@@ -38,7 +38,7 @@ displayRemote r = _remoteName r ++ " (" ++ _remoteUrl r ++ ")"
 
 -- | Typed accessor for filesystem remote paths.
 -- Use this instead of 'remoteUrl' when constructing filesystem paths
--- to a remote, so that downstream code must go through 'Bit.Platform'.
+-- to a remote, so that downstream code must go through 'Bit.IO.Platform'.
 remoteFilePath :: Remote -> RemotePath
 remoteFilePath = RemotePath . _remoteUrl
 

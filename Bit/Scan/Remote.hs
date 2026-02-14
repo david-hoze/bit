@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Bit.Remote.Scan
+module Bit.Scan.Remote
   ( fetchRemoteFiles
   , RemoteError(..)
   ) where
@@ -17,7 +17,7 @@ import System.FilePath (normalise)
 import Data.Maybe
 import qualified Data.Text as T
 import Bit.Types
-import qualified Internal.Transport as Transport
+import qualified Bit.Rclone.Run as Transport
 import Bit.Remote (Remote)
 
 ----------------------------------------------------------------------

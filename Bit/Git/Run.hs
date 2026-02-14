@@ -1,6 +1,6 @@
 {-# LANGUAGE MultiWayIf #-}
 
-module Internal.Git
+module Bit.Git.Run
     ( add
     , commit
     , commitFile
@@ -60,7 +60,7 @@ import Data.Maybe (mapMaybe, listToMaybe)
 
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
-import Internal.Config
+import Bit.Config.Paths
 import Data.Char (isSpace)
 import Control.Monad (when, guard)
 import Prelude hiding (init)

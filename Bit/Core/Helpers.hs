@@ -41,14 +41,14 @@ module Bit.Core.Helpers
     ) where
 
 import System.Directory (removeDirectory)
-import qualified Bit.Platform as Platform
-import Bit.Platform (copyFile, removeFile, createDirectoryIfMissing, listDirectory, doesDirectoryExist, doesFileExist)
+import qualified Bit.IO.Platform as Platform
+import Bit.IO.Platform (copyFile, removeFile, createDirectoryIfMissing, listDirectory, doesDirectoryExist, doesFileExist)
 import System.FilePath ((</>), normalise)
 import Control.Monad (when, unless, forM_)
 import System.Exit (ExitCode(..), exitWith)
-import Internal.Git (AncestorQuery(..))
-import qualified Internal.Git as Git
-import qualified Bit.Device as Device
+import Bit.Git.Run (AncestorQuery(..))
+import qualified Bit.Git.Run as Git
+import qualified Bit.Device.Identity as Device
 import Bit.Remote (Remote, remoteName, RemotePath(..))
 import Data.List (isPrefixOf, foldl')
 import System.IO (stderr, hPutStrLn)
@@ -56,9 +56,9 @@ import Bit.Types (BitM, BitEnv(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Bit.Utils (toPosix, atomicWriteFileStr, trimGitOutput, formatBytes)
-import qualified Bit.Verify as Verify
-import qualified Bit.Scan as Scan
-import Internal.Config (bitIndexPath)
+import qualified Bit.Scan.Verify as Verify
+import qualified Bit.Scan.Local as Scan
+import Bit.Config.Paths (bitIndexPath)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T

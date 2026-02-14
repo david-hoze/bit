@@ -3,7 +3,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Bit.RemoteWorkspace
+module Bit.Device.RemoteWorkspace
   ( initRemote
   , addRemote
   , commitRemote
@@ -14,13 +14,13 @@ module Bit.RemoteWorkspace
 
 import Bit.Types (FileEntry(..), EntryKind(..), ContentType(..), Path(..))
 import Bit.Remote (Remote)
-import qualified Bit.Remote.Scan as Remote.Scan
-import Bit.Scan (hashAndClassifyFile, binaryExtensions)
-import qualified Internal.ConfigFile as ConfigFile
-import Internal.ConfigFile (TextConfig)
-import qualified Internal.Transport as Transport
+import qualified Bit.Scan.Remote as Remote.Scan
+import Bit.Scan.Local (hashAndClassifyFile, binaryExtensions)
+import qualified Bit.Config.File as ConfigFile
+import Bit.Config.File (TextConfig)
+import qualified Bit.Rclone.Run as Transport
 import Bit.Utils (isBitPath, atomicWriteFileStr, trimGitOutput)
-import Bit.Internal.Metadata (MetaContent(..), serializeMetadata)
+import Bit.Config.Metadata (MetaContent(..), serializeMetadata)
 import System.FilePath ((</>), takeExtension, takeDirectory)
 import System.Directory
     ( createDirectoryIfMissing
@@ -32,7 +32,7 @@ import System.Directory
     )
 import System.Exit (ExitCode(..), exitWith)
 import System.IO (hPutStrLn, stderr, stdout, hFlush)
-import qualified Internal.Git as Git
+import qualified Bit.Git.Run as Git
 import Control.Monad (when, unless, forM, forM_, void)
 import Data.Char (toLower)
 import Data.List (partition)

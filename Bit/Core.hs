@@ -53,7 +53,7 @@ module Bit.Core
 import Prelude hiding (init, log)
 import Bit.Core.Helpers (PullMode(..), PullOptions(..), defaultPullOptions)
 import Bit.Core.Init (init, initializeRepoAt)
-import Bit.Core.GitPassthrough
+import Bit.Git.Passthrough
     ( add
     , commit
     , diff

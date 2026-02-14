@@ -2,7 +2,7 @@
 
 -- | Centralized progress reporting for terminal operations.
 -- Eliminates duplicated progress loops and ensures consistent output behavior.
-module Bit.Progress
+module Bit.Progress.Report
   ( reportProgress
   , clearProgress
   , withProgressReporter

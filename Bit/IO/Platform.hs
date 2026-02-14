@@ -8,7 +8,7 @@
 -- MobaXterm) reject this prefix.  For UNC paths we call Win32 directly,
 -- which passes the path as-is.  Local paths still go through
 -- System.Directory to keep long-path support (>260 chars).
-module Bit.Platform
+module Bit.IO.Platform
     ( createDirectoryIfMissing
     , doesDirectoryExist
     , doesFileExist

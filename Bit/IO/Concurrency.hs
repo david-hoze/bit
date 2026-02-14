@@ -9,7 +9,7 @@
 -- The concurrency levels are based on the number of available CPU cores
 -- (from 'getNumCapabilities') and scaled appropriately for different workload
 -- types (file IO, network IO, etc.).
-module Bit.Concurrency
+module Bit.IO.Concurrency
   ( -- * Concurrency level calculation
     ioConcurrency
   , networkConcurrency
@@ -80,7 +80,7 @@ runConcurrentlyBounded = mapConcurrentlyBounded
 -- operations. Each action acquires the semaphore before running and
 -- releases it after completion (even on exception).
 --
--- This is the same implementation used in Bit.Scan and is re-exported
+-- This is the same implementation used in Bit.Scan.Local and is re-exported
 -- here for consistency.
 mapConcurrentlyBounded :: Int -> (a -> IO b) -> [a] -> IO [b]
 mapConcurrentlyBounded bound f xs = do

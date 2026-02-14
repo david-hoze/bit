@@ -1,4 +1,4 @@
-module Internal.Config where
+module Bit.Config.Paths where
 
 import System.FilePath ((</>))
 

@@ -9,44 +9,44 @@ executable bit
         -rtsopts
         -with-rtsopts=-N
         -Wall
-    other-modules:    Bit.AtomicWrite,
+    other-modules:    Bit.IO.AtomicWrite,
                       Bit.Commands,
                       Bit.Help,
                       Bit.Path,
-                      Bit.Platform,
-                      Bit.Concurrency,
-                      Bit.Conflict,
-                      Bit.ConcurrentIO,
-                      Bit.ConcurrentFileIO,
-                      Bit.CopyProgress,
-                      Bit.Device,
-                      Bit.DevicePrompt,
-                      Bit.Process,
-                      Bit.Progress,
+                      Bit.IO.Platform,
+                      Bit.IO.Concurrency,
+                      Bit.Core.Conflict,
+                      Bit.IO.ConcurrentIO,
+                      Bit.IO.ConcurrentFileIO,
+                      Bit.Rclone.Progress,
+                      Bit.Device.Identity,
+                      Bit.Device.Prompt,
+                      Bit.IO.Process,
+                      Bit.Progress.Report,
                       Bit.Utils,
-                      Bit.Plan,
+                      Bit.Domain.Plan,
                       Bit.Remote,
-                      Bit.Remote.Scan,
-                      Bit.RemoteWorkspace,
-                      Bit.Scan,
+                      Bit.Scan.Remote,
+                      Bit.Device.RemoteWorkspace,
+                      Bit.Scan.Local,
                       Bit.Types,
-                      Bit.Verify,
-                      Bit.Fsck,
+                      Bit.Scan.Verify,
+                      Bit.Scan.Fsck,
                       Bit.Core,
                       Bit.Core.Helpers,
                       Bit.Core.Init,
-                      Bit.Core.GitPassthrough,
+                      Bit.Git.Passthrough,
                       Bit.Core.Fetch,
-                      Bit.Core.Transport,
+                      Bit.Rclone.Sync,
                       Bit.Core.Push,
                       Bit.Core.Pull,
                       Bit.Core.RemoteManagement,
                       Bit.Core.Verify,
-                      Internal.Git,
-                      Internal.Config,
-                      Internal.ConfigFile,
-                      Bit.Internal.Metadata,
-                      Internal.Transport
+                      Bit.Git.Run,
+                      Bit.Config.Paths,
+                      Bit.Config.File,
+                      Bit.Config.Metadata,
+                      Bit.Rclone.Run
     build-depends:    base16-bytestring ^>=1.0.2.0,
                       base,
                       async,
@@ -96,7 +96,7 @@ test-suite device-prompt
     type:                exitcode-stdio-1.0
     main-is:             DevicePromptTests.hs
     hs-source-dirs:      test, .
-    other-modules:       Bit.DevicePrompt
+    other-modules:       Bit.Device.Prompt
     ghc-options:         -Wall
     build-depends:       base,
                         directory,
@@ -108,15 +108,15 @@ test-suite plan
     type:                exitcode-stdio-1.0
     main-is:             PlanSpec.hs
     hs-source-dirs:      test, .
-    other-modules:       Bit.AtomicWrite,
+    other-modules:       Bit.IO.AtomicWrite,
                          Bit.Types,
-                         Bit.Plan,
-                         Bit.Device,
+                         Bit.Domain.Plan,
+                         Bit.Device.Identity,
                          Bit.Path,
                          Bit.Remote,
-                         Internal.Git,
-                         Internal.Config,
-                         Internal.ConfigFile
+                         Bit.Git.Run,
+                         Bit.Config.Paths,
+                         Bit.Config.File
     ghc-options:         -Wall
     build-depends:       base,
                          containers,

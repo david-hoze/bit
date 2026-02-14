@@ -1,4 +1,4 @@
-module Bit.Plan
+module Bit.Domain.Plan
   ( RcloneAction(..)
   , resolveSwaps
   ) where

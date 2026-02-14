@@ -4,7 +4,7 @@
 -- | Utility functions for bit.
 --
 -- This module provides path utilities and re-exports atomic file operations
--- from 'Bit.AtomicWrite'.
+-- from 'Bit.IO.AtomicWrite'.
 module Bit.Utils
   ( -- * Path utilities
     toPosix
@@ -16,17 +16,17 @@ module Bit.Utils
   , trimGitOutput
   , shortRefDisplay
   
-    -- * Atomic file writes (re-exported from Bit.AtomicWrite)
+    -- * Atomic file writes (re-exported from Bit.IO.AtomicWrite)
   , atomicWriteFile
   , atomicWriteFileStr
   , atomicWriteFileWithLock
   
-    -- * Directory locking (re-exported from Bit.AtomicWrite)
+    -- * Directory locking (re-exported from Bit.IO.AtomicWrite)
   , DirWriteLock
   , newDirWriteLock
   , withDirWriteLock
   
-    -- * Lock registry (re-exported from Bit.AtomicWrite)
+    -- * Lock registry (re-exported from Bit.IO.AtomicWrite)
   , LockRegistry
   , newLockRegistry
   , withLockedDir
@@ -34,7 +34,7 @@ module Bit.Utils
 
 import Data.List (isPrefixOf, isInfixOf)
 import Bit.Types (FileEntry(..), Path(unPath))
-import Bit.AtomicWrite
+import Bit.IO.AtomicWrite
     ( atomicWriteFile
     , atomicWriteFileStr
     , atomicWriteFileWithLock

@@ -5,12 +5,12 @@
 -- paths should accept 'RemotePath' instead of bare 'FilePath' so that callers
 -- cannot accidentally pass them to @System.Directory@ functions, which break
 -- on UNC paths under Windows.  Use 'unRemotePath' to unwrap when passing to
--- 'Bit.Platform' functions (which handle UNC internally).
+-- 'Bit.IO.Platform' functions (which handle UNC internally).
 module Bit.Path
     ( RemotePath(..)
     ) where
 
 -- | A filesystem path pointing to a remote location.
--- Unwrap with 'unRemotePath' only when calling through 'Bit.Platform'.
+-- Unwrap with 'unRemotePath' only when calling through 'Bit.IO.Platform'.
 newtype RemotePath = RemotePath { unRemotePath :: FilePath }
     deriving (Show, Eq)

@@ -14,9 +14,9 @@
 -- Import this module instead of 'Prelude' for file operations:
 --
 -- @
--- import Bit.ConcurrentFileIO (readFileBinaryStrict, writeFileBinaryStrict)
+-- import Bit.IO.ConcurrentFileIO (readFileBinaryStrict, writeFileBinaryStrict)
 -- @
-module Bit.ConcurrentFileIO
+module Bit.IO.ConcurrentFileIO
   ( -- * Reading (strict)
     readFileBinaryStrict
   , readFileUtf8Strict

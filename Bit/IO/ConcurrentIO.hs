@@ -14,7 +14,7 @@
 -- Usage:
 --
 -- @
--- import Bit.ConcurrentIO
+-- import Bit.IO.ConcurrentIO
 --
 -- scanFiles :: [FilePath] -> ConcurrentIO [FileHash]
 -- scanFiles paths = do
@@ -26,7 +26,7 @@
 --   contents <- readFileStrict path
 --   pure $ FileHash path (sha256 contents)
 -- @
-module Bit.ConcurrentIO
+module Bit.IO.ConcurrentIO
   ( -- * The ConcurrentIO monad
     ConcurrentIO  -- Type exported, constructor hidden
   , runConcurrentIO

@@ -1,6 +1,6 @@
 import Test.Tasty
 import Test.Tasty.HUnit
-import qualified Bit.DevicePrompt as DP
+import qualified Bit.Device.Prompt as DP
 
 main :: IO ()
 main = defaultMain tests

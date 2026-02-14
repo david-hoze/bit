@@ -3,7 +3,7 @@
 
 -- | Device name acquisition for filesystem remotes.
 -- Supports injectable I/O for testing the interactive path.
-module Bit.DevicePrompt
+module Bit.Device.Prompt
   ( InputSource(..)
   , acquireDeviceName
   , acquireDeviceNameAuto

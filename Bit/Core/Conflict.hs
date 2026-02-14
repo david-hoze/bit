@@ -1,9 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE MultiWayIf #-}
 
-module Bit.Conflict
+module Bit.Core.Conflict
   ( Resolution(..)
-  , DeletedSide(..)  -- re-exported from Internal.Git
+  , DeletedSide(..)  -- re-exported from Bit.Git.Run
   , ConflictInfo(..)
   , conflictMarkersFatalMessage
   , resolveConflict
@@ -18,10 +18,10 @@ import Data.Maybe (mapMaybe)
 import Text.Read (readMaybe)
 import Control.Monad (void, when)
 import System.Exit (ExitCode(..))
-import qualified Internal.Git as Git
-import Internal.Git (DeletedSide(..))
+import qualified Bit.Git.Run as Git
+import Bit.Git.Run (DeletedSide(..))
 import System.IO (hPutStrLn, stderr, hFlush, stdout)
-import Bit.Internal.Metadata (MetaContent(..), parseMetadata, displayHash)
+import Bit.Config.Metadata (MetaContent(..), parseMetadata, displayHash)
 
 -- | Message shown when metadata contains conflict markers and merge is aborted.
 conflictMarkersFatalMessage :: String
@@ -31,7 +31,7 @@ conflictMarkersFatalMessage = "fatal: Metadata files contain conflict markers. M
 data Resolution = KeepLocal | TakeRemote
   deriving (Show, Eq)
 
--- | Conflict type (mirrors Internal.Git.ConflictType but doesn't depend on IO module).
+-- | Conflict type (mirrors Bit.Git.Run.ConflictType but doesn't depend on IO module).
 data ConflictInfo
   = ContentConflict FilePath
   | ModifyDelete FilePath DeletedSide

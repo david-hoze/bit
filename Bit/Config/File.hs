@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Internal.ConfigFile
+module Bit.Config.File
   ( TextConfig(..)
   , defaultTextConfig
   , readConfig
@@ -15,7 +15,7 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString as BS
-import Internal.Config (bitDir)
+import Bit.Config.Paths (bitDir)
 
 -- | Configuration for text file classification
 data TextConfig = TextConfig

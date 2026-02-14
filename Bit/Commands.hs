@@ -5,12 +5,12 @@ module Bit.Commands (run) where
 
 import qualified Bit.Core as Bit
 import Bit.Types (BitEnv(..), ForceMode(..), runBitM)
-import qualified Bit.Scan as Scan  -- Only for the pre-scan in runCommand
+import qualified Bit.Scan.Local as Scan  -- Only for the pre-scan in runCommand
 import Bit.Remote (getDefaultRemote, getUpstreamRemote, resolveRemote)
-import qualified Bit.Device as Device
+import qualified Bit.Device.Identity as Device
 import Bit.Utils (atomicWriteFileStr)
-import Bit.Concurrency (Concurrency(..))
-import qualified Bit.RemoteWorkspace as RemoteWorkspace
+import Bit.IO.Concurrency (Concurrency(..))
+import qualified Bit.Device.RemoteWorkspace as RemoteWorkspace
 import System.Environment (getArgs)
 import Bit.Help (printMainHelp, printTerseHelp, printCommandHelp)
 import System.Exit (ExitCode(..), exitWith, exitSuccess)
@@ -18,7 +18,7 @@ import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
-import qualified Internal.Git as Git
+import qualified Bit.Git.Run as Git
 import Data.List (dropWhileEnd)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS

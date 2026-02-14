@@ -12,7 +12,7 @@
 -- errors caused by antivirus, Windows Search, or other processes holding handles.
 --
 -- This module has no dependencies on other Bit modules to avoid circular imports.
-module Bit.AtomicWrite
+module Bit.IO.AtomicWrite
   ( -- * Atomic file writes
     atomicWriteFile
   , atomicWriteFileStr

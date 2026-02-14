@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Bit.Verify
+module Bit.Scan.Verify
   ( verifyLocal
   , verifyLocalAt
   , verifyWithAbort
@@ -27,19 +27,19 @@ module Bit.Verify
 
 import Bit.Types (Hash(..), HashAlgo(..), Path(..), FileEntry(..), EntryKind(..), ContentType(..), syncHash, hashToText)
 import Bit.Utils (filterOutBitPaths, toPosix)
-import Bit.Concurrency (Concurrency(..), runConcurrently, ioConcurrency)
+import Bit.IO.Concurrency (Concurrency(..), runConcurrently, ioConcurrency)
 import System.FilePath ((</>), makeRelative, normalise, takeDirectory)
 import System.Directory (doesFileExist, listDirectory, doesDirectoryExist, removeFile, createDirectoryIfMissing, removeDirectoryRecursive, getPermissions, setPermissions, setOwnerWritable)
 import Data.List (isPrefixOf)
 import Data.Maybe (maybeToList, isJust)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
-import qualified Internal.Git as Git
-import Bit.Internal.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, hashFile, serializeMetadata)
-import qualified Bit.Remote.Scan as Remote.Scan
+import qualified Bit.Git.Run as Git
+import Bit.Config.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, hashFile, serializeMetadata)
+import qualified Bit.Scan.Remote as Remote.Scan
 import qualified Bit.Remote
-import qualified Internal.Transport as Transport
-import Internal.Config (bundleForRemote, bitIndexPath, bundleCwdPath, fromCwdPath, BundleName)
+import qualified Bit.Rclone.Run as Transport
+import Bit.Config.Paths (bundleForRemote, bitIndexPath, bundleCwdPath, fromCwdPath, BundleName)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
@@ -49,7 +49,7 @@ import Data.Foldable (traverse_)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.IORef (IORef, atomicModifyIORef')
-import qualified Bit.Scan as Scan
+import qualified Bit.Scan.Local as Scan
 
 -- | Result of comparing one file to metadata.
 data VerifyIssue

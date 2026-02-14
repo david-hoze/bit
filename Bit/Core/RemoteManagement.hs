@@ -14,19 +14,19 @@ module Bit.Core.RemoteManagement
     ) where
 
 import qualified System.Directory as Dir
-import qualified Bit.Platform as Platform
+import qualified Bit.IO.Platform as Platform
 import System.FilePath ((</>))
 import Control.Monad (unless, void, forM_)
 import System.Exit (ExitCode(..), exitWith)
-import Internal.Git (AncestorQuery(..))
-import qualified Internal.Git as Git
-import qualified Bit.Device as Device
-import qualified Bit.DevicePrompt as DevicePrompt
+import Bit.Git.Run (AncestorQuery(..))
+import qualified Bit.Git.Run as Git
+import qualified Bit.Device.Identity as Device
+import qualified Bit.Device.Prompt as DevicePrompt
 import Data.UUID (UUID)
 import System.IO (stderr, hPutStrLn)
 import Control.Exception (try, IOException)
 import Data.Maybe (fromMaybe)
-import Internal.Config (bitDevicesDir, bitRemotesDir, bundleForRemote, bundleCwdPath, fromCwdPath, BundleName(..), bundleGitRelPath, fromGitRelPath)
+import Bit.Config.Paths (bitDevicesDir, bitRemotesDir, bundleForRemote, bundleCwdPath, fromCwdPath, BundleName(..), bundleGitRelPath, fromGitRelPath)
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)

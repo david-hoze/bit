@@ -15,13 +15,17 @@
 ### Layer Contract
 
 ```
-Commands.hs → Bit/Core/*.hs → Internal/Transport.hs → rclone (only here!)
-                   ↓
-                Internal/Git.hs → git (only here!)
+Commands.hs → Core/*.hs ──→ Rclone/Sync.hs → Rclone/Run.hs → rclone (only here!)
+                    │
+                    ├──→ Git/Passthrough.hs → Git/Run.hs → git (only here!)
+                    │
+                    ├──→ Scan/*.hs → Git/Run.hs, Rclone/Run.hs
+                    │
+                    └──→ Device/Identity.hs
 ```
 
-- **Internal/Git.hs** — the ONLY place that calls `git`. Use `Git.runGitRaw`, `Git.runGitRawAt`, or `Git.runGitAt`.
-- **Internal/Transport.hs** — the ONLY place that calls `rclone`. Exposes `copyToRemote`, `copyFromRemote`, etc.
+- **Bit/Git/Run.hs** — the ONLY place that calls `git`. Use `Git.runGitRaw`, `Git.runGitRawAt`, or `Git.runGitAt`.
+- **Bit/Rclone/Run.hs** — the ONLY place that calls `rclone`. Exposes `copyToRemote`, `copyFromRemote`, etc.
 - **Bit/Core/*.hs** — all business logic. Never calls `readProcessWithExitCode` directly.
 - Push and pull use seam types (`PushSeam`, `PullSeam`) to share one code path across cloud and filesystem remotes — only the metadata transport differs.
 

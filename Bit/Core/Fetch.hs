@@ -18,14 +18,14 @@ import System.FilePath ((</>), takeDirectory)
 import Data.List (isPrefixOf)
 import Control.Monad (when, void)
 import System.Exit (ExitCode(..), exitWith)
-import qualified Internal.Git as Git
-import qualified Internal.Transport as Transport
+import qualified Bit.Git.Run as Git
+import qualified Bit.Rclone.Run as Transport
 import System.IO (stderr, hPutStrLn)
 import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), RemotePath(..))
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
-import Internal.Config (fromCwdPath, bundleCwdPath, bundleForRemote, bundleGitRelPath, fromGitRelPath)
+import Bit.Config.Paths (fromCwdPath, bundleCwdPath, bundleForRemote, bundleGitRelPath, fromGitRelPath)
 import Bit.Core.Helpers (isFilesystemRemote, withRemote, safeRemove, checkFilesystemRemoteIsRepo)
 import System.Directory (copyFile, createDirectoryIfMissing)
 

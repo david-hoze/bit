@@ -29,21 +29,21 @@ import qualified Data.Text as T
 import qualified System.Directory as Dir
 
 import Bit.Types (BitM, BitEnv(..), Path(..), Hash(..), HashAlgo(..), hashToText)
-import Bit.Concurrency (Concurrency)
-import qualified Bit.Verify as Verify
-import qualified Bit.Fsck as Fsck
-import Internal.Config (bundleForRemote, bitIndexPath, bitRemotesDir)
-import Bit.Progress (reportProgress, clearProgress)
+import Bit.IO.Concurrency (Concurrency)
+import qualified Bit.Scan.Verify as Verify
+import qualified Bit.Scan.Fsck as Fsck
+import Bit.Config.Paths (bundleForRemote, bitIndexPath, bitRemotesDir)
+import Bit.Progress.Report (reportProgress, clearProgress)
 import Bit.Utils (toPosix, atomicWriteFileStr, formatBytes)
-import Bit.Internal.Metadata (MetaContent(..), serializeMetadata)
-import qualified Bit.Device as Device
-import qualified Bit.CopyProgress as CopyProgress
-import qualified Internal.Transport as Transport
-import qualified Internal.Git as Git
+import Bit.Config.Metadata (MetaContent(..), serializeMetadata)
+import qualified Bit.Device.Identity as Device
+import qualified Bit.Rclone.Progress as CopyProgress
+import qualified Bit.Rclone.Run as Transport
+import qualified Bit.Git.Run as Git
 
 import Bit.Core.Helpers (printVerifyIssue, isFilesystemRemote)
 import Bit.Remote (Remote, remoteName, remoteUrl, resolveRemote)
-import qualified Bit.Platform as Platform
+import qualified Bit.IO.Platform as Platform
 
 -- | Whether to verify local working tree or a specific remote.
 data VerifyTarget = VerifyLocal | VerifyRemotePath Remote

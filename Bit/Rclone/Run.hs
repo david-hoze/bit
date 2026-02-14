@@ -1,7 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
 
-module Internal.Transport
+module Bit.Rclone.Run
     ( remoteFilePath
     , copyToRemote
     , copyFromRemote

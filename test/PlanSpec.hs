@@ -7,7 +7,7 @@ import Test.Tasty.QuickCheck
 import Test.Tasty.HUnit
 
 import Bit.Types (Path(..), unPath)
-import Bit.Plan (RcloneAction(..), resolveSwaps)
+import Bit.Domain.Plan (RcloneAction(..), resolveSwaps)
 
 main :: IO ()
 main = defaultMain tests

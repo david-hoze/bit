@@ -12,26 +12,26 @@ module Bit.Core.Push
     ) where
 
 import qualified System.Directory as Dir
-import qualified Bit.Platform as Platform
+import qualified Bit.IO.Platform as Platform
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, unless, void, forM_)
 import System.Exit (ExitCode(..), exitWith)
-import qualified Internal.Git as Git
-import qualified Internal.Transport as Transport
-import Internal.Config (bundleForRemote, bundleCwdPath, fromCwdPath, bundleGitRelPath, fromGitRelPath)
+import qualified Bit.Git.Run as Git
+import qualified Bit.Rclone.Run as Transport
+import Bit.Config.Paths (bundleForRemote, bundleCwdPath, fromCwdPath, bundleGitRelPath, fromGitRelPath)
 import Bit.Utils (toPosix)
 import qualified Data.List as List
 import System.IO (stderr, hPutStrLn)
 import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), displayRemote, RemotePath(..))
-import Bit.Plan (RcloneAction(..))
+import Bit.Domain.Plan (RcloneAction(..))
 import Bit.Types (BitM, BitEnv(..), ForceMode(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
-import qualified Bit.CopyProgress as CopyProgress
-import qualified Bit.Verify as Verify
-import Bit.Concurrency (Concurrency(..))
-import Bit.Platform (copyFile)
+import qualified Bit.Rclone.Progress as CopyProgress
+import qualified Bit.Scan.Verify as Verify
+import Bit.IO.Concurrency (Concurrency(..))
+import Bit.IO.Platform (copyFile)
 import Bit.Core.Helpers
     ( AncestorQuery(..)
     , isFilesystemRemote
@@ -44,7 +44,7 @@ import Bit.Core.Helpers
     , safeRemove
     )
 import Bit.Core.Init (initializeRemoteRepoAt)
-import Bit.Core.Transport (deriveActions, executeCommand)
+import Bit.Rclone.Sync (deriveActions, executeCommand)
 import Bit.Core.Fetch (classifyRemoteState, fetchBundle)
 
 -- ============================================================================

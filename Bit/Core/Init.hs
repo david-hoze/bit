@@ -9,10 +9,10 @@ module Bit.Core.Init
 
 import Prelude hiding (init)
 import qualified System.Directory as Dir
-import qualified Bit.Platform as Platform
+import qualified Bit.IO.Platform as Platform
 import System.FilePath ((</>))
 import Control.Monad (unless, void)
-import qualified Internal.Git as Git
+import qualified Bit.Git.Run as Git
 import System.Process (readProcessWithExitCode)
 import Bit.Utils (atomicWriteFileStr, toPosix)
 import Bit.Path (RemotePath(..))
@@ -90,6 +90,6 @@ initializeRepoAt targetDir = do
 
 -- | Initialize a bit repository at a remote filesystem location.
 -- Typed wrapper around 'initializeRepoAt' that accepts 'RemotePath'
--- to enforce that callers use 'Bit.Platform' for remote paths.
+-- to enforce that callers use 'Bit.IO.Platform' for remote paths.
 initializeRemoteRepoAt :: RemotePath -> IO ()
 initializeRemoteRepoAt (RemotePath p) = initializeRepoAt p

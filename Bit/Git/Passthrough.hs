@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE MultiWayIf #-}
 
-module Bit.Core.GitPassthrough
+module Bit.Git.Passthrough
     ( -- Git passthrough
       add
     , commit
@@ -35,18 +35,18 @@ import Data.Foldable (traverse_)
 import Control.Monad.Trans.Class (lift)
 import System.Exit (ExitCode(..), exitWith)
 import Control.Exception (throwIO, IOException, catch)
-import qualified Internal.Git as Git
-import Internal.Config (bitIndexPath)
+import qualified Bit.Git.Run as Git
+import Bit.Config.Paths (bitIndexPath)
 import System.IO (stderr, hPutStrLn, hPutStr)
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import qualified Data.List
 import Control.Monad.IO.Class (liftIO)
 import Data.List (isPrefixOf, foldl')
-import qualified Bit.Conflict as Conflict
-import qualified Bit.Internal.Metadata as Metadata
+import qualified Bit.Core.Conflict as Conflict
+import qualified Bit.Config.Metadata as Metadata
 import Bit.Remote (remoteName)
-import qualified Bit.Core.Transport as Transport
+import qualified Bit.Rclone.Sync as Transport
 import Bit.Core.Helpers
     ( fileExistsE
     , createDirE

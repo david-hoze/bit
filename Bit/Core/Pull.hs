@@ -23,12 +23,12 @@ import System.FilePath ((</>), normalise)
 import Control.Monad (when, unless, void, forM_)
 import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
-import qualified Internal.Git as Git
-import qualified Internal.Transport as Transport
-import Internal.Config (bitIndexPath)
-import qualified Bit.Verify as Verify
-import qualified Bit.Conflict as Conflict
-import qualified Bit.Remote.Scan as Remote.Scan
+import qualified Bit.Git.Run as Git
+import qualified Bit.Rclone.Run as Transport
+import Bit.Config.Paths (bitIndexPath)
+import qualified Bit.Scan.Verify as Verify
+import qualified Bit.Core.Conflict as Conflict
+import qualified Bit.Scan.Remote as Remote.Scan
 import qualified Data.List as List
 import qualified Data.Map as Map
 import System.IO (stderr, hPutStrLn)
@@ -40,8 +40,8 @@ import Bit.Types (BitM, BitEnv(..), Hash, HashAlgo(..), FileEntry(..), EntryKind
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
-import Bit.Internal.Metadata (MetaContent(..), serializeMetadata, displayHash, validateMetadataDir)
-import Bit.Concurrency (Concurrency(..))
+import Bit.Config.Metadata (MetaContent(..), serializeMetadata, displayHash, validateMetadataDir)
+import Bit.IO.Concurrency (Concurrency(..))
 import Bit.Core.Helpers
     ( PullMode(..)
     , PullOptions(..)
@@ -60,7 +60,7 @@ import Bit.Core.Helpers
     , formatVerifiedRemoteFiles
     , checkFilesystemRemoteIsRepo
     )
-import Bit.Core.Transport
+import Bit.Rclone.Sync
     ( syncAllFilesFromHEAD
     , applyMergeToWorkingDir
     )

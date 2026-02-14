@@ -3,7 +3,7 @@
 -- | Device-identity-based remote resolution for filesystem remotes.
 -- Cloud remotes (rclone) use URL-based identity; filesystem remotes use
 -- UUID + hardware serial (physical) or UUID only (network).
-module Bit.Device
+module Bit.Device.Identity
   ( -- Types
     StorageType(..)
   , DeviceInfo(..)
@@ -53,12 +53,12 @@ import System.Exit (ExitCode(ExitSuccess))
 import qualified System.Info as Info
 import Data.UUID (UUID, toString, fromString)
 import Data.UUID.V4 (nextRandom)
-import Internal.Config (bitDevicesDir, bitRemotesDir)
+import Bit.Config.Paths (bitDevicesDir, bitRemotesDir)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8', encodeUtf8)
-import Bit.AtomicWrite (atomicWriteFile)
+import Bit.IO.AtomicWrite (atomicWriteFile)
 
 -- ---------------------------------------------------------------------------
 -- Types

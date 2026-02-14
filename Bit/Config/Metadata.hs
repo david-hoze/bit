@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
-module Bit.Internal.Metadata
+module Bit.Config.Metadata
   ( MetaContent(..)
   , serializeMetadata
   , parseMetadata

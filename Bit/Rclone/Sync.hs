@@ -1,7 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Bit.Core.Transport
+module Bit.Rclone.Sync
     ( -- Shared action derivation
       deriveActions
     , nameStatusToAction
@@ -17,23 +17,23 @@ module Bit.Core.Transport
     ) where
 
 import qualified System.Directory as Dir
-import Bit.Platform (copyFile, createDirectoryIfMissing)
+import Bit.IO.Platform (copyFile, createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
 import Control.Monad (when, void, forM, forM_, unless)
 import Control.Exception (try, SomeException)
-import Bit.Concurrency (ioConcurrency, mapConcurrentlyBounded)
+import Bit.IO.Concurrency (ioConcurrency, mapConcurrentlyBounded)
 import Data.Foldable (traverse_)
-import qualified Internal.Git as Git
-import qualified Internal.Transport as Transport
-import Internal.Config (bitIndexPath, bundleForRemote)
+import qualified Bit.Git.Run as Git
+import qualified Bit.Rclone.Run as Transport
+import Bit.Config.Paths (bitIndexPath, bundleForRemote)
 import Data.List (isPrefixOf)
 import Bit.Utils (toPosix)
-import Bit.Plan (RcloneAction(..), resolveSwaps)
+import Bit.Domain.Plan (RcloneAction(..), resolveSwaps)
 import Bit.Remote (Remote, remoteName, remoteUrl)
 import Bit.Types (BitM, BitEnv(..), Path(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
-import qualified Bit.CopyProgress as CopyProgress
+import qualified Bit.Rclone.Progress as CopyProgress
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -42,7 +42,7 @@ import Bit.Core.Helpers
     ( getLocalHeadE
     , readFileMaybe
     )
-import qualified Bit.Platform as Platform
+import qualified Bit.IO.Platform as Platform
 
 -- ============================================================================
 -- Internal types

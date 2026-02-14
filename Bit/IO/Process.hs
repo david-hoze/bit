@@ -19,9 +19,9 @@
 -- Import this module for process operations that need output capture:
 --
 -- @
--- import Bit.Process (readProcessStrict, readProcessStrictWithStderr)
+-- import Bit.IO.Process (readProcessStrict, readProcessStrictWithStderr)
 -- @
-module Bit.Process
+module Bit.IO.Process
   ( -- * Strict process execution
     readProcessStrict
   , readProcessStrictWithStderr
@@ -100,7 +100,7 @@ readProcessStrict cmd args = do
         
         pure (exitCode, out, err)
       
-      _ -> error "Bit.Process.readProcessStrict: failed to create pipes"
+      _ -> error "Bit.IO.Process.readProcessStrict: failed to create pipes"
   where
     cleanupProcess (mStdin, mStdout, _mStderr, ph) = do
       -- Try to close any handles that are still open
@@ -152,7 +152,7 @@ readProcessStrictWithStderr cmd args = do
         
         pure (exitCode, out)
       
-      _ -> error "Bit.Process.readProcessStrictWithStderr: failed to create pipes"
+      _ -> error "Bit.IO.Process.readProcessStrictWithStderr: failed to create pipes"
   where
     cleanupProcess (mStdin, mStdout, _mStderr, ph) = do
       -- Try to close any handles that are still open

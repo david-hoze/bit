@@ -3,7 +3,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Bit.Scan
+module Bit.Scan.Local
   ( scanWorkingDir
   , scanWorkingDirWithAbort
   , ScanResult(..)
@@ -37,9 +37,9 @@ import Control.Monad (void, when, forM_)
 import Data.Foldable (traverse_)
 import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
-import qualified Internal.ConfigFile as ConfigFile
+import qualified Bit.Config.File as ConfigFile
 import Bit.Utils (atomicWriteFileStr, toPosix, formatBytes)
-import Bit.Internal.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
+import Bit.Config.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
 import qualified Data.Set as Set
 import qualified Crypto.Hash.MD5 as MD5
 import Data.ByteString.Base16 (encode)
@@ -48,11 +48,11 @@ import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent (getNumCapabilities, forkIO, threadDelay, killThread)
 import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
 import Control.Exception (bracket_, finally)
-import Bit.Progress (reportProgress, clearProgress)
+import Bit.Progress.Report (reportProgress, clearProgress)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import Bit.Concurrency (Concurrency(..), ioConcurrency)
+import Bit.IO.Concurrency (Concurrency(..), ioConcurrency)
 
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]

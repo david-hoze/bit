@@ -3,7 +3,7 @@
 
 -- | Progress reporting for file copy operations.
 -- Provides rclone-based batch file copy with progress tracking via JSON logs.
-module Bit.CopyProgress
+module Bit.Rclone.Progress
     ( SyncProgress(..)
     , newSyncProgress
     , rcloneCopyFiles
@@ -18,7 +18,7 @@ import System.IO
     )
 import System.Process (CreateProcess(..), StdStream(..), proc, createProcess, waitForProcess, terminateProcess)
 import System.Exit (ExitCode(..))
-import Bit.Progress (reportProgress, clearProgress)
+import Bit.Progress.Report (reportProgress, clearProgress)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, atomicModifyIORef')
 import Control.Concurrent (forkIO, threadDelay, killThread)
 import Control.Concurrent.Async (async, wait)

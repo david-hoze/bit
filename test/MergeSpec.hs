@@ -14,8 +14,8 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Data.List (isInfixOf)
 
-import Bit.Conflict
-import Bit.Internal.Metadata (MetaContent(..), parseMetadata, serializeMetadata, displayHash, hasConflictMarkers)
+import Bit.Core.Conflict
+import Bit.Config.Metadata (MetaContent(..), parseMetadata, serializeMetadata, displayHash, hasConflictMarkers)
 import Bit.Types (Hash(..), HashAlgo(..))
 import qualified Data.Text as T
 
