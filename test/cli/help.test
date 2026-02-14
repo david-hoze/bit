@@ -7,11 +7,11 @@ rmdir /s /q test\cli\output\work_help 2>nul & mkdir test\cli\output\work_help
 >>>
 >>>= 0
 
-# bit with no args prints help to stdout, exits 0
+# bit with no args delegates to git (like git with no args)
 cd test\cli\output\work_help & bit
 <<<
->>> /Usage: bit/
->>>= 0
+>>> /usage: git/
+>>>= 1
 
 # bit help prints same help
 cd test\cli\output\work_help & bit help

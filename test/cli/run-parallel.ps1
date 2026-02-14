@@ -10,6 +10,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+$projectRoot = (Get-Location).Path
 $testDir = "test\cli"
 
 # Tests that must run sequentially (contend on remote-init resources)
@@ -55,7 +56,8 @@ Write-Host "Running $($parallelTests.Count) test files in parallel..." -Foregrou
 $jobs = $parallelTests | ForEach-Object {
     $file = $_.FullName
     Start-Job -ScriptBlock {
-        param($file)
+        param($file, $workDir)
+        Set-Location $workDir
         $output = shelltest --debug $file 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
         $passed = 0; $failed = 0
@@ -68,7 +70,7 @@ $jobs = $parallelTests | ForEach-Object {
             ExitCode = $exitCode
             Output   = $output
         }
-    } -ArgumentList $file
+    } -ArgumentList $file, $projectRoot
 }
 
 $results = @($jobs | Wait-Job | Receive-Job)

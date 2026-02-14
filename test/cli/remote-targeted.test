@@ -126,7 +126,7 @@ cd test\cli\output\work_rmt_a & bit @fake init
 >>>2 /remote.*not found/
 >>>= 1
 
-# ---- @remote commands without a bit repository ----
+# ---- @remote commands from subdirectory (finds parent repo via findBitRoot) ----
 mkdir test\cli\output\work_rmt_a\notrepo
 <<<
 >>>
@@ -134,7 +134,7 @@ mkdir test\cli\output\work_rmt_a\notrepo
 
 cd test\cli\output\work_rmt_a\notrepo & bit @origin init
 <<<
->>>2 /not a bit repository/
+>>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ======================================================================

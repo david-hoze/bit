@@ -38,8 +38,10 @@ module Bit.Git.Run
     , checkoutOurs
     , checkoutTheirs
     , runGitRaw
+    , runGitRawIn
     , runGitRawAt
     , runGitWithOutput
+    , runGitWithOutputIn
     , runGitAt
     , rewriteGitHints
     , DeletedSide(..)
@@ -62,6 +64,7 @@ import Data.Maybe (mapMaybe, listToMaybe)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import Bit.Config.Paths
+import System.FilePath ((</>))
 import Data.Char (isSpace)
 import Control.Monad (when, guard)
 import Prelude hiding (init)
@@ -221,6 +224,21 @@ runGitRaw args = do
       hPutStrLn stderr ("bit: git exited with code " ++ show n)
 
   pure code
+
+-- | Like runGitRaw but targets .bit/index/<prefix>.
+-- Git walks up from the subdirectory to find .git, and resolves paths
+-- relative to the subdirectory. When prefix is empty, delegates to runGitRaw.
+runGitRawIn :: FilePath -> [String] -> IO ExitCode
+runGitRawIn "" args = runGitRaw args
+runGitRawIn prefix args = runGitRawAt (bitIndexPath </> prefix) args
+
+-- | Like runGitWithOutput but targets .bit/index/<prefix>.
+-- When prefix is empty, delegates to runGitWithOutput.
+runGitWithOutputIn :: FilePath -> [String] -> IO (ExitCode, String, String)
+runGitWithOutputIn "" args = runGitWithOutput args
+runGitWithOutputIn prefix args = do
+  let fullArgs = ["-C", bitIndexPath </> prefix] ++ ["-c", "color.ui=never"] ++ args
+  readProcessWithExitCode "git" fullArgs ""
 
 -- | Like runGitRaw but targets an arbitrary directory instead of .bit/index.
 runGitRawAt :: FilePath -> [String] -> IO ExitCode

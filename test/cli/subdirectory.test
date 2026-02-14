@@ -1,0 +1,155 @@
+# =============================================================================
+# Subdirectory Support - Running bit commands from subdirectories
+#
+# Tests that bit finds .bit/ by walking up, computes the prefix, and
+# correctly dispatches git commands relative to the subdirectory.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_subdir 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: init repo, add a file, commit
+# ======================================================================
+
+mkdir test\cli\output\work_subdir & cd test\cli\output\work_subdir & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_subdir & echo root file> root.txt & bit add root.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_subdir & bit commit -m "Add root.txt"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: status from subdirectory
+# ======================================================================
+
+# Create a subdirectory and run bit status from it
+mkdir test\cli\output\work_subdir\subdir
+<<<
+>>>
+>>>= 0
+
+# ---- bit status from subdirectory should work (clean tree) ----
+cd test\cli\output\work_subdir\subdir & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: add + commit from subdirectory
+# ======================================================================
+
+# ---- Create a file in the subdirectory, add and commit from there ----
+cd test\cli\output\work_subdir\subdir & echo sub file> sub.txt & bit add sub.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_subdir\subdir & bit status
+<<<
+>>> /new file:.*sub\.txt/
+>>>= 0
+
+cd test\cli\output\work_subdir\subdir & bit commit -m "Add sub.txt from subdir"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_subdir\subdir & bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: diff from subdirectory
+# ======================================================================
+
+# ---- Modify a file and check diff from subdirectory ----
+cd test\cli\output\work_subdir\subdir & echo modified> sub.txt & bit add sub.txt & bit diff --cached
+<<<
+>>> /sub\.txt/
+>>>= 0
+
+cd test\cli\output\work_subdir\subdir & bit commit -m "Modify sub.txt"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# ======================================================================
+# SECTION 4: log from subdirectory
+# ======================================================================
+
+# ---- bit log from subdirectory should show full history ----
+cd test\cli\output\work_subdir\subdir & bit log --oneline
+<<<
+>>> /Add root\.txt/
+>>>= 0
+
+# ======================================================================
+# SECTION 5: ls-files from subdirectory
+# ======================================================================
+
+cd test\cli\output\work_subdir\subdir & bit ls-files
+<<<
+>>> /sub\.txt/
+>>>= 0
+
+# ======================================================================
+# SECTION 6: nested subdirectory (two levels deep)
+# ======================================================================
+
+mkdir test\cli\output\work_subdir\subdir\deep
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_subdir\subdir\deep & echo deep file> deep.txt & bit add deep.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_subdir\subdir\deep & bit status
+<<<
+>>> /new file:.*deep\.txt/
+>>>= 0
+
+cd test\cli\output\work_subdir\subdir\deep & bit commit -m "Add deep.txt"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# ======================================================================
+# SECTION 7: non-repo directory still fails
+# ======================================================================
+
+mkdir test\cli\output\work_subdir_norepo 2>nul
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_subdir_norepo & bit status 2>&1
+<<<
+>>> /fatal: not a bit repository/
+>>>= 1
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_subdir 2>nul & rmdir /s /q test\cli\output\work_subdir_norepo 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

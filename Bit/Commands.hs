@@ -14,7 +14,7 @@ import qualified Bit.Device.RemoteWorkspace as RemoteWorkspace
 import System.Environment (getArgs)
 import Bit.Help (printMainHelp, printTerseHelp, printCommandHelp)
 import System.Exit (ExitCode(..), exitWith, exitSuccess)
-import System.FilePath ((</>))
+import System.FilePath ((</>), makeRelative, takeDirectory)
 import System.IO (hPutStrLn, stderr)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
@@ -113,11 +113,15 @@ extractRemoteTarget args = NoRemote args
 -- operates, re-bundles if needed, and pushes back. No persistent workspace.
 runRemoteCommand :: String -> [String] -> IO ()
 runRemoteCommand remoteName args = do
-    cwd <- Dir.getCurrentDirectory
-    bitExists <- Dir.doesDirectoryExist (cwd </> ".bit")
-    unless bitExists $ do
-        hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
-        exitWith (ExitFailure 1)
+    origCwd <- Dir.getCurrentDirectory
+    mRoot <- findBitRoot origCwd
+    case mRoot of
+        Nothing -> do
+            hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
+            exitWith (ExitFailure 1)
+        Just _ -> pure ()
+    let cwd = maybe origCwd id mRoot
+    Dir.setCurrentDirectory cwd
 
     mRemote <- resolveRemote cwd remoteName
     case mRemote of
@@ -129,7 +133,7 @@ runRemoteCommand remoteName args = do
                 concurrency = if isSequential then Sequential else Parallel 0
                 cmd = filter (/= "--sequential") args
                 runVerifyCmd repairMode = do
-                    let env = BitEnv cwd (Just remote) NoForce
+                    let env = BitEnv cwd "" (Just remote) NoForce
                     runBitM env $ Bit.verify (Bit.VerifyRemotePath remote) repairMode concurrency
                 rejectFilesystem = do
                     mType <- Device.readRemoteType cwd remoteName
@@ -208,6 +212,16 @@ commandKey ("branch":sub:_)
 commandKey (cmd:_) = cmd
 commandKey [] = ""
 
+-- | Walk up from the given directory to find the closest ancestor containing .bit/.
+findBitRoot :: FilePath -> IO (Maybe FilePath)
+findBitRoot dir = do
+    exists <- Dir.doesDirectoryExist (dir </> ".bit")
+    if exists
+        then pure (Just dir)
+        else let parent = takeDirectory dir
+             in if parent == dir then pure Nothing
+                else findBitRoot parent
+
 runCommand :: [String] -> IO ()
 runCommand args = do
     let hasHelp = "--help" `elem` args
@@ -234,30 +248,46 @@ runCommand args = do
                 then printTerseHelp key >> exitSuccess
                 else printCommandHelp key >> exitSuccess
 
-    cwd <- Dir.getCurrentDirectory
-    bitExists <- Dir.doesDirectoryExist (cwd </> ".bit")
-
-    -- Lightweight env (no scan) — for fetch, verify, and explicit-remote commands (falls back to "origin")
-    let baseEnv = do
-            mRemote <- getDefaultRemote cwd
-            pure $ BitEnv cwd mRemote forceMode
-
-    -- Strict upstream env — requires branch.main.remote (for push and pull without explicit remote)
-    let upstreamEnv = do
-            mRemote <- getUpstreamRemote cwd
-            pure $ BitEnv cwd mRemote forceMode
-
-    -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
-    let scanAndWrite = do
-            syncBitignoreToIndex cwd
-            localFiles <- Scan.scanWorkingDir cwd concurrency
-            Scan.writeMetadataFiles cwd localFiles
+    origCwd <- Dir.getCurrentDirectory
+    mRoot <- findBitRoot origCwd
+    let bitExists = case mRoot of { Just _ -> True; Nothing -> False }
+        root = maybe origCwd id mRoot
+        prefix = case mRoot of
+            Just r  -> let rel = makeRelative r origCwd
+                       in if rel == "." then "" else rel
+            Nothing -> ""
 
     -- Repo existence check (skip for init)
     let needsRepo = case cmd of { ("init":_) -> False; _ -> True }
     when (needsRepo && not bitExists) $ do
         hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
         exitWith (ExitFailure 1)
+
+    -- Change to repo root so all .bit/ paths resolve correctly
+    when bitExists $
+        Dir.setCurrentDirectory root
+
+    -- Ensure .bit/index/<prefix> subdirectory exists for git -C
+    when (bitExists && not (null prefix)) $
+        Dir.createDirectoryIfMissing True (root </> ".bit" </> "index" </> prefix)
+
+    let cwd = root
+
+    -- Lightweight env (no scan) — for fetch, verify, and explicit-remote commands (falls back to "origin")
+    let baseEnv = do
+            mRemote <- getDefaultRemote cwd
+            pure $ BitEnv cwd prefix mRemote forceMode
+
+    -- Strict upstream env — requires branch.main.remote (for push and pull without explicit remote)
+    let upstreamEnv = do
+            mRemote <- getUpstreamRemote cwd
+            pure $ BitEnv cwd prefix mRemote forceMode
+
+    -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
+    let scanAndWrite = do
+            syncBitignoreToIndex cwd
+            localFiles <- Scan.scanWorkingDir cwd concurrency
+            Scan.writeMetadataFiles cwd localFiles
 
     -- Helper functions for running commands
     let runScanned action = do { scanAndWrite; env <- baseEnv; runBitM env action }
@@ -287,36 +317,36 @@ runCommand args = do
         ["branch", "--unset-upstream"]  -> Bit.unsetUpstream
 
         -- ── Lightweight env (no scan) ────────────────────────
-        ("log":rest)                    -> Bit.log rest >>= exitWith
-        ("ls-files":rest)               -> Bit.lsFiles rest >>= exitWith
+        ("log":rest)                    -> Bit.log prefix rest >>= exitWith
+        ("ls-files":rest)               -> Bit.lsFiles prefix rest >>= exitWith
         ["remote", "show"]              -> runBase $ Bit.remoteShow Nothing
         ["remote", "show", name]        -> runBaseWithRemote name $ Bit.remoteShow (Just name)
         ["verify"]                      -> runBase $ Bit.verify Bit.VerifyLocal Bit.PromptRepair concurrency
         ["repair"]                      -> runBase $ Bit.verify Bit.VerifyLocal Bit.AutoRepair concurrency
 
         ("rm":rest)                     -> runBase (Bit.rm rest) >>= exitWith
-        ("branch":rest)                 -> Bit.branch rest >>= exitWith
+        ("branch":rest)                 -> Bit.branch prefix rest >>= exitWith
 
         -- ── Full scanned env (needs working directory state) ─
         ("add":rest)                    -> do
             scanAndWrite
-            Bit.add rest >>= exitWith
+            Bit.add prefix rest >>= exitWith
         ("commit":rest)                 -> do
             scanAndWrite
-            Bit.commit rest >>= exitWith
+            Bit.commit prefix rest >>= exitWith
         ("diff":rest)                   -> do
             scanAndWrite
-            Bit.diff rest >>= exitWith
+            Bit.diff prefix rest >>= exitWith
         ("mv":rest)                     -> do
             scanAndWrite
-            Bit.mv rest >>= exitWith
+            Bit.mv prefix rest >>= exitWith
         ("reset":rest)                  -> do
             scanAndWrite
-            Bit.reset rest >>= exitWith
+            Bit.reset prefix rest >>= exitWith
         ["merge", "--continue"]         -> runScanned Bit.mergeContinue
         ("merge":rest)                  -> do
             scanAndWrite
-            Bit.merge rest >>= exitWith
+            Bit.merge prefix rest >>= exitWith
         ("status":rest)                 -> runScanned (Bit.status rest) >>= exitWith
         ("restore":rest)                -> runScanned (Bit.restore rest) >>= exitWith
         ("checkout":rest)               -> runScanned (Bit.checkout rest) >>= exitWith

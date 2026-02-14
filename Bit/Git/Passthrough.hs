@@ -62,31 +62,32 @@ import Bit.Core.Helpers
 -- Git passthrough (thin wrappers)
 -- ============================================================================
 
-add :: [String] -> IO ExitCode
-add args = Git.runGitRaw ("add" : args)
+add :: FilePath -> [String] -> IO ExitCode
+add prefix args = Git.runGitRawIn prefix ("add" : args)
 
-commit :: [String] -> IO ExitCode
-commit args = Git.runGitRaw ("commit" : args)
+commit :: FilePath -> [String] -> IO ExitCode
+commit prefix args = Git.runGitRawIn prefix ("commit" : args)
 
-diff :: [String] -> IO ExitCode
-diff args = Git.runGitRaw ("diff" : args)
+diff :: FilePath -> [String] -> IO ExitCode
+diff prefix args = Git.runGitRawIn prefix ("diff" : args)
 
-log :: [String] -> IO ExitCode
-log args = Git.runGitRaw ("log" : args)
+log :: FilePath -> [String] -> IO ExitCode
+log prefix args = Git.runGitRawIn prefix ("log" : args)
 
-lsFiles :: [String] -> IO ExitCode
-lsFiles args = Git.runGitRaw ("ls-files" : args)
+lsFiles :: FilePath -> [String] -> IO ExitCode
+lsFiles prefix args = Git.runGitRawIn prefix ("ls-files" : args)
 
-reset :: [String] -> IO ExitCode
-reset args = Git.runGitRaw ("reset" : args)
+reset :: FilePath -> [String] -> IO ExitCode
+reset prefix args = Git.runGitRawIn prefix ("reset" : args)
 
 rm :: [String] -> BitM ExitCode
 rm args = do
     cwd <- asks envCwd
+    prefix <- asks envPrefix
     let flags = parseRmFlags args
         -- Strip quiet flags so git always outputs the file list for parsing
         gitArgs = stripQuiet args
-    (code, out, err) <- liftIO $ Git.runGitWithOutput ("rm" : gitArgs)
+    (code, out, err) <- liftIO $ Git.runGitWithOutputIn prefix ("rm" : gitArgs)
 
     -- Remove actual files from working directory
     when (code == ExitSuccess && not (rmCached flags) && not (rmDryRun flags)) $ liftIO $ do
@@ -112,14 +113,14 @@ rm args = do
 
     pure code
 
-mv :: [String] -> IO ExitCode
-mv args = Git.runGitRaw ("mv" : args)
+mv :: FilePath -> [String] -> IO ExitCode
+mv prefix args = Git.runGitRawIn prefix ("mv" : args)
 
-branch :: [String] -> IO ExitCode
-branch args = Git.runGitRaw ("branch" : args)
+branch :: FilePath -> [String] -> IO ExitCode
+branch prefix args = Git.runGitRawIn prefix ("branch" : args)
 
-merge :: [String] -> IO ExitCode
-merge args = Git.runGitRaw ("merge" : args)
+merge :: FilePath -> [String] -> IO ExitCode
+merge prefix args = Git.runGitRawIn prefix ("merge" : args)
 
 -- ============================================================================
 -- Stateful passthrough (needs BitEnv)
@@ -127,7 +128,8 @@ merge args = Git.runGitRaw ("merge" : args)
 
 status :: [String] -> BitM ExitCode
 status args = do
-    liftIO $ Git.runGitRaw ("status" : args)
+    prefix <- asks envPrefix
+    liftIO $ Git.runGitRawIn prefix ("status" : args)
 
 restore :: [String] -> BitM ExitCode
 restore = doRestore
@@ -222,24 +224,32 @@ unsetUpstream = void Git.unsetBranchUpstream
 doRestore :: [String] -> BitM ExitCode
 doRestore args = do
     cwd <- asks envCwd
-    code <- lift $ Git.runGitRaw ("restore" : args)
+    prefix <- asks envPrefix
+    code <- lift $ Git.runGitRawIn prefix ("restore" : args)
     when (code == ExitSuccess) $ do
         let stagedOnly = ("--staged" `elem` args || "-S" `elem` args) &&
                          not ("--worktree" `elem` args || "-W" `elem` args)
-        unless stagedOnly $
-            syncTextFilesFromIndex cwd (restoreCheckoutPaths args)
+        unless stagedOnly $ do
+            let rawPaths = restoreCheckoutPaths args
+                adjustedPaths = if null prefix then rawPaths
+                                else map (prefix </>) rawPaths
+            syncTextFilesFromIndex cwd adjustedPaths
     pure code
 
 doCheckout :: [String] -> BitM ExitCode
 doCheckout args = do
+    prefix <- asks envPrefix
     let args' = case Data.List.elemIndex "--" args of
           Just _ -> args
           Nothing -> let (opts, paths) = Data.List.span (\a -> a == "--" || "-" `isPrefixOf` a) args
                      in opts ++ ["--"] ++ paths
-    code <- lift $ Git.runGitRaw ("checkout" : args')
+    code <- lift $ Git.runGitRawIn prefix ("checkout" : args')
     when (code == ExitSuccess) $ do
         cwd <- asks envCwd
-        syncTextFilesFromIndex cwd (restoreCheckoutPaths args')
+        let rawPaths = restoreCheckoutPaths args'
+            adjustedPaths = if null prefix then rawPaths
+                            else map (prefix </>) rawPaths
+        syncTextFilesFromIndex cwd adjustedPaths
     pure code
 
 -- | After a successful restore/checkout, copy text files from .bit/index/ back
