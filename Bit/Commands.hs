@@ -19,7 +19,7 @@ import System.IO (hPutStrLn, stderr)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
 import qualified Bit.Git.Run as Git
-import Data.List (dropWhileEnd)
+import Data.List (dropWhileEnd, isPrefixOf)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -29,12 +29,13 @@ run :: IO ()
 run = do
     args <- getArgs
     case args of
-        []               -> printMainHelp >> exitSuccess
+        []               -> Git.runGitGlobal [] >>= exitWith
         ["help"]         -> printMainHelp >> exitSuccess
         ["help", cmd]    -> printCommandHelp cmd >> exitSuccess
         ["help", c1, c2] -> printCommandHelp (c1 ++ " " ++ c2) >> exitSuccess
         ["-h"]           -> printMainHelp >> exitSuccess
         ["--help"]       -> printMainHelp >> exitSuccess
+        _ | isGitGlobalFlag args -> Git.runGitGlobal args >>= exitWith
         _  -> case extractRemoteTarget args of
             RemoteError msg -> do
                 hPutStrLn stderr $ "fatal: " ++ msg
@@ -42,6 +43,50 @@ run = do
             NoRemote remaining -> runCommand remaining
             RemoteFound remoteName remaining ->
                 runRemoteCommand remoteName remaining
+
+-- | Parse 'bit init [flags] [dir]' into InitOptions + target directory.
+-- Flags that take a separate arg: --template, --separate-git-dir, --object-format,
+-- --ref-format, -b, --initial-branch. All others are standalone.
+parseInitArgs :: [String] -> (Bit.InitOptions, Maybe FilePath)
+parseInitArgs = go Bit.defaultInitOptions Nothing
+  where
+    consumesNext f = f `elem`
+        ["--template", "--separate-git-dir", "--object-format", "--ref-format"
+        , "-b", "--initial-branch"]
+    go opts dir [] = (opts, dir)
+    go opts dir ("-q":rest) = go opts { Bit.initQuiet = True } dir rest
+    go opts dir ("--quiet":rest) = go opts { Bit.initQuiet = True } dir rest
+    go opts dir ("--bare":rest) = go opts { Bit.initBare = True, Bit.initGitFlags = Bit.initGitFlags opts ++ ["--bare"] } dir rest
+    go opts dir (f:v:rest)
+        | consumesNext f = go opts { Bit.initGitFlags = Bit.initGitFlags opts ++ [f, v] } dir rest
+    go opts dir (f:rest)
+        | "-" `isPrefixOf` f = go opts { Bit.initGitFlags = Bit.initGitFlags opts ++ [f] } dir rest
+        | otherwise = go opts (Just f) rest
+
+-- | Run 'bit init' with parsed options.
+runInit :: [String] -> IO ()
+runInit args = do
+    let (opts, mDir) = parseInitArgs args
+    case mDir of
+        Nothing -> do
+            cwd <- Dir.getCurrentDirectory
+            unless (Bit.initQuiet opts) $
+                putStrLn $ "Initializing bit in: " ++ cwd
+            Bit.initializeRepoAt cwd opts
+            unless (Bit.initQuiet opts) $
+                putStrLn "bit initialized successfully!"
+        Just d -> do
+            unless (Bit.initQuiet opts) $
+                putStrLn $ "Initializing bit in: " ++ d
+            Bit.initializeRepoAt d opts
+            unless (Bit.initQuiet opts) $
+                putStrLn "bit initialized successfully!"
+
+-- | Git flags that don't need a repo (or .bit directory).
+isGitGlobalFlag :: [String] -> Bool
+isGitGlobalFlag (flag:_) = flag `elem`
+    ["--exec-path", "--version", "--html-path", "--man-path", "--info-path"]
+isGitGlobalFlag _ = False
 
 -- | Result of extracting a remote target from CLI args.
 data RemoteExtract
@@ -209,7 +254,7 @@ runCommand args = do
             Scan.writeMetadataFiles cwd localFiles
 
     -- Repo existence check (skip for init)
-    let needsRepo = cmd /= ["init"]
+    let needsRepo = case cmd of { ("init":_) -> False; _ -> True }
     when (needsRepo && not bitExists) $ do
         hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
         exitWith (ExitFailure 1)
@@ -235,7 +280,7 @@ runCommand args = do
 
     case cmd of
         -- ── No env needed ────────────────────────────────────
-        ["init"]                        -> Bit.init
+        ("init":rest)                   -> runInit rest
         ["remote", "add", name, url]    -> Bit.remoteAdd name url
         ["fsck"]                        -> Bit.fsck cwd
         ["merge", "--abort"]            -> Bit.mergeAbort

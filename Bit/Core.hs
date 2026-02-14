@@ -5,6 +5,8 @@ module Bit.Core
     ( -- Repo initialization
       init
     , initializeRepoAt
+    , InitOptions(..)
+    , defaultInitOptions
 
       -- Git passthrough (these take args from the CLI)
     , add
@@ -52,7 +54,7 @@ module Bit.Core
 
 import Prelude hiding (init, log)
 import Bit.Core.Helpers (PullMode(..), PullOptions(..), defaultPullOptions)
-import Bit.Core.Init (init, initializeRepoAt)
+import Bit.Core.Init (init, initializeRepoAt, InitOptions(..), defaultInitOptions)
 import Bit.Git.Passthrough
     ( add
     , commit

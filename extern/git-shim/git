@@ -1,0 +1,38 @@
+#!/bin/bash
+# Shim: runs bit as git, then creates a .git directory junction for test compatibility.
+
+case "$1" in
+init)
+    bit "$@"
+    rc=$?
+    [ $rc -ne 0 ] && exit $rc
+
+    # Find the target directory from args (last non-flag argument, or cwd)
+    dir=
+    skip_next=false
+    shift  # skip "init"
+    for arg; do
+        if $skip_next; then skip_next=false; continue; fi
+        case "$arg" in
+            --template|--separate-git-dir|--object-format|--ref-format|-b|--initial-branch)
+                skip_next=true ;;
+            --template=*|--separate-git-dir=*|--object-format=*|--ref-format=*|--initial-branch=*) ;;
+            --bare|--quiet|-q|--shared*) ;;
+            -*) ;;
+            *) dir="$arg" ;;
+        esac
+    done
+    dir="${dir:-.}"
+
+    # Create directory junction: <dir>/.git -> <dir>/.bit/index/.git
+    if [ -d "$dir/.bit/index/.git" ] && [ ! -e "$dir/.git" ]; then
+        target=$(cygpath -w "$(cd "$dir/.bit/index/.git" && pwd)")
+        link=$(cygpath -w "$(cd "$dir" && pwd)/.git")
+        cmd //c mklink //j "$link" "$target" > /dev/null 2>&1
+    fi
+    exit $rc
+    ;;
+*)
+    exec bit "$@"
+    ;;
+esac

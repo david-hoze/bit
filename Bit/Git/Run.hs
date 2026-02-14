@@ -54,6 +54,7 @@ module Bit.Git.Run
     , NameStatusChange(..)
     , parseNameStatusOutput
     , getRemoteTrackingHash
+    , runGitGlobal
     ) where
 
 import Data.Maybe (mapMaybe, listToMaybe)
@@ -536,3 +537,12 @@ getFilesAtCommit gitRef = do
 -- The indexPath should be the path to the .bit/index directory (NOT the .git subdirectory).
 runGitAt :: FilePath -> [String] -> IO (ExitCode, String, String)
 runGitAt indexPath args = readProcessWithExitCode "git" (["-C", indexPath] ++ args) ""
+
+-- | Run git without -C .bit/index (no repo context).
+-- For commands that don't need a repo: --exec-path, --version, etc.
+runGitGlobal :: [String] -> IO ExitCode
+runGitGlobal args = do
+  (code, out, err) <- readProcessWithExitCode "git" args ""
+  putStr out
+  hPutStr stderr err
+  pure code
