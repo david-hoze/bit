@@ -184,7 +184,7 @@ Two fields only:
 - `hash` — MD5 hash of file content (prefixed with `md5:`)
 - `size` — File size in bytes
 
-Parsing and serialization are handled by a single canonical module (`bit/Internal/Metadata.hs`) which enforces the round-trip property: `parseMetadata . serializeMetadata ≡ Just`.
+Parsing and serialization are handled by a single canonical module (`Bit/Config/Metadata.hs`) which enforces the round-trip property: `parseMetadata . serializeMetadata ≡ Just`.
 
 **Known deviation from original spec**: The original spec called for SHA256 and `hash=`/`size=` (equals-sign) format. The implementation uses MD5 (matching rclone's native hash) and `hash: `/`size: ` (colon-space) format. This is intentional — MD5 is used everywhere for consistency with rclone comparisons. SHA256 may be added later alongside MD5, not as a replacement.
 
@@ -214,15 +214,15 @@ bit runs Git with:
 The codebase follows strict layer boundaries:
 
 ```
-bit/Commands.hs → Bit/Core/*.hs → Internal/Transport.hs → rclone (only here!)
+Bit/Commands.hs → Bit/Core/*.hs → Bit/Rclone/Run.hs → rclone (only here!)
                       ↓
-                   Internal/Git.hs → git (only here!)
+                   Bit/Git/Run.hs → git (only here!)
 ```
 
-- **Internal/Transport.hs** — Dumb rclone wrapper. Exposes `copyToRemote`, `copyFromRemote`, `copyFromRemoteDetailed`, `moveRemote`, `deleteRemote`, `listRemoteJson`, `listRemoteJsonWithHash`, `checkRemote`, etc. Takes `Remote` + relative paths. Does NOT know about `.bit/`, bundles, `RemoteState`, or `FetchResult`. Captures rclone JSON output as raw UTF-8 bytes to correctly handle non-ASCII filenames (Hebrew, Chinese, emoji, etc.). Uses `bracket` for exception-safe subprocess resource cleanup. **copyFromRemoteDetailed** returns **CopyResult** (NotFound, NetworkError, OtherError) by parsing rclone stderr so fetch and remote-workspace can distinguish "no bundle" from network or other errors for user-facing messaging and retry.
-- **Internal/Git.hs** — Dumb git wrapper. Knows how to run git commands. Takes args. Does NOT interpret results in domain terms.
-- **Bit/Core/*.hs** — Smart business logic, split by concern. `Bit.Core` re-exports the public API. Sub-modules: `Bit.Core.Push` (push logic + PushSeam), `Bit.Core.Pull` (pull + merge + conflict), `Bit.Core.Fetch` (fetch + remote state classification), `Bit.Core.Transport` (shared action derivation + working-tree sync), `Bit.Core.Verify` (verify + repair), `Bit.Core.Init` (repo initialization), `Bit.Core.Helpers` (shared types + utilities), `Bit.Core.RemoteManagement` (remote add/show), `Bit.Core.GitPassthrough` (git command delegation). All domain knowledge lives here. Calls Transport and Git, never calls `readProcessWithExitCode` directly.
-- **bit/Commands.hs** — Entry point. Parses CLI, resolves the remote, builds `BitEnv`, dispatches to `Bit.Core`.
+- **Bit/Rclone/Run.hs** — Dumb rclone wrapper. Exposes `copyToRemote`, `copyFromRemote`, `copyFromRemoteDetailed`, `moveRemote`, `deleteRemote`, `listRemoteJson`, `listRemoteJsonWithHash`, `checkRemote`, etc. Takes `Remote` + relative paths. Does NOT know about `.bit/`, bundles, `RemoteState`, or `FetchResult`. Captures rclone JSON output as raw UTF-8 bytes to correctly handle non-ASCII filenames (Hebrew, Chinese, emoji, etc.). Uses `bracket` for exception-safe subprocess resource cleanup. **copyFromRemoteDetailed** returns **CopyResult** (NotFound, NetworkError, OtherError) by parsing rclone stderr so fetch and remote-workspace can distinguish "no bundle" from network or other errors for user-facing messaging and retry.
+- **Bit/Git/Run.hs** — Dumb git wrapper. Knows how to run git commands. Takes args. Does NOT interpret results in domain terms.
+- **Bit/Core/*.hs** — Smart business logic, split by concern. `Bit.Core` re-exports the public API. Sub-modules: `Bit.Core.Push` (push logic + PushSeam), `Bit.Core.Pull` (pull + merge + conflict), `Bit.Core.Fetch` (fetch + remote state classification), `Bit.Rclone.Sync` (shared action derivation + working-tree sync), `Bit.Core.Verify` (verify + repair), `Bit.Core.Init` (repo initialization), `Bit.Core.Helpers` (shared types + utilities), `Bit.Core.RemoteManagement` (remote add/show), `Bit.Git.Passthrough` (git command delegation), `Bit.Core.Conflict` (merge conflict resolution). All domain knowledge lives here. Calls Rclone.Run and Git.Run, never calls `readProcessWithExitCode` directly.
+- **Bit/Commands.hs** — Entry point. Parses CLI, resolves the remote, builds `BitEnv`, dispatches to `Bit.Core`.
 
 ### Key Types
 
@@ -233,29 +233,29 @@ bit/Commands.hs → Bit/Core/*.hs → Internal/Transport.hs → rclone (only her
 | `FileEntry` | `bit.Types` | Tracked `Path` + `EntryKind` (hash, size, `ContentType`) |
 | `BitEnv` | `bit.Types` | Reader environment: cwd, remote, force flags |
 | `BitM` | `bit.Types` | `ReaderT BitEnv IO` — the application monad |
-| `MetaContent` | `bit.Internal.Metadata` | Canonical metadata: hash + size, single parser/serializer |
+| `MetaContent` | `Bit.Config.Metadata` | Canonical metadata: hash + size, single parser/serializer |
 | `Remote` | `bit.Remote` | Resolved remote: name + URL. Smart constructor, `remoteUrl` for Transport only |
 | `RemoteState` | `bit.Remote` | Remote classification: StateEmpty, StateValidBit, StateNonBitOccupied, StateNetworkError |
 | `FetchResult` | `bit.Remote` | Bundle fetch result: BundleFound, RemoteEmpty, NetworkError |
 | `FetchOutcome` | `bit.Core.Fetch` | UpToDate, Updated { foOldHash, foNewHash }, FetchedFirst, FetchError |
-| `RcloneAction` | `bit.Plan` | Copy, Move, Delete, Swap — concrete rclone operations. Swap is produced by `resolveSwaps`. |
-| `Resolution` | `bit.Conflict` | KeepLocal or TakeRemote — conflict resolution choice |
-| `DeletedSide` | `Internal.Git` (re-exported by `bit.Conflict`) | DeletedInOurs or DeletedInTheirs — which side deleted in modify/delete conflict |
-| `ConflictInfo` | `bit.Conflict` | ContentConflict, ModifyDelete path DeletedSide, AddAdd — conflict type from git ls-files -u |
-| `NameStatusChange` | `Internal.Git` | Added, Deleted, Modified, Renamed, Copied — parsed `git diff --name-status` output (replaces bare `(Char, FilePath, Maybe FilePath)` tuple) |
+| `RcloneAction` | `Bit.Domain.Plan` | Copy, Move, Delete, Swap — concrete rclone operations. Swap is produced by `resolveSwaps`. |
+| `Resolution` | `Bit.Core.Conflict` | KeepLocal or TakeRemote — conflict resolution choice |
+| `DeletedSide` | `Bit.Git.Run` (re-exported by `Bit.Core.Conflict`) | DeletedInOurs or DeletedInTheirs — which side deleted in modify/delete conflict |
+| `ConflictInfo` | `Bit.Core.Conflict` | ContentConflict, ModifyDelete path DeletedSide, AddAdd — conflict type from git ls-files -u |
+| `NameStatusChange` | `Bit.Git.Run` | Added, Deleted, Modified, Renamed, Copied — parsed `git diff --name-status` output (replaces bare `(Char, FilePath, Maybe FilePath)` tuple) |
 | `DivergentFile` | `bit.Core.Pull` | Record for remote divergence: path, expected/actual hash and size (replaces bare 5-tuple) |
-| `ScannedEntry` | `bit.Scan` | ScannedFile / ScannedDir — internal type for scan pass, replaces (FilePath, Bool) |
-| `FileToSync` | `bit.Core.Transport` | TextToSync / BinaryToSync — classifies files for sync (both carry FilePath only) |
-| `BinaryFileMeta` | `bit.Verify` | Record: bfmPath, bfmHash, bfmSize — replaces bare (Path, Hash, Integer) tuple |
-| `VerifyResult` | `bit.Verify` | Record: vrCount, vrIssues — replaces bare (Int, [VerifyIssue]) tuple |
+| `ScannedEntry` | `Bit.Scan.Local` | ScannedFile / ScannedDir — internal type for scan pass, replaces (FilePath, Bool) |
+| `FileToSync` | `Bit.Rclone.Sync` | TextToSync / BinaryToSync — classifies files for sync (both carry FilePath only) |
+| `BinaryFileMeta` | `Bit.Scan.Verify` | Record: bfmPath, bfmHash, bfmSize — replaces bare (Path, Hash, Integer) tuple |
+| `VerifyResult` | `Bit.Scan.Verify` | Record: vrCount, vrIssues — replaces bare (Int, [VerifyIssue]) tuple |
 | `VerifyTarget` | `bit.Core.Verify` | VerifyLocal or VerifyRemotePath Remote — whether verify checks local or a specific remote |
-| `DeviceInfo` | `bit.Device` | UUID + storage type + optional hardware serial |
-| `RemoteType` | `bit.Device` | RemoteFilesystem, RemoteDevice, RemoteCloud |
+| `DeviceInfo` | `Bit.Device.Identity` | UUID + storage type + optional hardware serial |
+| `RemoteType` | `Bit.Device.Identity` | RemoteFilesystem, RemoteDevice, RemoteCloud |
 
 ### Sync Pipeline
 
 Both push and pull derive file actions from `git diff --name-status` via a
-shared `deriveActions` function in `Bit.Core.Transport`:
+shared `deriveActions` function in `Bit.Rclone.Sync`:
 
 ```haskell
 deriveActions    :: Maybe String -> String -> IO [RcloneAction]  -- Nothing = first sync
@@ -312,7 +312,7 @@ regardless of whether the destination is local or cloud. Text files (content
 stored in index metadata) are copied individually from the index; only binary
 files go through the rclone batch.
 
-**Key functions** (Bit.Core.Transport):
+**Key functions** (Bit.Rclone.Sync):
 - `syncAllFilesFromHEAD`: First pull — lists files from HEAD, classifies text/binary, copies text from index, batches binary via `rcloneCopyFiles`
 - `applyMergeToWorkingDir`: Merge pull — diffs oldHead..newHead, processes deletions, copies text from index, batches binary via `rcloneCopyFiles`
 
@@ -331,7 +331,7 @@ and tracking ref updates.
 
 ### Conflict Resolution
 
-Conflict resolution is structured as a traversal over a list of conflicts (`bit.Conflict`): `resolveAll` maps over the list with `resolveConflict`, so each conflict is visited exactly once with correct progress tracking (1/N, 2/N, ...). The decision logic (KeepLocal vs TakeRemote) is cleanly separated from the git checkout/merge mechanics.
+Conflict resolution is structured as a traversal over a list of conflicts (`Bit.Core.Conflict`): `resolveAll` maps over the list with `resolveConflict`, so each conflict is visited exactly once with correct progress tracking (1/N, 2/N, ...). The decision logic (KeepLocal vs TakeRemote) is cleanly separated from the git checkout/merge mechanics.
 
 **Critical**: After resolving all conflicts, the merge commit must **always** be
 created, regardless of whether the index has staged changes. When the user
@@ -469,9 +469,9 @@ bit supports two kinds of remotes:
 - **Cloud remotes**: rclone-based (e.g., `gdrive:Projects/foo`). Identified by URL. Uses bundle + rclone sync.
 - **Filesystem remotes**: Local/network paths (USB drives, network shares, local directories). Creates a **full bit repository** at the remote location.
   - **UNC paths**: Under MINGW / Git Bash, UNC paths must use forward slashes (`//server/share/path`). The shell strips leading backslashes before bit receives the argument. bit normalizes forward-slash UNC paths and displays the canonical backslash form.
-  - **Platform layer**: GHC's `System.Directory` prepends `\\?\UNC\` to UNC paths for long-path support; virtual UNC providers (RDP tsclient, WebDAV) reject this prefix. `Bit.Platform` bypasses the prefix for UNC paths by calling Win32 directly, while keeping `System.Directory` (with long-path support) for local paths.
+  - **Platform layer**: GHC's `System.Directory` prepends `\\?\UNC\` to UNC paths for long-path support; virtual UNC providers (RDP tsclient, WebDAV) reject this prefix. `Bit.IO.Platform` bypasses the prefix for UNC paths by calling Win32 directly, while keeping `System.Directory` (with long-path support) for local paths.
 
-The `bit.Device` module handles remote type classification and device resolution:
+The `Bit.Device.Identity` module handles remote type classification and device resolution:
 - `RemoteType`: `RemoteFilesystem` (fixed paths), `RemoteDevice` (removable/network drives), `RemoteCloud` (rclone-based)
 - `isFilesystemType`: True for both `RemoteFilesystem` and `RemoteDevice` (both use direct git operations)
 - Physical storage: Identified by UUID + hardware serial (survives drive letter changes)
@@ -780,7 +780,7 @@ All other commands are not supported in remote context (e.g., `bit --remote orig
 
 ### Implementation Details
 
-Located in `Bit.RemoteWorkspace`:
+Located in `Bit.Device.RemoteWorkspace`:
 
 #### Core Helpers
 
@@ -877,7 +877,7 @@ This feature does NOT provide:
 
 #### 1. Strict IO Modules
 
-**`Bit.ConcurrentFileIO`** — Drop-in replacements for `Prelude` file operations:
+**`Bit.IO.ConcurrentFileIO`** — Drop-in replacements for `Prelude` file operations:
 - `readFileBinaryStrict` — strict `ByteString.readFile` wrapper
 - `readFileUtf8Strict` — strict UTF-8 text reading
 - `readFileMaybe` / `readFileUtf8Maybe` — safe reading with `Maybe` return
@@ -885,7 +885,7 @@ This feature does NOT provide:
 
 All operations use `ByteString.readFile` / `ByteString.writeFile` which read/write the entire file and close the handle before returning.
 
-**`Bit.Process`** — Strict process output capture:
+**`Bit.IO.Process`** — Strict process output capture:
 - `readProcessStrict` — runs a process, strictly captures stdout and stderr as `ByteString`, returns `(ExitCode, ByteString, ByteString)`
 - `readProcessStrictWithStderr` — runs a process with inherited stderr (for live progress), strictly captures stdout
 
@@ -895,14 +895,14 @@ Both functions:
 - Ensure all handles are closed and process is waited on in all code paths (using `bracket`)
 - Prevent "delayed read on closed handle" errors that occur when using lazy IO with `createProcess`
 
-**`Bit.ConcurrentIO`** — Type-safe concurrent IO newtype:
+**`Bit.IO.ConcurrentIO`** — Type-safe concurrent IO newtype:
 - Constructor is **not exported** to prevent `liftIO` smuggling
 - Only whitelisted strict operations are exposed
 - No `MonadIO` instance (intentional restriction)
 - Async integration is handled by explicit unwrapping via `runConcurrentIO` at concurrency boundaries (e.g. where `mapConcurrently` is called), preserving the newtype's encapsulation. The codebase does **not** use `MonadUnliftIO`: that would require the monad to be isomorphic to `ReaderT env IO`, and would let any async combinator round-trip back to `IO`, defeating the wrapper's discipline. Explicit unwrapping makes the escape hatch visible at the call site.
 - Includes concurrency primitives: `mapConcurrentlyBoundedC`, `QSem` operations
 
-**`Bit.AtomicWrite`** — Atomic file writes with Windows retry logic:
+**`Bit.IO.AtomicWrite`** — Atomic file writes with Windows retry logic:
 - `atomicWriteFile` — temp file + rename pattern
 - `DirWriteLock` — directory-level locking (MVar-based thread coordination)
 - `LockRegistry` — process-wide lock registry for multiple workers
@@ -911,11 +911,11 @@ Both functions:
 #### 2. Module Updates
 
 All lazy IO replaced with strict operations:
-- `Bit/Scan.hs` — `.gitignore` reading uses strict ByteString
-- `Bit/Device.hs` — `.bit-store`, device files, remote files use strict ByteString + atomic writes
+- `Bit/Scan/Local.hs` — `.gitignore` reading uses strict ByteString
+- `Bit/Device/Identity.hs` — `.bit-store`, device files, remote files use strict ByteString + atomic writes
 - `Bit/Core/Helpers.hs` — `readFileMaybe`, `writeFileAtomicE` (now truly atomic), metadata reading
 - `Bit/Commands.hs` — `.bitignore` reading/writing uses strict ByteString + atomic writes
-- `Internal/ConfigFile.hs` — Config reading uses strict ByteString instead of lazy Text IO
+- `Bit/Config/File.hs` — Config reading uses strict ByteString instead of lazy Text IO
 
 #### 3. HLint Enforcement
 
@@ -1201,13 +1201,13 @@ Interactive per-file conflict resolution:
 
 1. **Phantom-typed hashes**: `Hash (a :: HashAlgo)` — the compiler distinguishes MD5 from SHA256. Mixing algorithms is a compile error. The `DataKinds` extension is used per-module.
 
-2. **Unified metadata parser and loader**: A single `bit/Internal/Metadata.hs` module handles all parsing and serialization, and `Bit/Verify.hs` provides unified metadata loading via the `MetadataSource` abstraction. This eliminates the class of bugs where multiple parsers or loaders handle edge cases differently. The `MetadataEntry` type forces callers to explicitly handle the binary vs. text file distinction, ensuring text files (whose git blobs may have normalized line endings) are not incorrectly hash-verified across sources.
+2. **Unified metadata parser and loader**: A single `Bit/Config/Metadata.hs` module handles all parsing and serialization, and `Bit/Scan/Verify.hs` provides unified metadata loading via the `MetadataSource` abstraction. This eliminates the class of bugs where multiple parsers or loaders handle edge cases differently. The `MetadataEntry` type forces callers to explicitly handle the binary vs. text file distinction, ensuring text files (whose git blobs may have normalized line endings) are not incorrectly hash-verified across sources.
 
 3. **`ReaderT BitEnv IO` (no free monad)**: The application monad is `ReaderT BitEnv IO`. A free monad effect system was considered (for testability and dry-run mode) but rejected as premature — no pure tests or dry-run usage existed to justify the complexity. Direct IO with `ReaderT` for environment threading is cleaner for now.
 
-4. **Shared `deriveActions`**: Both push and pull derive `[RcloneAction]` from `git diff --name-status` via the shared `deriveActions` function in `Bit.Core.Transport`. `resolveSwaps` (in `Bit.Plan`) detects pairwise Move swaps. Property tests in `test/PlanSpec.hs` verify swap detection.
+4. **Shared `deriveActions`**: Both push and pull derive `[RcloneAction]` from `git diff --name-status` via the shared `deriveActions` function in `Bit.Rclone.Sync`. `resolveSwaps` (in `Bit.Domain.Plan`) detects pairwise Move swaps. Property tests in `test/PlanSpec.hs` verify swap detection.
 
-5. **Structured conflict resolution**: Conflict handling is a fold over a conflict list (`bit.Conflict`), not an imperative block. Decision logic is separated from IO mechanics.
+5. **Structured conflict resolution**: Conflict handling is a fold over a conflict list (`Bit.Core.Conflict`), not an imperative block. Decision logic is separated from IO mechanics.
 
 6. **Remote as opaque type**: `Remote` is exported without its constructor. Only `remoteName` is public for display. `remoteUrl` exists for Transport to extract the URL, but business logic in Bit/Core/*.hs should use `displayRemote` for user-facing messages.
 
@@ -1286,7 +1286,7 @@ Interactive per-file conflict resolution:
     HLint rules enforce this project-wide.
 
 16. **Atomic writes with retry logic**: All important writes use the temp-file +
-    rename pattern (`Bit.AtomicWrite.atomicWriteFile`). On Windows, includes
+    rename pattern (`Bit.IO.AtomicWrite.atomicWriteFile`). On Windows, includes
     retry logic (up to 5 retries, 6 total attempts) with linear backoff (e.g.
     50ms, 100ms, 150ms, 200ms, 250ms; total window ~750ms). Linear backoff is
     intentional: exponential backoff matters when hitting a shared remote
@@ -1298,14 +1298,14 @@ Interactive per-file conflict resolution:
     Directory-level locking coordinates concurrent writers within the process.
 
 17. **ConcurrentIO newtype without MonadIO**: For modules that need type-level
-    IO restrictions, `Bit.ConcurrentIO` provides a newtype wrapper where the
+    IO restrictions, `Bit.IO.ConcurrentIO` provides a newtype wrapper where the
     constructor is not exported. This prevents smuggling arbitrary lazy IO via
     `liftIO`. Only whitelisted strict operations are exposed. Async integration
     is by explicit unwrapping via `runConcurrentIO` at concurrency boundaries,
     not via `MonadUnliftIO` (which would let any async combinator escape the
     wrapper and defeat its discipline). Used where the type system should
     enforce IO discipline (currently available but not widely adopted;
-    `Bit.ConcurrentFileIO` with plain `MonadIO` is used in most places for
+    `Bit.IO.ConcurrentFileIO` with plain `MonadIO` is used in most places for
     simplicity).
 
 18. **Ephemeral remote workspaces (no persistent state)**: Remote-targeted
@@ -1391,41 +1391,42 @@ Interactive per-file conflict resolution:
 
 | Module | Role |
 |--------|------|
-| `bit/Commands.hs` | CLI dispatch, env setup |
-| `bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
+| `Bit/Commands.hs` | CLI dispatch, env setup |
+| `Bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit/Core.hs` | Re-exports public API from `Bit/Core/*.hs` sub-modules |
 | `Bit/Core/Push.hs` | Push logic + PushSeam transport abstraction |
 | `Bit/Core/Pull.hs` | Pull + merge + conflict resolution |
 | `Bit/Core/Fetch.hs` | Fetch + remote state classification |
-| `Bit/Core/Transport.hs` | Shared action derivation + working-tree sync |
-| `Bit/Core/Verify.hs` | Verify + repair logic |
 | `Bit/Core/Helpers.hs` | Shared types (PullMode, PullOptions) + utility functions |
-| `Internal/Git.hs` | Git command wrapper; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
-| `Bit/Path.hs` | `RemotePath` newtype — compile-time enforcement that remote filesystem paths go through `Bit.Platform` |
-| `Bit/Platform.hs` | UNC-safe wrappers for `System.Directory` (CPP: Win32 direct calls for UNC paths, `System.Directory` for local); includes `getFileSize` |
-| `Internal/Transport.hs` | Rclone command wrapper; `remoteFilePath` for trailing-slash-safe remote path construction |
-| `Internal/Config.hs` | Path constants |
-| `Internal/ConfigFile.hs` | Config file parsing (strict ByteString) |
-| `bit/Types.hs` | Core types: Hash, FileEntry, BitEnv, BitM |
-| `bit/Internal/Metadata.hs` | Canonical metadata parser/serializer |
-| `bit/Scan.hs` | Working directory scanning, hash computation (`hashAndClassifyFile` returns `ContentType`, accepts optional `IORef Integer` for per-chunk byte progress), `ScanPhase` callbacks for verbose phase reporting, bandwidth-aware `scanWorkingDirWithAbort` with cache check + throughput measurement + size-only fallback, cache entries use `ContentType`, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO). `readMetadataFile`, `getFileHashAndSize` return `Maybe MetaContent`. |
-| `bit/Concurrency.hs` | Bounded parallelism helpers: concurrency level calculation, sequential/parallel mode switching |
-| `bit/Plan.hs` | `RcloneAction` type and `resolveSwaps` (detects pairwise Move swaps → Swap) |
-| `bit/Verify.hs` | Local and remote verification; scan + git diff approach for local (compares against committed metadata); `verifyWithAbort` threads `ScanPhase` callbacks and creates size-only entries for skipped files; unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
-| `bit/Fsck.hs` | Passthrough to `git fsck` on `.bit/index` metadata repository |
-| `bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
-| `bit/Remote/Scan.hs` | Remote file scanning via rclone |
-| `bit/RemoteWorkspace.hs` | Ephemeral remote workspace: `initRemote`, `addRemote`, `commitRemote`, `statusRemote`, `logRemote`; `withRemoteWorkspace` / `withRemoteWorkspaceReadOnly` orchestration; bundle inflation via `init+fetch+reset --hard` |
-| `bit/Device.hs` | Device identity, volume detection, .bit-store (strict IO, atomic writes), `RemoteType` classification, `isFixedDrive` |
-| `bit/DevicePrompt.hs` | Interactive device setup prompts |
-| `bit/Conflict.hs` | Conflict resolution: Resolution, DeletedSide, ConflictInfo, resolveAll |
-| `bit/Utils.hs` | Path utilities, filtering, atomic write re-exports |
-| `bit/AtomicWrite.hs` | Atomic file writes, directory locking, lock registry |
-| `bit/ConcurrentIO.hs` | Type-safe concurrent IO newtype (no MonadIO) |
-| `bit/ConcurrentFileIO.hs` | Strict ByteString file operations |
-| `bit/Process.hs` | Strict process output capture (concurrent stdout/stderr reading) |
-| `bit/Progress.hs` | Centralized progress reporting for terminal operations |
-| `bit/CopyProgress.hs` | Progress tracking for file copy operations (push/pull sync via `rcloneCopyFiles`, repair via `rcloneCopyto` with per-file JSON progress parsing) |
+| `Bit/Core/RemoteManagement.hs` | Remote add/show and device-name prompting |
+| `Bit/Core/Conflict.hs` | Conflict resolution: Resolution, DeletedSide, ConflictInfo, resolveAll |
+| `Bit/Git/Run.hs` | Git command wrapper; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
+| `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, etc.) |
+| `Bit/Rclone/Run.hs` | Rclone command wrapper; `remoteFilePath` for trailing-slash-safe remote path construction |
+| `Bit/Rclone/Sync.hs` | Shared action derivation + working-tree sync |
+| `Bit/Rclone/Progress.hs` | Progress tracking for file copy operations (push/pull sync via `rcloneCopyFiles`, repair via `rcloneCopyto` with per-file JSON progress parsing) |
+| `Bit/Config/Paths.hs` | Path constants |
+| `Bit/Config/File.hs` | Config file parsing (strict ByteString) |
+| `Bit/Config/Metadata.hs` | Canonical metadata parser/serializer |
+| `Bit/Types.hs` | Core types: Hash, FileEntry, BitEnv, BitM |
+| `Bit/Path.hs` | `RemotePath` newtype — compile-time enforcement that remote filesystem paths go through `Bit.IO.Platform` |
+| `Bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
+| `Bit/Utils.hs` | Path utilities, filtering, atomic write re-exports |
+| `Bit/Domain/Plan.hs` | `RcloneAction` type and `resolveSwaps` (detects pairwise Move swaps → Swap) |
+| `Bit/Scan/Local.hs` | Working directory scanning, hash computation (`hashAndClassifyFile` returns `ContentType`, accepts optional `IORef Integer` for per-chunk byte progress), `ScanPhase` callbacks for verbose phase reporting, bandwidth-aware `scanWorkingDirWithAbort` with cache check + throughput measurement + size-only fallback, cache entries use `ContentType`, parallel metadata writing with skip-unchanged optimization (concurrent, strict IO). `readMetadataFile`, `getFileHashAndSize` return `Maybe MetaContent`. |
+| `Bit/Scan/Remote.hs` | Remote file scanning via rclone |
+| `Bit/Scan/Verify.hs` | Local and remote verification; scan + git diff approach for local (compares against committed metadata); `verifyWithAbort` threads `ScanPhase` callbacks and creates size-only entries for skipped files; unified metadata loading via `MetadataSource` abstraction (`FromFilesystem`, `FromCommit`); `MetadataEntry` type distinguishes binary (hash-verifiable) from text files (existence-only); `verifyLocalAt` for filesystem remotes |
+| `Bit/Scan/Fsck.hs` | Passthrough to `git fsck` on `.bit/index` metadata repository |
+| `Bit/Device/Identity.hs` | Device identity, volume detection, .bit-store (strict IO, atomic writes), `RemoteType` classification, `isFixedDrive` |
+| `Bit/Device/Prompt.hs` | Interactive device setup prompts |
+| `Bit/Device/RemoteWorkspace.hs` | Ephemeral remote workspace: `initRemote`, `addRemote`, `commitRemote`, `statusRemote`, `logRemote`; `withRemoteWorkspace` / `withRemoteWorkspaceReadOnly` orchestration; bundle inflation via `init+fetch+reset --hard` |
+| `Bit/IO/Concurrency.hs` | Bounded parallelism helpers: concurrency level calculation, sequential/parallel mode switching |
+| `Bit/IO/ConcurrentIO.hs` | Type-safe concurrent IO newtype (no MonadIO) |
+| `Bit/IO/ConcurrentFileIO.hs` | Strict ByteString file operations |
+| `Bit/IO/AtomicWrite.hs` | Atomic file writes, directory locking, lock registry |
+| `Bit/IO/Process.hs` | Strict process output capture (concurrent stdout/stderr reading) |
+| `Bit/IO/Platform.hs` | UNC-safe wrappers for `System.Directory` (CPP: Win32 direct calls for UNC paths, `System.Directory` for local); includes `getFileSize` |
+| `Bit/Progress/Report.hs` | Centralized progress reporting for terminal operations |
 
 ---
 
@@ -1573,13 +1574,13 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
   not fully complete due to file locking, causing "directory already exists"
   errors; use `git init` + `git fetch` + `git reset --hard` instead
 - Call `git` directly via `readProcessWithExitCode "git"` or `System.Process`
-  outside `Internal/Git.hs` — all git commands must go through `Git.runGitRaw`,
-  `Git.runGitAt`, or the typed wrappers in `Internal/Git.hs`. This keeps the
+  outside `Bit/Git/Run.hs` — all git commands must go through `Git.runGitRaw`,
+  `Git.runGitAt`, or the typed wrappers in `Bit/Git/Run.hs`. This keeps the
   git interface in one place, makes the `-C .bit/index` base flags consistent,
   and prevents accidental git calls against the wrong working directory
-- Copy or transfer files without rclone outside `Internal/Transport.hs` —
+- Copy or transfer files without rclone outside `Bit/Rclone/Run.hs` —
   all file transfers between local and remote (cloud or filesystem) must use
-  rclone via Transport. The only exception is small local-to-local copies
+  rclone via Rclone.Run. The only exception is small local-to-local copies
   that are part of internal bookkeeping (e.g., copying a text file from
   `.bit/index/` to the working tree, or writing a metadata file)
 - Create `.bit/` from non-init code paths — only `init` and `initializeRepoAt`
@@ -1593,18 +1594,18 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
 - Prefer `rclone moveto` over delete+upload when hash matches
 - Push files before metadata, pull metadata before files (cloud remotes)
 - For filesystem remotes, use fetch+merge (not `git push` to non-bare repos)
-- Use `Bit.AtomicWrite.atomicWriteFile` for all important file writes (temp file + rename pattern)
+- Use `Bit.IO.AtomicWrite.atomicWriteFile` for all important file writes (temp file + rename pattern)
 - Use strict `ByteString` operations for all file IO — never `Prelude.readFile`, `writeFile`, or lazy ByteString/Text
-- Use `Bit.ConcurrentFileIO.readFileBinaryStrict` / `readFileUtf8Strict` for reading
+- Use `Bit.IO.ConcurrentFileIO.readFileBinaryStrict` / `readFileUtf8Strict` for reading
 - Match Git's CLI conventions and output format
-- Route all git commands through `Internal/Git.hs` (`runGitRaw`, `runGitAt`, etc.)
-- Route all file transfers through `Internal/Transport.hs` (rclone wrappers)
-- Keep Transport dumb — no domain knowledge in Transport
-- Keep Git.hs dumb — no domain interpretation
+- Route all git commands through `Bit/Git/Run.hs` (`runGitRaw`, `runGitAt`, etc.)
+- Route all file transfers through `Bit/Rclone/Run.hs` (rclone wrappers)
+- Keep Rclone.Run dumb — no domain knowledge in Rclone.Run
+- Keep Git.Run dumb — no domain interpretation
 - All business logic in Bit/Core/*.hs
 - Prefer git/rclone primitives over custom implementations — if git or rclone
   already solves the problem, wire into it instead of reimplementing
-- Use the unified metadata parser from `bit/Internal/Metadata.hs`
+- Use the unified metadata parser from `Bit/Config/Metadata.hs`
 - After pull/merge, set refs/remotes/origin/main to the bundle hash, not HEAD
 - Capture `oldHead` before any git operation that changes HEAD, then use
   `applyMergeToWorkingDir` to sync the working directory
