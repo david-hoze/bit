@@ -12,7 +12,7 @@ Every module in the project, grouped by architectural layer.
 
 | Module | Path | Purpose |
 |--------|------|---------|
-| `Bit.Commands` | `Bit/Commands.hs` | CLI argument parser and command dispatcher |
+| `Bit.Commands` | `Bit/Commands.hs` | CLI argument parser, `findBitRoot` repo discovery, prefix computation, command dispatcher |
 | `Bit.Help` | `Bit/Help.hs` | Help text and command documentation |
 
 ## Core Business Logic (`Bit.Core.*`)
@@ -33,8 +33,8 @@ Every module in the project, grouped by architectural layer.
 
 | Module | Path | Purpose |
 |--------|------|---------|
-| `Bit.Git.Run` | `Bit/Git/Run.hs` | Git command abstraction (**only** module that calls `git`) |
-| `Bit.Git.Passthrough` | `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, etc.) |
+| `Bit.Git.Run` | `Bit/Git/Run.hs` | Git command abstraction (**only** module that calls `git`); `runGitRawIn`/`runGitWithOutputIn` for subdirectory prefix dispatch |
+| `Bit.Git.Passthrough` | `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, etc.); prefix-aware for subdirectory support |
 
 ## Rclone Boundary (`Bit.Rclone.*`)
 
@@ -48,7 +48,7 @@ Every module in the project, grouped by architectural layer.
 
 | Module | Path | Purpose |
 |--------|------|---------|
-| `Bit.Types` | `Bit/Types.hs` | Core domain types: `Path`, `Hash`, `FileEntry`, `EntryKind`, `BitM` monad |
+| `Bit.Types` | `Bit/Types.hs` | Core domain types: `Path`, `Hash`, `FileEntry`, `EntryKind`, `BitEnv` (with `envPrefix`), `BitM` monad |
 | `Bit.Path` | `Bit/Path.hs` | Path newtypes (`RemotePath`) for compile-time path semantics |
 | `Bit.Remote` | `Bit/Remote.hs` | Opaque `Remote` type with smart constructor and resolution |
 | `Bit.Domain.Plan` | `Bit/Domain/Plan.hs` | Sync action planning and swap detection |

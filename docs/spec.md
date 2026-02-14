@@ -222,7 +222,7 @@ Bit/Commands.hs → Bit/Core/*.hs → Bit/Rclone/Run.hs → rclone (only here!)
 - **Bit/Rclone/Run.hs** — Dumb rclone wrapper. Exposes `copyToRemote`, `copyFromRemote`, `copyFromRemoteDetailed`, `moveRemote`, `deleteRemote`, `listRemoteJson`, `listRemoteJsonWithHash`, `checkRemote`, etc. Takes `Remote` + relative paths. Does NOT know about `.bit/`, bundles, `RemoteState`, or `FetchResult`. Captures rclone JSON output as raw UTF-8 bytes to correctly handle non-ASCII filenames (Hebrew, Chinese, emoji, etc.). Uses `bracket` for exception-safe subprocess resource cleanup. **copyFromRemoteDetailed** returns **CopyResult** (NotFound, NetworkError, OtherError) by parsing rclone stderr so fetch and remote-workspace can distinguish "no bundle" from network or other errors for user-facing messaging and retry.
 - **Bit/Git/Run.hs** — Dumb git wrapper. Knows how to run git commands. Takes args. Does NOT interpret results in domain terms.
 - **Bit/Core/*.hs** — Smart business logic, split by concern. `Bit.Core` re-exports the public API. Sub-modules: `Bit.Core.Push` (push logic + PushSeam), `Bit.Core.Pull` (pull + merge + conflict), `Bit.Core.Fetch` (fetch + remote state classification), `Bit.Rclone.Sync` (shared action derivation + working-tree sync), `Bit.Core.Verify` (verify + repair), `Bit.Core.Init` (repo initialization), `Bit.Core.Helpers` (shared types + utilities), `Bit.Core.RemoteManagement` (remote add/show), `Bit.Git.Passthrough` (git command delegation), `Bit.Core.Conflict` (merge conflict resolution). All domain knowledge lives here. Calls Rclone.Run and Git.Run, never calls `readProcessWithExitCode` directly.
-- **Bit/Commands.hs** — Entry point. Parses CLI, resolves the remote, builds `BitEnv`, dispatches to `Bit.Core`.
+- **Bit/Commands.hs** — Entry point. Discovers repository root via `findBitRoot` (walks up from cwd), computes subdirectory prefix, parses CLI, resolves the remote, builds `BitEnv`, dispatches to `Bit.Core`.
 
 ### Key Types
 
@@ -231,7 +231,7 @@ Bit/Commands.hs → Bit/Core/*.hs → Bit/Rclone/Run.hs → rclone (only here!)
 | `Hash (a :: HashAlgo)` | `bit.Types` | Phantom-typed hash — compiler distinguishes MD5 vs SHA256 |
 | `Path` | `bit.Types` | Domain path (bit-tracked file path). `newtype` over `FilePath` to prevent transposition bugs. |
 | `FileEntry` | `bit.Types` | Tracked `Path` + `EntryKind` (hash, size, `ContentType`) |
-| `BitEnv` | `bit.Types` | Reader environment: cwd, remote, force flags |
+| `BitEnv` | `bit.Types` | Reader environment: cwd, prefix (subdirectory relative to root), remote, force flags |
 | `BitM` | `bit.Types` | `ReaderT BitEnv IO` — the application monad |
 | `MetaContent` | `Bit.Config.Metadata` | Canonical metadata: hash + size, single parser/serializer |
 | `Remote` | `bit.Remote` | Resolved remote: name + URL. Smart constructor, `remoteUrl` for Transport only |
@@ -1036,7 +1036,7 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 
 **Command Classification**:
 
-1. **No env needed**: `init`, `remote add`, `fsck`, `merge --abort`, `branch --unset-upstream`. Also `log`, `ls-files`, and `branch` (with args) — in the code they are invoked directly (no `runBase`); they call `Git.runGitRaw` and only require process cwd to be the repo root. They do not build or use a `BitEnv`.
+1. **No env needed**: `init`, `remote add`, `fsck`, `merge --abort`, `branch --unset-upstream`. Also `log`, `ls-files`, and `branch` (with args) — in the code they are invoked directly (no `runBase`); they call `Git.runGitRawIn` with the subdirectory prefix so git resolves paths relative to the user's cwd. They do not build or use a `BitEnv`.
 
 2. **Env, no scan** (runBase or runUpstream or runBaseWithRemote):
    - `remote show` — runBase; read config/remote state
@@ -1045,7 +1045,7 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
    - `push` (no args) — runUpstream; requires `branch.main.remote`
    - `push <remote>` — runBaseWithRemote; explicit remote
 
-3. **Scan only, no env**: `add`, `commit`, `diff`, `mv`, `reset`, `merge` (generic). Each runs `scanAndWrite` then calls `Bit.add` / `Bit.commit` / etc. directly (no `BitEnv`). Scan is for metadata write or for git operations that need up-to-date index. `merge` (generic) is a pure git passthrough (`Git.runGitRaw`); remote or conflict context is only used in `merge --continue`.
+3. **Scan only, no env**: `add`, `commit`, `diff`, `mv`, `reset`, `merge` (generic). Each runs `scanAndWrite` then calls `Bit.add prefix` / `Bit.commit prefix` / etc. with the subdirectory prefix (no `BitEnv`). Scan is for metadata write or for git operations that need up-to-date index. `merge` (generic) is a pure git passthrough (`Git.runGitRawIn prefix`); remote or conflict context is only used in `merge --continue`.
 
 4. **Scan + env** (runScanned, runScannedUpstream, or runScannedWithRemote):
    - `status`, `restore`, `checkout`, `merge --continue` — runScanned (scan + baseEnv); need working directory state
@@ -1053,6 +1053,22 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
    - `pull` — runScannedUpstream (scan + upstreamEnv) or runScannedWithRemote when a remote is given; need working directory state for sync
 
 **Performance Impact**: In large repositories, read-only commands now have instant response times. The old design would scan 860 files for `bit remote add`, the new design scans zero. Push performance is dramatically improved — it no longer scans the remote via `rclone lsjson --hash --recursive`, instead deriving file actions from git metadata diffs with zero network I/O for planning.
+
+---
+
+## Subdirectory Support
+
+bit commands work from any subdirectory of a bit repository, matching git's behavior.
+
+**Repository Discovery** (`findBitRoot`): Starting from the current working directory, walks up the directory tree looking for a `.bit/` directory. If found, the process `setCurrentDirectory` to the repo root. If no `.bit/` is found and the command requires a repo, exits with "fatal: not a bit repository".
+
+**Prefix Computation**: The relative path from the repo root to the user's original cwd becomes the "prefix" (empty string at root). This prefix is stored in `BitEnv.envPrefix` and threaded through the application.
+
+**Git Dispatch**: `runGitRawIn prefix` and `runGitWithOutputIn prefix` target `.bit/index/<prefix>` via `git -C`, so git natively resolves the user's path arguments relative to their subdirectory. When prefix is empty (user is at root), these delegate to the standard `runGitRaw`/`runGitWithOutput` — no behavior change.
+
+**Passthrough Functions**: IO passthrough functions (`add`, `commit`, `diff`, `log`, `lsFiles`, etc.) take `FilePath` prefix as their first parameter. BitM passthrough functions (`status`, `rm`, `doRestore`, `doCheckout`) extract prefix from `envPrefix`. `doRestore` and `doCheckout` prepend prefix to user path arguments before passing them to `syncTextFilesFromIndex`, which needs paths relative to the repo root.
+
+**Unchanged**: Internal repo-level operations (`mergeContinue`, `doMergeAbort`, `unsetUpstream`) and all Core modules (Push, Pull, Fetch, Verify, etc.) continue using un-prefixed git operations — they always operate on the full repository.
 
 ---
 
@@ -1391,7 +1407,7 @@ Interactive per-file conflict resolution:
 
 | Module | Role |
 |--------|------|
-| `Bit/Commands.hs` | CLI dispatch, env setup |
+| `Bit/Commands.hs` | CLI dispatch, `findBitRoot` (walks up to discover repo), prefix computation, env setup |
 | `Bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit/Core.hs` | Re-exports public API from `Bit/Core/*.hs` sub-modules |
 | `Bit/Core/Push.hs` | Push logic + PushSeam transport abstraction |
@@ -1400,15 +1416,15 @@ Interactive per-file conflict resolution:
 | `Bit/Core/Helpers.hs` | Shared types (PullMode, PullOptions) + utility functions |
 | `Bit/Core/RemoteManagement.hs` | Remote add/show and device-name prompting |
 | `Bit/Core/Conflict.hs` | Conflict resolution: Resolution, DeletedSide, ConflictInfo, resolveAll |
-| `Bit/Git/Run.hs` | Git command wrapper; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
-| `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, etc.) |
+| `Bit/Git/Run.hs` | Git command wrapper; `runGitRawIn`/`runGitWithOutputIn` for prefix-aware subdirectory dispatch; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
+| `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, etc.); IO functions take prefix for subdirectory support; BitM functions extract prefix from `envPrefix` |
 | `Bit/Rclone/Run.hs` | Rclone command wrapper; `remoteFilePath` for trailing-slash-safe remote path construction |
 | `Bit/Rclone/Sync.hs` | Shared action derivation + working-tree sync |
 | `Bit/Rclone/Progress.hs` | Progress tracking for file copy operations (push/pull sync via `rcloneCopyFiles`, repair via `rcloneCopyto` with per-file JSON progress parsing) |
 | `Bit/Config/Paths.hs` | Path constants |
 | `Bit/Config/File.hs` | Config file parsing (strict ByteString) |
 | `Bit/Config/Metadata.hs` | Canonical metadata parser/serializer |
-| `Bit/Types.hs` | Core types: Hash, FileEntry, BitEnv, BitM |
+| `Bit/Types.hs` | Core types: Hash, FileEntry, BitEnv (with `envPrefix` for subdirectory support), BitM |
 | `Bit/Path.hs` | `RemotePath` newtype — compile-time enforcement that remote filesystem paths go through `Bit.IO.Platform` |
 | `Bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
 | `Bit/Utils.hs` | Path utilities, filtering, atomic write re-exports |
