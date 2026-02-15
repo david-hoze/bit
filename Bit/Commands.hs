@@ -65,23 +65,30 @@ parseInitArgs = go Bit.defaultInitOptions Nothing
         | otherwise = go opts (Just f) rest
 
 -- | Run 'bit init' with parsed options.
+-- Bare repos are passed through to git directly (bit doesn't manage bare repos).
 runInit :: [String] -> IO ()
 runInit args = do
     let (opts, mDir) = parseInitArgs args
-    case mDir of
-        Nothing -> do
-            cwd <- Dir.getCurrentDirectory
-            unless (Bit.initQuiet opts) $
-                putStrLn $ "Initializing bit in: " ++ cwd
-            Bit.initializeRepoAt cwd opts
-            unless (Bit.initQuiet opts) $
-                putStrLn "bit initialized successfully!"
-        Just d -> do
-            unless (Bit.initQuiet opts) $
-                putStrLn $ "Initializing bit in: " ++ d
-            Bit.initializeRepoAt d opts
-            unless (Bit.initQuiet opts) $
-                putStrLn "bit initialized successfully!"
+    if Bit.initBare opts
+        then do
+            code <- Git.runGitGlobal ("init" : args)
+            let bareDir = maybe "." id mDir
+            Dir.createDirectoryIfMissing True (bareDir </> "bit" </> "cas")
+            exitWith code
+        else case mDir of
+            Nothing -> do
+                cwd <- Dir.getCurrentDirectory
+                unless (Bit.initQuiet opts) $
+                    putStrLn $ "Initializing bit in: " ++ cwd
+                Bit.initializeRepoAt cwd opts
+                unless (Bit.initQuiet opts) $
+                    putStrLn "bit initialized successfully!"
+            Just d -> do
+                unless (Bit.initQuiet opts) $
+                    putStrLn $ "Initializing bit in: " ++ d
+                Bit.initializeRepoAt d opts
+                unless (Bit.initQuiet opts) $
+                    putStrLn "bit initialized successfully!"
 
 -- | Git flags that don't need a repo (or .bit directory).
 isGitGlobalFlag :: [String] -> Bool
@@ -155,11 +162,13 @@ runRemoteCommand remoteName args = do
     origCwd <- Dir.getCurrentDirectory
     mRoot <- findBitRoot origCwd
     case mRoot of
-        Nothing -> do
+        Just (NormalRoot _) -> pure ()
+        _ -> do
             hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
             exitWith (ExitFailure 1)
-        Just _ -> pure ()
-    let cwd = maybe origCwd id mRoot
+    let cwd = case mRoot of
+            Just (NormalRoot r) -> r
+            _                   -> origCwd
     Dir.setCurrentDirectory cwd
 
     mRemote <- resolveRemote cwd remoteName
@@ -251,23 +260,35 @@ commandKey ("branch":sub:_)
 commandKey (cmd:_) = cmd
 commandKey [] = ""
 
--- | Walk up from the given directory to find the closest ancestor containing .bit/.
--- Respects BIT_CEILING_DIRECTORIES (path-list separated by ';' on Windows, ':' elsewhere)
--- to stop the walk, analogous to git's GIT_CEILING_DIRECTORIES.
-findBitRoot :: FilePath -> IO (Maybe FilePath)
+-- | Result of walking up to find a bit repository.
+data BitRoot
+    = NormalRoot FilePath   -- ^ Standard repo with .bit/ directory
+    | BareRoot FilePath     -- ^ Git bare repo with bit/ subdirectory
+
+-- | Walk up from the given directory to find the closest bit repository.
+-- Checks for both .bit/ (normal repo) and bare repo markers (HEAD + bit/) at
+-- each level, returning whichever is closest. This ensures a bare repo nested
+-- inside a normal repo's tree is found before the parent normal repo.
+-- Respects BIT_CEILING_DIRECTORIES to stop the walk.
+findBitRoot :: FilePath -> IO (Maybe BitRoot)
 findBitRoot start = do
     ceilings <- getCeilingDirs
     canonStart <- Dir.canonicalizePath start
     go ceilings canonStart
   where
     go ceilings dir = do
-        exists <- Dir.doesDirectoryExist (dir </> ".bit")
-        if exists
-            then pure (Just dir)
-            else let parent = takeDirectory dir
-                 in if parent == dir || dir `elem` ceilings
-                    then pure Nothing
-                    else go ceilings parent
+        hasDotBit <- Dir.doesDirectoryExist (dir </> ".bit")
+        if hasDotBit
+            then pure (Just (NormalRoot dir))
+            else do
+                hasBitDir <- Dir.doesDirectoryExist (dir </> "bit")
+                hasHead <- Dir.doesFileExist (dir </> "HEAD")
+                if hasBitDir && hasHead
+                    then pure (Just (BareRoot dir))
+                    else let parent = takeDirectory dir
+                         in if parent == dir || dir `elem` ceilings
+                            then pure Nothing
+                            else go ceilings parent
     getCeilingDirs = do
         mVal <- lookupEnv "BIT_CEILING_DIRECTORIES"
         case mVal of
@@ -313,12 +334,25 @@ runCommand args = do
 
     origCwd <- Dir.getCurrentDirectory
     mRoot <- findBitRoot origCwd
-    let bitExists = case mRoot of { Just _ -> True; Nothing -> False }
-        root = maybe origCwd id mRoot
+
+    -- Handle bare repo case: pass through to git for unknown commands,
+    -- reject known bit commands that require a work tree
+    case mRoot of
+        Just (BareRoot _) -> case cmd of
+            (name:rest) | not (isKnownCommand name) -> tryAlias Nothing name rest
+            _ -> do
+                hPutStrLn stderr "fatal: this operation must be run in a work tree"
+                exitWith (ExitFailure 128)
+        _ -> pure ()
+
+    let bitExists = case mRoot of { Just (NormalRoot _) -> True; _ -> False }
+        root = case mRoot of
+            Just (NormalRoot r) -> r
+            _                   -> origCwd
         prefix = case mRoot of
-            Just r  -> let rel = makeRelative r origCwd
-                       in if rel == "." then "" else rel
-            Nothing -> ""
+            Just (NormalRoot r) -> let rel = makeRelative r origCwd
+                                   in if rel == "." then "" else rel
+            _                   -> ""
 
     -- For unknown commands, try alias expansion before the repo check.
     -- This allows global aliases to work even without a .bit directory.

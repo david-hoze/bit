@@ -89,6 +89,12 @@ shelltest test/cli/specific.test --debug                       # Single test
 powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # Full suite (parallel, including cloud)
 ```
 
+### Git Test Suite
+- Consult `docs/git-test-suite.md` for setup, environment variables, and how the shim works
+- One-time setup: `extern/git-shim/setup.sh`
+- Run a test: `cd extern/git/t && GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose`
+- Use `--run=N` to run a single test number
+
 ### Cloud Remote Tests
 - `gdrive-test` is a configured rclone remote for cloud tests (`test/cli/gdrive-remote.test`)
 - Cloud tests are included in the parallel test runner — do NOT exclude them

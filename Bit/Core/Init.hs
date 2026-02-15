@@ -107,6 +107,7 @@ initializeRepoAt targetDir opts = do
     -- 6. Create other .bit subdirectories
     Platform.createDirectoryIfMissing True targetBitDevicesDir
     Platform.createDirectoryIfMissing True targetBitRemotesDir
+    Platform.createDirectoryIfMissing True (targetBitDir </> "cas")
 
     -- 5a. Create config file with default values
     let configPath = targetBitDir </> "config"
