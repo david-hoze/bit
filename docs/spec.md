@@ -20,7 +20,7 @@ The three systems differ in where content lives and what guarantees that provide
 
 This creates a fundamental architectural constraint that Git and bit-solid don't have: **in lite mode, metadata can become hollow.** If a binary file is deleted, corrupted, or modified without running `bit add`, the metadata in `.bit/index/` claims something that is no longer true. In Git, this situation is impossible — the object store is append-only and self-verifying. In bit-lite, it's the normal consequence of working with mutable files on a regular filesystem.
 
-This constraint gives rise to the **proof of possession** rule (see below): bit-lite must verify that content matches metadata before transferring metadata to or from another repo. Without this rule, hollow metadata propagates between repos, and the system's core value proposition — knowing the true state of your files — is undermined. In solid mode, proof of possession is trivially satisfied because the CAS backs every claim.
+This constraint gives rise to the **proof of possession** rule (see below): when syncing with full-layout remotes, bit must verify that content matches metadata before transferring. Without this rule, hollow metadata propagates between repos, and the system's core value proposition — knowing the true state of your files — is undermined. The rule does not apply to bare-layout remotes (CAS blobs are self-verifying). When verifying, bit consults both the working tree and the local CAS — if either has the content, possession is proven.
 
 ### Origin
 
@@ -165,8 +165,8 @@ Existing CAS data is preserved.
 
 **What the mode controls:** A single behavior — whether `bit add` copies file content into `.bit/cas/` in addition to writing metadata to `.bit/index/`.
 
-- **lite**: `bit add` writes metadata only. No CAS writes. Proof-of-possession verification is required on push/pull.
-- **solid**: `bit add` writes metadata AND copies the blob (keyed by its hash) into `.bit/cas/`. Proof-of-possession is trivially satisfied since the CAS is append-only and self-verifying.
+- **lite**: `bit add` writes metadata only. No CAS writes.
+- **solid**: `bit add` writes metadata AND copies the blob (keyed by its hash) into `.bit/cas/`. When verifying for full-layout remotes, CAS blobs can satisfy proof of possession even if the working tree file is missing.
 
 **Switching modes:**
 
@@ -224,34 +224,54 @@ so text files get `hash:/size:` metadata instead of their actual content).
 
 ### The Proof of Possession Rule
 
-In Git and in bit-solid, content is always recoverable from an object store. Git stores file content in `.git/objects/`; bit-solid stores it in a content-addressed store (CAS). In both systems, metadata and content are either the same thing or the content is always reachable from the metadata. You can push any metadata you want — the objects back it up unconditionally.
+The proof of possession rule ensures that metadata is never transferred without matching content to back it up. **The rule applies to full-layout remotes (cloud full and filesystem), not to bare-layout remotes.**
 
-bit-lite is fundamentally different. There is no object store. The working tree is the **only copy** of binary file content. The metadata in `.bit/index/` is just a *claim* — "there exists a file at this path with this hash and this size." If that file is gone, corrupted, or modified since the last commit, the claim is hollow. Pushing hollow claims to a remote means the remote now has metadata that nobody can fulfill. Pulling hollow claims from a remote means your local repo has metadata pointing to content that doesn't exist.
+**Why the rule exists:** In a full-layout remote, binary files live at mutable paths that can drift — files can be deleted, corrupted, or modified without updating metadata. The metadata in `.bit/index/` is just a *claim* — "there exists a file at this path with this hash and this size." If that file is gone or changed, the claim is hollow. Pushing hollow claims to a remote means the remote has metadata that nobody can fulfill. Pulling hollow claims means your local repo has metadata pointing to content that doesn't exist.
 
-This is the **proof of possession** rule: a repo must not transfer metadata it cannot back up with actual content.
+This is the **proof of possession** rule: when syncing with a full-layout remote, a repo must not transfer metadata it cannot back up with actual content.
+
+**Where the rule applies and doesn't:**
 
 ```
-             Git / bit-solid                    bit-lite
-             ──────────────                     ────────
-Content:     Object store (always available)    Working tree (only copy)
-Metadata:    Always backed by objects           Only valid if working tree matches
-Push safety: Unconditional                      Requires verification first
-Pull safety: Unconditional                      Requires remote verification first
+Remote layout     Push verification        Pull verification
+──────────────    ────────────────────     ──────────────────────
+Full (cloud)      Verify local content     Verify remote content
+Full (filesystem) Verify local content     Verify remote content
+Bare (cloud)      Not needed (CAS)         Not needed (CAS)
 ```
 
-In solid mode, the CAS serves the same role as Git's object store — proof of possession is trivially satisfied. The verification step can be skipped or reduced to checking that the CAS contains the expected blobs (which is a fast filename check, not a content hash).
+**Bare remotes are exempt** because CAS blobs are self-verifying by construction — the blob filename *is* the content hash. If `cas/a1/a1b2c3d4e5f6...` exists, it is correct. There is no mutable path that can drift. Push to a bare remote simply uploads blobs into CAS; pull from a bare remote simply downloads blobs from CAS. No verification step is needed.
+
+**Verification consults both working tree and CAS.** When verifying for a full-layout remote, bit checks whether each file's content can be substantiated from *either* the working tree *or* the local CAS. If the working tree file is missing or corrupted but the blob exists in `.bit/cas/`, possession is still proven — the content can be recovered and synced. This means solid-mode repos (or repos with CAS data from a prior solid period) have an easier time satisfying the rule, but they are not exempt from it — the rule still applies, it's just more likely to pass.
+
+```
+Verification check order (push to full remote):
+  1. Does the working tree file match the metadata hash? → verified
+  2. Does .bit/cas/ contain a blob for that hash?       → verified
+  3. Neither?                                            → verification fails
+```
 
 The rule applies symmetrically:
 
-**Push (sender must prove possession):**
-1. Verify local — every binary file's hash must match its metadata
+**Push to full remote (sender must prove possession):**
+1. Verify local — every binary file must be substantiated (working tree or CAS)
 2. If verification fails, refuse to push
 3. If verified, sync files then push metadata (files first so the remote never has metadata referencing missing content)
 
-**Pull (sender must prove possession):**
+**Pull from full remote (sender must prove possession):**
 1. Verify remote — every binary file on the remote must match the remote's metadata
 2. If verification fails, refuse to pull (suggest `--accept-remote`, `--force`, or `--manual-merge`)
 3. If verified, pull metadata then copy files
+
+**Push to bare remote (no verification needed):**
+1. Hash working tree files and upload into remote CAS layout
+2. Push metadata bundle
+3. CAS blobs are self-verifying — no separate verification step
+
+**Pull from bare remote (no verification needed):**
+1. Fetch metadata bundle and merge
+2. Download needed blobs from remote CAS by hash
+3. Place at correct working tree paths
 
 **What happens when verification fails:**
 
@@ -287,13 +307,15 @@ The existing divergence resolution mechanisms (`--accept-remote`, `--force`, `--
 - **Cloud remotes (other backends):** Some backends provide native hashes, some don't. Where hashes aren't free, rclone may need to download file content to hash it. Check per-backend.
 - **Filesystem remotes:** Requires reading and hashing every binary file on the remote. Same cost as local verification.
 
-**Implementation status:** The proof of possession rule is fully implemented as of this version:
+**Implementation status:** The proof of possession rule is fully implemented for full-layout remotes:
 
-- `bit push` always verifies local working tree before pushing (unconditional — `--force` only affects ancestry check)
-- `bit pull` verifies remote before pulling (unless `--accept-remote` or `--manual-merge`)
+- `bit push` to a full remote always verifies local content before pushing (unconditional — `--force` only affects ancestry check). Verification checks working tree first, then falls back to local CAS.
+- `bit push` to a bare remote skips verification (CAS blobs are self-verifying)
+- `bit pull` from a full remote verifies remote before pulling (unless `--accept-remote` or `--manual-merge`)
+- `bit pull` from a bare remote skips verification (CAS blobs are self-verifying)
 - `bit fetch` does NOT verify (fetch only transfers metadata, no file sync happens)
 - `bit fetch` is silent when already up to date (no stdout), similar to `git fetch`
-- Cloud remotes: verified via `Verify.verifyRemote` using `rclone lsjson --hash`
+- Full cloud remotes: verified via `Verify.verifyRemote` using `rclone lsjson --hash`
 - Filesystem remotes: verified via `Verify.verifyLocalAt` which hashes the remote's working tree
 - Verification runs in parallel using bounded concurrency (`Parallel 0` = auto-detect). **Concurrency levels** (from `Bit/Concurrency.hs`): file IO and hashing use **ioConcurrency** = max(4, 4 × getNumCapabilities); network-bound work (rclone, transport) uses **networkConcurrency** = min(8, max(2, 2 × getNumCapabilities)).
 
@@ -792,12 +814,12 @@ target path scheme.
 **Filesystem seam** (`mkFilesystemSeam`): Takes current working directory and remote; uses native git fetch/pull. The local index registers the remote's `.bit/index` as a named git remote; metadata is pushed via `git pull --ff-only` at the remote side.
 
 **Push flow** (both transports):
-1. **Verify local** (proof of possession)
+1. **Verify local** (proof of possession — full-layout remotes only; checks working tree then CAS; skipped for bare remotes)
 2. **First-push detection** (filesystem only): If remote `.bit/` doesn't exist, create and initialize it
 3. **Classify remote state** via rclone (`classifyRemoteState`)
 4. **Fetch remote history** via seam (`ptFetchHistory`)
 5. **Ancestry/force checks** (`processExistingRemote`)
-6. **Sync files** via git diff + rclone (`syncRemoteFiles`) — derives actions from `getDiffNameStatus`, no remote scan
+6. **Sync files** via git diff + rclone (`syncRemoteFiles`) — for full remotes, derives actions from `getDiffNameStatus`; for bare remotes, uploads blobs to CAS layout
 7. **Push metadata** via seam (`ptPushMetadata`)
 8. **Update tracking ref** (`Git.updateRemoteTrackingBranchToHead`) — same for both
 
@@ -825,12 +847,12 @@ Everything else is shared: merge orchestration, conflict resolution, file sync,
 
 **Pull flow** (both transports):
 1. **Fetch remote metadata** via seam (`psFetchMetadata`)
-2. **Verify remote** via seam (`psVerifyRemote`) — unless `--accept-remote` or `--manual-merge`
+2. **Verify remote** via seam (`psVerifyRemote`) — full-layout remotes only; skipped for bare remotes (CAS is self-verifying); also skipped with `--accept-remote` or `--manual-merge`
 3. **Dispatch by mode**:
    - Normal: `git merge --no-commit --no-ff`, then `applyMergeToWorkingDir`
    - `--accept-remote`: Force-checkout (with `--no-track`), then sync files
    - `--manual-merge`: Detect divergence, create conflict directories
-4. **Sync files**: Text from index, binary via rclone (same `rcloneCopyFiles`)
+4. **Sync files**: Text from index, binary via rclone (same `rcloneCopyFiles`); for bare remotes, downloads blobs from `cas/<prefix>/<hash>` and places at working tree paths
 5. **Update tracking ref**: Set `refs/remotes/<name>/main` to the fetched hash
 
 #### Text vs Binary File Sync
@@ -1546,15 +1568,15 @@ Interactive per-file conflict resolution:
     `mergeContinue`, and `pullAcceptRemoteImpl`. The only exception is first
     pull (`oldHead = Nothing`), which falls back to `syncAllFilesFromHEAD`.
 
-11. **Proof of possession on push/pull**: bit-lite must verify that the sender's
-    working tree matches its metadata before transferring that metadata. On push,
-    the local repo is verified; on pull, the remote is verified. This is necessary
-    because bit-lite has no object store — the working tree is the only copy of
-    binary content, and metadata without matching content is meaningless. Git and
-    bit-solid don't need this rule because their object stores back up every claim
-    unconditionally. The existing divergence resolution mechanisms
-    (`--accept-remote`, `--force`, `--manual-merge`) serve as escape hatches when
-    verification fails.
+11. **Proof of possession on push/pull (full-layout remotes only)**: When syncing
+    with a full-layout remote (cloud full or filesystem), bit verifies that the
+    sender's content matches its metadata before transferring. On push, the
+    local repo is verified; on pull, the remote is verified. Verification
+    consults both the working tree and the local CAS — if either has the
+    correct blob, possession is proven. Bare-layout remotes are exempt because
+    CAS blobs are self-verifying by construction (the filename is the hash).
+    The existing divergence resolution mechanisms (`--accept-remote`, `--force`,
+    `--manual-merge`) serve as escape hatches when verification fails.
 
 12. **Seam pattern for transport differences**: Both push and pull use a single
     code path for cloud and filesystem remotes. The only difference — how
@@ -1720,7 +1742,7 @@ Interactive per-file conflict resolution:
 - Atomic file writes with Windows retry logic (linear backoff; see Design Decisions #16) — crash-safe, handles antivirus/indexing conflicts
 - Concurrent file scanning with bounded parallelism and progress reporting
 - HLint enforcement of IO safety rules
-- Proof of possession verification for push and pull operations
+- Proof of possession verification for push and pull operations (full-layout remotes; consults working tree then CAS)
   - `verifyLocalAt` function for verifying arbitrary repo paths (used for filesystem remotes)
   - Integration with existing escape hatches (`--accept-remote`, `--manual-merge`)
 
@@ -1901,10 +1923,12 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
   causes "delayed read on closed handle" errors; use `Bit.Process.readProcessStrict` instead
 - Use plain `writeFile` for important files — use `atomicWriteFile` for crash safety
   and Windows compatibility
-- Push metadata from an unverified working tree (the metadata may reference
-  files that are missing or corrupted — see Proof of Possession rule)
-- Pull metadata from an unverified remote (corruption propagates through
-  metadata; verify remote first, suggest `--accept-remote` if verification fails)
+- Push metadata to a full-layout remote from an unverified working tree (the
+  metadata may reference files that are missing or corrupted — see Proof of
+  Possession rule; bare remotes are exempt since CAS is self-verifying)
+- Pull metadata from an unverified full-layout remote (corruption propagates
+  through metadata; verify remote first, suggest `--accept-remote` if
+  verification fails; bare remotes are exempt)
 - Store persistent remote workspace state under `.bit/` — remote-targeted
   commands must use ephemeral temp directories (fetch → inflate → operate →
   push → cleanup). The remote bundle is the sole source of truth.
@@ -1957,10 +1981,11 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
 - Update tracking ref after filesystem pull (same invariant as cloud pull)
 - Use `--no-track` flag for any `git checkout` that should not set upstream
   tracking (e.g., `checkoutRemoteAsMain`, `--accept-remote` flows)
-- Verify local working tree before push (proof of possession)
-- Verify remote before pull (proof of possession); for cloud remotes use
-  `rclone lsjson --hash` (free on Google Drive), for filesystem remotes hash
-  the files
+- Verify local content before push to full-layout remotes (proof of possession;
+  check working tree then CAS); skip verification for bare remotes
+- Verify remote before pull from full-layout remotes (proof of possession); for
+  cloud full remotes use `rclone lsjson --hash` (free on Google Drive), for
+  filesystem remotes hash the files; skip verification for bare remotes
 - When verification fails, refuse the operation and suggest resolution:
   `bit add` / `bit restore` for local issues, `--accept-remote` / `--force` /
   `--manual-merge` for remote issues
