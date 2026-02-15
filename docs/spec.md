@@ -4,7 +4,7 @@
 
 **bit** is a version control system designed for large files that leverages Git as a metadata-tracking engine while storing actual file content separately. The core insight: Git excels at tracking small text files, so we feed it exactly that — tiny metadata files instead of large binaries.
 
-**Mental Model**: bit = Git(metadata) + rclone(sync) + [optional CAS(content) for bit-solid]
+**Mental Model**: bit = Git(metadata) + rclone(sync) + [CAS(content) when mode=solid]
 
 ### bit-lite vs Git vs bit-solid: Content Authority
 
@@ -12,13 +12,15 @@ The three systems differ in where content lives and what guarantees that provide
 
 **Git** stores file content directly in its object store (`.git/objects/`). Every blob, tree, and commit is content-addressed by SHA-1. When you push, you're transferring objects that are self-verifying. When you pull, the objects you receive are self-verifying. Metadata (commits, trees) and content (blobs) live in the same store. The object store is the single source of truth, and it can always back up any metadata claim.
 
-**bit-solid** (planned) will add a content-addressed store (CAS) alongside Git's metadata tracking. Like Git, every version of every file will be stored by its hash. The CAS backs up every metadata claim unconditionally — if the metadata says a file existed at commit N with hash X, the CAS has that blob. This enables full binary history, time travel, and sparse checkout.
+**bit-solid** adds a content-addressed store (CAS) alongside Git's metadata tracking. Like Git, every version of every file is stored by its hash. The CAS backs up every metadata claim unconditionally — if the metadata says a file existed at commit N with hash X, the CAS has that blob. This enables full binary history, time travel, and sparse checkout.
 
-**bit-lite** (current) has no object store and no CAS. Git tracks only metadata files (2-line hash+size records). The actual binary content lives exclusively in the working tree. There is exactly one copy of each file — the one on disk right now. Old versions are gone the moment you overwrite a file.
+**bit-lite** has no object store and no CAS. Git tracks only metadata files (2-line hash+size records). The actual binary content lives exclusively in the working tree. There is exactly one copy of each file — the one on disk right now. Old versions are gone the moment you overwrite a file.
 
-This creates a fundamental architectural constraint that Git and bit-solid don't have: **metadata can become hollow.** If a binary file is deleted, corrupted, or modified without running `bit add`, the metadata in `.bit/index/` claims something that is no longer true. In Git, this situation is impossible — the object store is append-only and self-verifying. In bit-lite, it's the normal consequence of working with mutable files on a regular filesystem.
+**Mode is a per-repo configuration, not a separate product.** A repo can switch between lite and solid at any time via `.bit/config`. The mode controls a single behavior: whether `bit add` writes content into `.bit/cas/` alongside the metadata. See "Mode Configuration" below.
 
-This constraint gives rise to the **proof of possession** rule (see below): bit-lite must verify that content matches metadata before transferring metadata to or from another repo. Without this rule, hollow metadata propagates between repos, and the system's core value proposition — knowing the true state of your files — is undermined.
+This creates a fundamental architectural constraint that Git and bit-solid don't have: **in lite mode, metadata can become hollow.** If a binary file is deleted, corrupted, or modified without running `bit add`, the metadata in `.bit/index/` claims something that is no longer true. In Git, this situation is impossible — the object store is append-only and self-verifying. In bit-lite, it's the normal consequence of working with mutable files on a regular filesystem.
+
+This constraint gives rise to the **proof of possession** rule (see below): bit-lite must verify that content matches metadata before transferring metadata to or from another repo. Without this rule, hollow metadata propagates between repos, and the system's core value proposition — knowing the true state of your files — is undermined. In solid mode, proof of possession is trivially satisfied because the CAS backs every claim.
 
 ### Origin
 
@@ -74,7 +76,7 @@ project/
     │   └── data/
     │       └── dataset.bin # Metadata file (NOT the actual data)
     ├── cache/              # Scan/verify cache (mtime+size) to skip re-hashing
-    ├── cas/                # Content-addressed store (bit-solid, structure only)
+    ├── cas/                # Content-addressed store (populated when mode=solid)
     ├── remotes/            # Named remote configs (typed)
     │   └── origin          # Remote type + optional target
     ├── devices/            # Device identity files
@@ -90,7 +92,7 @@ project.git/                # Standard git bare repo
 ├── objects/
 ├── refs/
 └── bit/                    # bit-specific data (note: bit/, not .bit/)
-    └── cas/                # Content-addressed store (bit-solid, structure only)
+    └── cas/                # Content-addressed store (populated when mode=solid)
 ```
 
 Bare repos are standard git bare repos with a `bit/` subdirectory. Git commands work naturally (git discovers the bare repo). bit does not wrap bare repos in `.bit/index/`. The `bit/` directory (not `.bit/`) is used because bare repos have no hidden directory convention — all contents are visible at the top level.
@@ -122,6 +124,37 @@ Separated repos place the git database and bit metadata at a separate directory 
 
 **Transient paths (created and removed by operations):** Fetch downloads the cloud bundle to `.bit/temp_remote.bundle` before copying it to `.bit/index/.git/bundles/<name>.bundle`. Cloud text-file repair uses a temp file under `.bit/` when uploading restored content.
 
+### Mode Configuration (lite vs solid)
+
+The mode is stored in `.bit/config` as a single key:
+
+```
+mode: lite
+```
+or
+```
+mode: solid
+```
+
+**Default:** `lite`. If `.bit/config` does not exist or does not contain a `mode` key, the repo operates in lite mode. This preserves backward compatibility — all existing repos are implicitly lite.
+
+**What the mode controls:** A single behavior — whether `bit add` copies file content into `.bit/cas/` in addition to writing metadata to `.bit/index/`.
+
+- **lite**: `bit add` writes metadata only. No CAS writes. Proof-of-possession verification is required on push/pull.
+- **solid**: `bit add` writes metadata AND copies the blob (keyed by its hash) into `.bit/cas/`. Proof-of-possession is trivially satisfied since the CAS is append-only and self-verifying.
+
+**Switching modes:**
+
+**lite → solid**: Set `mode: solid` in `.bit/config`. From this point forward, `bit add` populates the CAS. Existing history has no CAS backing — the CAS is simply incomplete for older commits. An optional `bit cas backfill` command can walk historical commits and store any blobs that are currently present in the working tree, but it is not required.
+
+**solid → lite**: Set `mode: lite` in `.bit/config`. `bit add` stops writing to the CAS. The existing `.bit/cas/` directory is preserved with all its data — nothing is deleted.
+
+**CAS reads are mode-independent.** Regardless of the current mode, any operation that needs old file content (e.g. `bit restore` from a historical commit) checks `.bit/cas/` as a fallback. If the requested blob exists in CAS, it is used. If not (because the commit predates solid mode), the operation fails with "no content available for this version." This means the mode only gates *writes* — reads always consult the CAS if data is present.
+
+**The mode is local-only.** It is not committed or tracked in git. Different clones of the same project can run in different modes — a laptop might use lite to save space while a NAS uses solid for full history.
+
+**CAS garbage collection:** `bit cas gc` (future) can prune blobs that are not referenced by any reachable commit. The safe default is to never delete CAS data automatically.
+
 ### The Index Invariant
 
 **Git is the sole authority over `.bit/index/`.** After any git operation that
@@ -142,7 +175,7 @@ so text files get `hash:/size:` metadata instead of their actual content).
 
 ### The Proof of Possession Rule
 
-In Git and in bit-solid (planned), content is always recoverable from an object store. Git stores file content in `.git/objects/`; bit-solid will store it in a content-addressed store (CAS). In both systems, metadata and content are either the same thing or the content is always reachable from the metadata. You can push any metadata you want — the objects back it up unconditionally.
+In Git and in bit-solid, content is always recoverable from an object store. Git stores file content in `.git/objects/`; bit-solid stores it in a content-addressed store (CAS). In both systems, metadata and content are either the same thing or the content is always reachable from the metadata. You can push any metadata you want — the objects back it up unconditionally.
 
 bit-lite is fundamentally different. There is no object store. The working tree is the **only copy** of binary file content. The metadata in `.bit/index/` is just a *claim* — "there exists a file at this path with this hash and this size." If that file is gone, corrupted, or modified since the last commit, the claim is hollow. Pushing hollow claims to a remote means the remote now has metadata that nobody can fulfill. Pulling hollow claims from a remote means your local repo has metadata pointing to content that doesn't exist.
 
@@ -156,6 +189,8 @@ Metadata:    Always backed by objects           Only valid if working tree match
 Push safety: Unconditional                      Requires verification first
 Pull safety: Unconditional                      Requires remote verification first
 ```
+
+In solid mode, the CAS serves the same role as Git's object store — proof of possession is trivially satisfied. The verification step can be skipped or reduced to checking that the CAS contains the expected blobs (which is a fast filename check, not a content hash).
 
 The rule applies symmetrically:
 
@@ -238,7 +273,7 @@ bit runs Git with:
 - Working tree is `.bit/index` (not the project root)
 - Ignore rules: user creates `.bitignore` in the project root. Before any command that uses working tree state (add, commit, status, diff, restore, checkout, merge, reset, mv), bit runs **syncBitignoreToIndex**: if `.bitignore` exists it is copied to `.bit/index/.gitignore` with normalization (line endings, trim, drop empty lines); if `.bitignore` does not exist, `.bit/index/.gitignore` is removed if present so the index has no ignore file. The index working tree is thus always in sync with the user's ignore rules for those commands.
 
-**Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes. Creates `.bit/cas/` for future content-addressed storage. These post-init config steps only run on fresh init — re-init (`bit init` on an existing repo) skips them and just forwards to `git init` so that "Reinitialized existing" output, exit codes, and `--initial-branch` warnings work identically to git.
+**Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes. Creates `.bit/cas/` for the content-addressed store (used when mode=solid). These post-init config steps only run on fresh init — re-init (`bit init` on an existing repo) skips them and just forwards to `git init` so that "Reinitialized existing" output, exit codes, and `--initial-branch` warnings work identically to git.
 
 **Branch naming:** On fresh init, bit sets `init.defaultBranch=main` and renames `master` to `main` — unless the user passed `--initial-branch`/`-b`, in which case git's own branch naming is respected and bit does not override it.
 
@@ -539,6 +574,11 @@ The `Bit.Device.Identity` module handles remote type classification and device r
   - `type: filesystem` (path lives only in git config as named remote)
   - `type: cloud\ntarget: gdrive:Projects/foo` (rclone path for transport)
   - `type: device\ntarget: black_usb:Backup` (device identity for resolution)
+- **Cloud remote layout:** Cloud remotes have a `layout` field that controls what is stored on the cloud:
+  - `layout: full` (default, backward compatible): Files are stored at human-readable paths mirroring the working tree. Users can browse files in Google Drive / S3 / etc. This is the current behavior.
+  - `layout: bare`: Files are stored only in CAS layout (`cas/<prefix>/<hash>`). The cloud folder is opaque to humans — no browsable file tree, just hashed blobs and a metadata bundle. This is for pure backup where browsability is not needed.
+  - Example remote config for bare layout: `type: cloud\ntarget: gdrive:Backup/foo\nlayout: bare`
+- **No cloud remote layout conversion.** Switching a remote between `layout: full` and `layout: bare` is not supported. To change layout, create a new remote with the desired layout and push to it. This avoids complex migration logic and keeps the remote lifecycle simple.
 - **Device add fallback:** When adding a removable or network path, bit may prompt for a device name and write `.bit-store` at the volume root. If writing `.bit-store` fails (e.g. permission denied on `C:\`), the remote is added as path-only (RemoteFilesystem) so the user still has a working remote; device identity is not persisted. This silent degradation is worth specifying so users and maintainers know the fallback exists.
 
 All remote types get a **named git remote** inside `.bit/index/.git`:
@@ -584,7 +624,42 @@ For cloud remotes (Google Drive, S3, etc.), bit uses **dumb storage**:
 - Files are synced via rclone copy/move/delete operations
 - The remote is just a directory of files — no Git repo, no bit commands work there
 
-**Cloud bundle lifecycle:**
+Cloud remotes support two layouts:
+
+**Full layout** (`layout: full`, default): Files are stored at human-readable paths on the cloud, mirroring the working tree structure. Users can open Google Drive and browse files directly. This is the current behavior.
+
+```
+gdrive:Projects/foo/
+├── .bit/
+│   └── bit.bundle          # Metadata bundle
+├── lectures/
+│   ├── lecture-01.mp3       # Actual files at readable paths
+│   └── lecture-02.mp3
+└── data/
+    └── dataset.bin
+```
+
+**Bare layout** (`layout: bare`): Files are stored only in CAS layout — hashed blobs organized by prefix. No human-readable file tree exists on the cloud. This is for pure backup where browsability is not needed.
+
+```
+gdrive:Backup/foo/
+├── .bit/
+│   └── bit.bundle          # Metadata bundle
+└── cas/
+    ├── a1/
+    │   └── a1b2c3d4e5f6...  # Content blob (keyed by hash)
+    ├── f8/
+    │   └── f8e9a0b1c2d3...
+    └── ...
+```
+
+**Bare layout push behavior:** On push to a bare remote, bit hashes each file in the working tree and uploads it into the remote's CAS layout (`cas/<first-2-chars>/<full-hash>`) via rclone, then uploads the metadata bundle. This works regardless of local mode — a lite-mode repo streams content directly to the remote CAS without populating local CAS. The local repo pays no disk cost; the remote gets a complete content-addressed backup.
+
+**Bare layout pull behavior:** On pull from a bare remote, bit fetches the metadata bundle and merges as usual. For file sync, it reads the metadata to determine which hashes are needed, then downloads the corresponding blobs from `cas/<prefix>/<hash>` on the remote and places them at the correct working tree paths.
+
+**Bare layout verification:** For bare cloud remotes, remote verification compares the hashes in the remote's metadata bundle against the CAS blob names on the remote (the blob filename *is* the hash). No content re-hashing is needed — if `cas/a1/a1b2c3d4e5f6...` exists, the content is correct by construction.
+
+**Cloud bundle lifecycle (both layouts):**
 
 - **On the remote:** The metadata bundle is always stored at **`.bit/bit.bundle`** (single file).
 - **Fetch:** (1) Download from remote to staging path `.bit/temp_remote.bundle`. (2) Copy to per-remote path `.bit/index/.git/bundles/<sanitized-name>.bundle` and remove the temp file. (3) Register the bundle as a git remote and run `git fetch <name>` to populate `refs/remotes/<name>/main`. (4) If `git fetch` does not set the ref (e.g. bundle format), the implementation uses `git bundle list-heads` and manually updates the tracking ref so status and pull still work.
@@ -636,7 +711,10 @@ file sync — no remote scan), ancestry checks, `--force`/`--force-with-lease`, 
 
 **Cloud seam** (`mkCloudSeam`): Downloads/uploads git bundles via rclone. Bundles
 are stored per-remote at `.bit/index/.git/bundles/<name>.bundle` so `bit status`
-can compare against them.
+can compare against them. For bare-layout remotes, file sync uploads content
+into CAS layout (`cas/<prefix>/<hash>`) instead of readable paths — the seam
+reads the remote's `layout` field from `.bit/remotes/<n>` to determine the
+target path scheme.
 
 **Filesystem seam** (`mkFilesystemSeam`): Takes current working directory and remote; uses native git fetch/pull. The local index registers the remote's `.bit/index` as a named git remote; metadata is pushed via `git pull --ff-only` at the remote side.
 
@@ -1478,6 +1556,23 @@ Interactive per-file conflict resolution:
     updates when already on the target branch; not `git clone`, which
     fails on Windows when temp directories aren't fully cleaned up).
 
+19. **Mode is local-only, gates writes only**: The lite/solid mode is stored in
+    `.bit/config` (not tracked by git) and controls a single behavior: whether
+    `bit add` writes blobs to `.bit/cas/`. CAS reads are always available
+    regardless of mode — `bit restore` and similar commands check CAS as a
+    fallback. This means switching from solid to lite preserves all previously
+    stored history, and switching from lite to solid starts accumulating history
+    from that point forward. No migration, no data loss, instant switch.
+
+20. **Cloud remote layout (full vs bare) with streaming CAS**: Cloud remotes
+    support two layouts: `full` (files at readable paths, browsable in Google
+    Drive) and `bare` (CAS-only, opaque blobs). A lite-mode repo can push to a
+    bare remote by streaming content directly into the remote's CAS layout
+    without populating local CAS — the local repo pays no disk cost while the
+    remote gets a complete content-addressed backup. This is the compelling
+    "laptop-constrained user who wants a safety net" use case. Layout conversion
+    between full and bare is not supported — create a new remote instead.
+
 ### What We Deliberately Do NOT Do
 
 - **`RemoteState` does not need a typed state machine.** The pattern match in push logic is clear and total.
@@ -1489,6 +1584,10 @@ Interactive per-file conflict resolution:
   correct metadata in the index. Rescanning would be redundant at best,
   wrong at worst (e.g., overwriting text file content with hash/size if the
   scan's text/binary classification differs from git's).
+- **No cloud remote layout conversion.** Switching between `layout: full` and
+  `layout: bare` is not supported. Create a new remote with the desired layout
+  and push to it. Migration logic would be complex and error-prone, and remote
+  layout changes are rare enough to not justify the implementation cost.
 
 ---
 
@@ -1502,7 +1601,11 @@ Interactive per-file conflict resolution:
 
 ### Future (bit-solid)
 
-- Content-Addressed Storage (CAS) — directory structure exists (`.bit/cas/` for normal repos, `bit/cas/` for bare repos); wiring into `bit add`/push/pull is deferred
+- **Mode switching**: `mode: solid` in `.bit/config` activates CAS writes on `bit add`. Switching is instant and non-destructive in both directions. See "Mode Configuration" in Core Architecture.
+- **CAS structure**: `.bit/cas/<first-2-chars>/<full-hash>` for normal repos, `bit/cas/` for bare repos. Directory structure already created by `bit init`.
+- **`bit cas backfill`**: Walk historical commits, store any blobs currently present in the working tree into CAS. Optional — incomplete CAS is fine.
+- **`bit cas gc`**: Prune unreferenced blobs. Safe default: never auto-delete.
+- **`bit restore` from CAS**: When restoring a file from a historical commit, check CAS for the blob before failing. Works regardless of current mode.
 - Sparse checkout via symlinks to CAS blobs
 - `bit materialize` / `bit checkout --sparse`
 
@@ -1697,7 +1800,9 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
 - Use `rclone sync` — use action-based sync with explicit operations
 - Add fields to metadata beyond `hash` and `size`
 - Track symlinks or empty directories
-- Implement CAS yet (that's bit-solid, mark as TODO)
+- Wire CAS into `bit add` without reading the mode from `.bit/config` first (mode gates all CAS writes)
+- Implement cloud remote layout conversion (create a new remote instead)
+- Store the mode (`lite`/`solid`) in git-tracked files (it is local-only in `.bit/config`)
 - Add MTL-style type classes or free monad effects (premature)
 - Bypass `deriveActions` by writing custom diff/plan logic in push or pull code paths
 - Write metadata to `.bit/index/` directly and then commit (bypasses git;
