@@ -352,6 +352,8 @@ bit runs Git with:
 
 **Re-init:** Running `bit init` on an existing repo always forwards to `git init` (including on `.bit` bitlink repos from `--separate-git-dir`). Git prints "Reinitialized existing Git repository" and handles format changes, gitdir moves, etc. bit propagates git's exit code and output verbatim.
 
+**Re-init with `--separate-git-dir` (junction environment):** When re-initializing with `--separate-git-dir` and `BIT_GIT_JUNCTION=1`, bit normalizes the `.git` directory junction to a gitlink file before calling `git init`. This is necessary because git's `--separate-git-dir` expects to rename `.git` (a directory), but junctions are removed with `rmdir` not `rename`. After normalization, git runs from `targetDir` (not `.bit/index`) so CWD is not inside the directory being renamed — avoiding "Permission denied" on Windows. After git moves the database, bit recreates the `.bit/index/.git` gitlink pointing to the new separate gitdir.
+
 **Global flags before init:** `bit -c key=val init [dir]` and `bit --bare init [dir]` are dispatched correctly — `-c` pairs and `--bare` are peeled from before the `init` subcommand and forwarded to git in the right position.
 
 ### Bare Init
@@ -1329,22 +1331,22 @@ Alias types:
 
 Unknown commands (not handled by bit, no alias match) are forwarded to git:
 
-- **Inside a bit repo with `.git` junction/gitlink**: uses `runGitHere` (no `-C`) — when CWD has a `.git` directory (junction) or `.git` file (gitlink from `--separate-git-dir`), git's own repo discovery works natively. Using `-C .bit/index` would break commands like `git config -f <relative-path>` that expect paths relative to CWD.
+- **Inside a bit repo with `.git` junction/gitlink**: uses `runGitGlobal` (no `-C`, no `-c` flags) — when CWD has a `.git` directory (junction) or `.git` file (gitlink from `--separate-git-dir`), git's own repo discovery works natively. Using `-C .bit/index` would break commands like `git config -f <relative-path>` that expect paths relative to CWD. Using `runGitGlobal` instead of `runGitHere` avoids leaking `GIT_CONFIG_*` env vars (from `-c color.ui=auto`) into shell alias scripts.
 - **Inside a bit repo without `.git`**: uses `runGitRawAt` to target `.bit/index/` via `-C`
 - **Inside a bare bit repo** (has `bit/` + `HEAD`): uses `runGitGlobal` (no `-C`) — git discovers the bare repo naturally
-- **Inside a git directory** (CWD has a `HEAD` file, e.g. user `cd`'d into `.git`): uses `runGitHere` — runs git without `-C` override, letting git's own repo discovery work. This is necessary because adding `-C .bit/index` would point to a nonexistent path relative to the `.git` directory.
+- **Inside a git directory** (CWD has `HEAD` file + `refs/` directory but no `.bit/`): uses `runGitHere` — runs git without `-C` override, letting git's own repo discovery work. This catches bare repos and users who `cd`'d into `.git/`. Without this check, `findBitRoot` would walk up to a parent `.bit/` repo and commands would target the wrong repository.
 - **Outside any repo**: uses `runGitGlobal` (no `-C`)
 
-**`GIT_DIR=/dev/null` bypass:** When `GIT_DIR` is set to `/dev/null` (or `NUL`/`nul` on Windows via MSYS2 path conversion), bit passes through to git immediately without any command parsing or `-C` insertion. This is needed for tools like `test_cmp` in git's test suite, which use `GIT_DIR=/dev/null git diff --no-index` to compare files outside any repository.
+**`GIT_DIR` bypass:** When `GIT_DIR` is set to any non-empty value, bit passes through to git immediately via `runGitGlobal` without any command parsing, alias expansion, or `-C` insertion. This covers `GIT_DIR=/dev/null` (used by tools like `test_cmp` for `git diff --no-index` outside any repository), `GIT_DIR=<path>` (explicit repo targeting), and any other value. Checking for `GIT_DIR` happens before all other dispatch — it is the first thing `runCommand` evaluates.
 
 ### `-C <dir>` Flag
 
-When invoked as `bit -C <dir> <args...>`, bit intercepts the `-C` flag before any command dispatch. This is a pure passthrough — no alias expansion, no bit command handling:
+When invoked as `bit -C <dir> <args...>`, bit intercepts the `-C` flag before any command dispatch:
 
-- **`<dir>` has `.bit/`** (bit repo): runs `git -C <dir>/.bit/index <args...>`
-- **Otherwise** (plain git repo, bare repo, or nonexistent): runs `git -C <dir> <args...>`
+- **`<dir>` has `.bit/`** (bit repo): `cd`s to `<dir>` and runs through normal bit dispatch (`runCommand`). This ensures init, scan, commit, alias expansion, and passthrough all resolve paths correctly relative to the target directory.
+- **Otherwise** (plain git repo, bare repo, or nonexistent): runs `git -C <dir> <args...>` via `runGitRawAt`
 
-This is necessary because without interception, `-C` would be treated as an unknown command, alias lookup would fail, and passthrough would prepend `-C .bit/index` — producing `git -C .bit/index -C <dir> ...`. Git resolves `-C` sequentially, so the second `-C <dir>` would resolve relative to `.bit/index/` (wrong directory).
+Interception is necessary because without it, `-C` would be treated as an unknown command, alias lookup would fail, and passthrough would prepend `-C .bit/index` — producing `git -C .bit/index -C <dir> ...`. Git resolves `-C` sequentially, so the second `-C <dir>` would resolve relative to `.bit/index/` (wrong directory).
 
 ### Init Dispatch Order
 

@@ -256,8 +256,8 @@ detectStorageTypeLinux _ = do
             then Network else Physical
     _ -> Physical
 
--- | Is the volume a fixed (non-removable, non-network) drive?
--- Fixed drives use RemoteFilesystem; removable/network use RemoteDevice.
+-- | Is the volume a fixed (non-removable) drive or UNC path?
+-- Fixed drives and UNC paths use RemoteFilesystem; removable drives use RemoteDevice.
 isFixedDrive :: FilePath -> IO Bool
 isFixedDrive volumeRoot
   | isWindows = isFixedDriveWindows volumeRoot
@@ -267,7 +267,7 @@ isFixedDriveWindows :: FilePath -> IO Bool
 isFixedDriveWindows volRoot = do
   let drive = take 2 (filter (`elem` ['A'..'Z'] ++ ['a'..'z'] ++ ":") volRoot)
   case drive of
-    [] -> pure False  -- UNC: treat as network
+    [] -> pure True   -- UNC: always accessible at the same path, treat as fixed
     _ -> do
       (code, out, _) <- readProcessWithExitCode "powershell" ["-NoProfile", "-Command",
         "[int]([System.IO.DriveInfo]::new('" ++ drive ++ "').DriveType)"] ""

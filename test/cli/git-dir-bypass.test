@@ -1,0 +1,84 @@
+# =============================================================================
+# GIT_DIR Bypass - When GIT_DIR is set, bit passes through to git directly
+#
+# Tests that:
+# 1. GIT_DIR=<path> causes bit to pass through to git without .bit interception
+# 2. GIT_DIR=/dev/null allows git commands like diff --no-index
+# 3. GIT_DIR=<path> with git config reads from the specified git dir
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_gitdir 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_gitdir
+<<<
+>>>= 0
+
+cd test\cli\output\work_gitdir & bit init -q
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: GIT_DIR=/dev/null bypass (no-repo commands)
+# ======================================================================
+
+# ---- diff --no-index works with GIT_DIR=/dev/null ----
+cd test\cli\output\work_gitdir & echo aaa> a.txt & echo bbb> b.txt
+<<<
+>>>= 0
+
+cd test\cli\output\work_gitdir & set "GIT_DIR=/dev/null" & bit diff --no-index --stat a.txt b.txt
+<<<
+>>> /a\.txt.*b\.txt/
+>>>= 1
+
+# ======================================================================
+# SECTION 2: GIT_DIR=<path> reads config from specified git dir
+# ======================================================================
+
+# ---- Create a bare git repo to use as GIT_DIR ----
+cd test\cli\output\work_gitdir & git init --bare bare.git
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Set a config value in the bare repo ----
+cd test\cli\output\work_gitdir & git config -f bare.git\config test.mykey myvalue
+<<<
+>>>= 0
+
+# ---- GIT_DIR=bare.git bit config should read from bare.git, not .bit ----
+cd test\cli\output\work_gitdir & set "GIT_DIR=bare.git" & bit config test.mykey
+<<<
+>>>
+myvalue
+>>>= 0
+
+# ======================================================================
+# SECTION 3: GIT_DIR=<path> with rev-parse
+# ======================================================================
+
+# ---- GIT_DIR=bare.git rev-parse --git-dir should return bare.git ----
+cd test\cli\output\work_gitdir & set "GIT_DIR=bare.git" & bit rev-parse --git-dir
+<<<
+>>> /bare\.git/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_gitdir 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

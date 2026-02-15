@@ -2,7 +2,7 @@
 # Alias Expansion - bit expands git aliases and re-dispatches
 #
 # Tests that bit reads git aliases from config and expands them before
-# dispatching. Shell aliases (starting with !) are forwarded to git.
+# dispatching. Unknown commands pass through to git.
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----

@@ -64,15 +64,22 @@ initializeRepoAt targetDir opts = do
     -- For --separate-git-dir, compute absolute sgdir and put bit metadata there
     mAbsSgdir <- traverse Dir.makeAbsolute separated
 
-    -- Resolve the actual .bit directory. On re-init, .bit may be a bitlink file
-    -- (from a previous --separate-git-dir init) pointing to the real bit dir.
-    let defaultBitDir = case mAbsSgdir of
-            Just sgdir -> sgdir </> "bit"
-            Nothing    -> targetDir </> ".bit"
-    isBitLink <- Platform.doesFileExist (targetDir </> ".bit")
-    targetBitDir <- if isBitLink && separated == Nothing
+    -- Check if the repo already exists (re-init vs fresh init).
+    hasBitDir <- Platform.doesDirectoryExist (targetDir </> ".bit")
+    hasBitLink <- Platform.doesFileExist (targetDir </> ".bit")
+    let existingRepo = hasBitDir || hasBitLink
+
+    -- Resolve the actual .bit directory.
+    -- For existing repos (re-init): always use the existing .bit dir, even if
+    -- --separate-git-dir is specified. The git database moves but bit metadata stays.
+    -- For fresh repos: use sgdir/bit if --separate-git-dir, else targetDir/.bit.
+    targetBitDir <- if existingRepo && hasBitLink
         then resolveBitLink (targetDir </> ".bit")
-        else pure defaultBitDir
+        else if existingRepo
+            then pure (targetDir </> ".bit")
+            else case mAbsSgdir of
+                Just sgdir -> pure (sgdir </> "bit")
+                Nothing    -> pure (targetDir </> ".bit")
     let targetBitIndexPath = targetBitDir </> "index"
     let targetBitGitDir = targetBitIndexPath </> ".git"
     let targetBitDevicesDir = targetBitDir </> "devices"
@@ -90,6 +97,26 @@ initializeRepoAt targetDir opts = do
         Platform.createDirectoryIfMissing True targetBitDir
         Platform.createDirectoryIfMissing True targetBitIndexPath
 
+    -- For reinit with --separate-git-dir, git must run from targetDir (not
+    -- .bit/index) because git renames the old gitdir to the new location, and
+    -- CWD must not be inside the directory being renamed (Windows limitation).
+    -- First normalize .git from junction to gitlink so git can update it.
+    let isReinitSgdir = not isFreshInit && mAbsSgdir /= Nothing
+    when isReinitSgdir $ do
+        let gitPath = targetDir </> ".git"
+        gitIsJunction <- Platform.doesDirectoryExist gitPath
+        when gitIsJunction $ do
+            -- Resolve the actual git dir through .bit/index
+            (_, rawDir, _) <- Git.runGitAt targetBitIndexPath
+                ["rev-parse", "--absolute-git-dir"]
+            let currentGitDir = filter (\c -> c /= '\n' && c /= '\r') rawDir
+            -- Remove junction (rmdir without /s doesn't follow)
+            absGit <- Dir.makeAbsolute gitPath
+            callCommand $ "rmdir \"" ++ absGit ++ "\" 2>nul"
+            -- Write gitlink to current git dir so git can discover the repo
+            atomicWriteFileStr gitPath
+                ("gitdir: " ++ toPosix currentGitDir ++ "\n")
+
     -- ALWAYS run git init (handles both fresh init and re-init)
     let extraFlags = case mAbsSgdir of
             Just sgdir -> ["--separate-git-dir", sgdir]
@@ -97,8 +124,11 @@ initializeRepoAt targetDir opts = do
     -- Resolve relative --template paths to absolute (git runs with -C inside
     -- .bit/index, so relative paths would resolve from the wrong directory)
     resolvedGitFlags <- resolveTemplatePaths (initGitFlags opts)
+    -- For reinit+sgdir: run from targetDir so CWD isn't inside the dir being moved.
+    -- For everything else: run from .bit/index as usual.
+    let gitInitDir = if isReinitSgdir then targetDir else targetBitIndexPath
     (code, out, err) <- Git.spawnGit $
-        ["-C", targetBitIndexPath]
+        ["-C", gitInitDir]
         ++ initGitGlobalFlags opts
         ++ ("init" : extraFlags ++ resolvedGitFlags)
 
@@ -194,6 +224,38 @@ initializeRepoAt targetDir opts = do
                         -- repo discovery works without -C override.
                         createGitJunction targetDir targetBitGitDir
 
+            -- 9. Re-init with --separate-git-dir: git renamed the old gitdir to
+            -- sgdir. Recreate .bit/index/.git as a gitlink so future
+            -- git -C .bit/index commands still find the repo.
+            -- Two cases:
+            -- (a) .bit/ was a separate directory — git only moved .bit/index/.git
+            --     contents; .bit/index/ still exists at the original path.
+            -- (b) .bit/ was inside the old gitdir (via bitlink) — git moved the
+            --     entire directory; paths are now under sgdir.
+            when isReinitSgdir $ case mAbsSgdir of
+                Just sgdir -> do
+                    indexStillExists <- Platform.doesDirectoryExist targetBitIndexPath
+                    if indexStillExists
+                        then do
+                            -- Case (a): write gitlink at original .bit/index/.git
+                            let indexGit = targetBitIndexPath </> ".git"
+                            hasIG <- Platform.doesFileExist indexGit
+                            unless hasIG $ atomicWriteFileStr indexGit
+                                ("gitdir: " ++ toPosix sgdir ++ "\n")
+                        else do
+                            -- Case (b): bit metadata moved with the gitdir.
+                            -- Write gitlink at the new location.
+                            let newIndexGit = sgdir </> "bit" </> "index" </> ".git"
+                            hasNG <- Platform.doesFileExist newIndexGit
+                            unless hasNG $ atomicWriteFileStr newIndexGit
+                                ("gitdir: " ++ toPosix sgdir ++ "\n")
+                            -- Update bitlink to point to new bit dir location
+                            let bitPath = targetDir </> ".bit"
+                            bitIsLink <- Platform.doesFileExist bitPath
+                            when bitIsLink $ atomicWriteFileStr bitPath
+                                ("bitdir: " ++ toPosix (sgdir </> "bit") ++ "\n")
+                Nothing -> pure ()
+
             pure ExitSuccess
 
 -- | Resolve a .bit bitlink file to the actual bit directory.
@@ -224,6 +286,19 @@ resolveTemplatePaths (f:rest)
     | otherwise = do
         rest' <- resolveTemplatePaths rest
         pure (f : rest')
+
+
+-- | Remove a .git path that may be a junction, gitlink file, or directory.
+-- Uses 'rmdir' without /s for junctions (safe, doesn't follow the target).
+removeGitPath :: FilePath -> IO ()
+removeGitPath path = do
+    isDir <- Platform.doesDirectoryExist path
+    isFile <- Platform.doesFileExist path
+    when isDir $ do
+        absPath <- Dir.makeAbsolute path
+        callCommand $ "rmdir \"" ++ absPath ++ "\" 2>nul"
+    when (isFile && not isDir) $
+        Dir.removeFile path
 
 -- | When BIT_GIT_JUNCTION=1, create a directory junction from
 -- @\<dir\>/.git@ to @\<dir\>/.bit/index/.git@ (if the target exists

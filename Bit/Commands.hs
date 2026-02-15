@@ -29,13 +29,14 @@ import Data.Text.Encoding (decodeUtf8')
 run :: IO ()
 run = do
     args <- getArgs
-    -- When GIT_DIR=/dev/null, git is being used as a standalone tool
-    -- (e.g. test_cmp on Windows uses "GIT_DIR=/dev/null git diff --no-index").
-    -- Pass through to git directly without .bit repo discovery.
-    -- MSYS2 converts /dev/null to NUL when passing to Windows processes.
+    -- When GIT_DIR is set, the user is explicitly controlling git's repo
+    -- location. Pass through to git directly without .bit interception.
+    -- This handles GIT_DIR=/dev/null (test_cmp), GIT_DIR=<path> (git test
+    -- suite tests 10/13), and any other explicit GIT_DIR usage.
     mGitDir <- lookupEnv "GIT_DIR"
-    when (mGitDir `elem` [Just "/dev/null", Just "NUL", Just "nul"]) $
-        Git.runGitGlobal args >>= exitWith
+    case mGitDir of
+        Just d | not (null d) -> Git.runGitGlobal args >>= exitWith
+        _ -> pure ()
     case args of
         []               -> Git.runGitGlobal [] >>= exitWith
         ["help"]         -> printMainHelp >> exitSuccess
@@ -133,8 +134,13 @@ handleDashC dir rest = do
     hasBitLink <- Dir.doesFileExist (dir </> ".bit")
     if hasBitDir || hasBitLink
         then do
-            bitDir <- resolveBitDir dir
-            Git.runGitRawAt (bitDir </> "index") rest >>= exitWith
+            -- cd to the target directory and run through normal bit dispatch.
+            -- This handles init (with correct relative path resolution),
+            -- working tree commands (add/commit via scan), and passthrough
+            -- (which uses the .git gitlink for native repo discovery).
+            absDir <- Dir.makeAbsolute dir
+            Dir.setCurrentDirectory absDir
+            runCommand rest
         else Git.runGitRawAt dir rest >>= exitWith
 
 -- | Commands that bit handles natively (not aliases).
@@ -160,7 +166,10 @@ tryAlias mIndexPath name rest = do
         ExitSuccess ->
             let expanded = words (filter (/= '\r') (filter (/= '\n') out))
             in case expanded of
-                ("!":_) -> Git.runGitGlobal (name : rest) >>= exitWith  -- shell alias
+                -- Shell aliases must run from CWD (not .bit/index) because git
+                -- resolves paths relative to the working tree root. Using -C .bit/index
+                -- would make the working tree root be .bit/index, breaking relative paths.
+                (x:_) | "!" `isPrefixOf` x -> Git.runGitGlobal (name : rest) >>= exitWith
                 [] -> passthrough (name : rest)
                 _ -> runCommand (expanded ++ rest) >> exitSuccess
         _ -> passthrough (name : rest)
@@ -170,11 +179,13 @@ tryAlias mIndexPath name rest = do
             -- If CWD has .git (junction, gitlink, or directory), let git
             -- discover the repo itself. This preserves the user's CWD for
             -- relative paths in args (e.g. git config -f <path>).
+            -- Use runGitGlobal (no -c flags) to avoid leaking GIT_CONFIG_*
+            -- env vars into shell aliases (test 6: No extra GIT_* on alias scripts).
             -- Otherwise use -C .bit/index for repo discovery.
             hasGitDir <- Dir.doesDirectoryExist ".git"
             hasGitFile <- Dir.doesFileExist ".git"
             if hasGitDir || hasGitFile
-                then Git.runGitHere args >>= exitWith
+                then Git.runGitGlobal args >>= exitWith
                 else Git.runGitRawAt p args >>= exitWith
         Nothing -> Git.runGitGlobal args >>= exitWith   -- no bit repo: bare git
 
@@ -409,6 +420,17 @@ runCommand args = do
         _ -> pure ()
 
     origCwd <- Dir.getCurrentDirectory
+
+    -- If CWD is itself a git directory (bare repo, .git dir) but NOT a bit
+    -- repo, pass through to git. This prevents bit from walking up to a
+    -- parent .bit/ repo when the user (or test) cd'd into a git directory.
+    hasHead <- Dir.doesFileExist (origCwd </> "HEAD")
+    hasRefs <- Dir.doesDirectoryExist (origCwd </> "refs")
+    hasDotBit <- Dir.doesDirectoryExist (origCwd </> ".bit")
+    hasDotBitLink <- Dir.doesFileExist (origCwd </> ".bit")
+    when (hasHead && hasRefs && not hasDotBit && not hasDotBitLink) $
+        Git.runGitHere cmd >>= exitWith
+
     mRoot <- findBitRoot origCwd
 
     -- Handle bare repo case: pass through to git for unknown commands,
