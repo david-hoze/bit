@@ -53,12 +53,32 @@ import System.Exit (ExitCode(ExitSuccess))
 import qualified System.Info as Info
 import Data.UUID (UUID, toString, fromString)
 import Data.UUID.V4 (nextRandom)
-import Bit.Config.Paths (bitDevicesDir, bitRemotesDir)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8', encodeUtf8)
 import Bit.IO.AtomicWrite (atomicWriteFile)
+
+-- ---------------------------------------------------------------------------
+-- Bitlink resolution
+-- ---------------------------------------------------------------------------
+
+-- | Resolve the .bit root directory from a repo root path.
+-- Follows bitlink files (e.g. "bitdir: /abs/path") for separated git dirs.
+resolveBitRoot :: FilePath -> IO FilePath
+resolveBitRoot repoRoot = do
+    let dotBit = repoRoot </> ".bit"
+    isDir <- Dir.doesDirectoryExist dotBit
+    if isDir then pure dotBit
+    else do
+        isFile <- Dir.doesFileExist dotBit
+        if isFile then do
+            bs <- BS.readFile dotBit
+            let content = either (const "") T.unpack (decodeUtf8' bs)
+            case lines content of
+                (firstLine:_) -> pure (drop 8 (filter (/= '\r') firstLine))
+                [] -> pure dotBit
+        else pure dotBit
 
 -- ---------------------------------------------------------------------------
 -- Types
@@ -379,7 +399,8 @@ parseDeviceFile content =
 
 readDeviceFile :: FilePath -> String -> IO (Maybe DeviceInfo)
 readDeviceFile repoRoot deviceName = do
-  let path = repoRoot </> bitDevicesDir </> deviceName
+  bitRoot <- resolveBitRoot repoRoot
+  let path = bitRoot </> "devices" </> deviceName
   exists <- Dir.doesFileExist path
   if not exists then pure Nothing
   else do
@@ -390,8 +411,9 @@ readDeviceFile repoRoot deviceName = do
 
 writeDeviceFile :: FilePath -> String -> DeviceInfo -> IO ()
 writeDeviceFile repoRoot deviceName info = do
-  Dir.createDirectoryIfMissing True (repoRoot </> bitDevicesDir)
-  let path = repoRoot </> bitDevicesDir </> deviceName
+  bitRoot <- resolveBitRoot repoRoot
+  Dir.createDirectoryIfMissing True (bitRoot </> "devices")
+  let path = bitRoot </> "devices" </> deviceName
   let body = unlines $
         [ "uuid: " ++ toString (deviceUuid info)
         , "type: " ++ (case deviceType info of Physical -> "physical"; Network -> "network")
@@ -401,7 +423,8 @@ writeDeviceFile repoRoot deviceName info = do
 
 listDeviceNames :: FilePath -> IO [String]
 listDeviceNames repoRoot = do
-  let dir = repoRoot </> bitDevicesDir
+  bitRoot <- resolveBitRoot repoRoot
+  let dir = bitRoot </> "devices"
   exists <- Dir.doesDirectoryExist dir
   if not exists then pure []
   else filter (not . null) <$> Dir.listDirectory dir
@@ -437,7 +460,8 @@ parseRemoteFile content =
 
 readRemoteFile :: FilePath -> String -> IO (Maybe RemoteTarget)
 readRemoteFile repoRoot remoteName = do
-  let path = repoRoot </> bitRemotesDir </> remoteName
+  bitRoot <- resolveBitRoot repoRoot
+  let path = bitRoot </> "remotes" </> remoteName
   exists <- Dir.doesFileExist path
   if not exists then pure Nothing
   else do
@@ -458,7 +482,8 @@ readRemoteFile repoRoot remoteName = do
 -- New format: "type: filesystem|device|cloud". Old format: inferred from "target:" line.
 readRemoteType :: FilePath -> String -> IO (Maybe RemoteType)
 readRemoteType repoRoot name = do
-  let path = repoRoot </> bitRemotesDir </> name
+  bitRoot <- resolveBitRoot repoRoot
+  let path = bitRoot </> "remotes" </> name
   exists <- Dir.doesFileExist path
   if not exists then pure Nothing
   else do
@@ -482,8 +507,9 @@ readRemoteType repoRoot name = do
 
 writeRemoteFile :: FilePath -> String -> RemoteType -> Maybe String -> IO ()
 writeRemoteFile repoRoot name remoteType mTarget = do
-  Dir.createDirectoryIfMissing True (repoRoot </> bitRemotesDir)
-  let path = repoRoot </> bitRemotesDir </> name
+  bitRoot <- resolveBitRoot repoRoot
+  Dir.createDirectoryIfMissing True (bitRoot </> "remotes")
+  let path = bitRoot </> "remotes" </> name
   let content = case remoteType of
         RemoteFilesystem -> "type: filesystem"
         RemoteCloud      -> "type: cloud\ntarget: " ++ fromMaybe "" mTarget

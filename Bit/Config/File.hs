@@ -8,14 +8,13 @@ module Bit.Config.File
   ) where
 
 import System.FilePath ((</>))
-import System.Directory (doesFileExist)
+import System.Directory (doesFileExist, doesDirectoryExist)
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd)
 import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString as BS
-import Bit.Config.Paths (bitDir)
 
 -- | Configuration for text file classification
 data TextConfig = TextConfig
@@ -30,22 +29,38 @@ defaultTextConfig = TextConfig
   , textExtensions = [".txt", ".md", ".yaml", ".yml", ".json", ".xml", ".html", ".css", ".js", ".py", ".hs", ".rs"]
   }
 
--- | Path to config file
-configPath :: FilePath
-configPath = bitDir </> "config"
+-- | Resolve the .bit root directory from CWD, following bitlinks if needed.
+resolveBitRoot :: IO (Maybe FilePath)
+resolveBitRoot = do
+    isDir <- doesDirectoryExist ".bit"
+    if isDir then pure (Just ".bit")
+    else do
+        isFile <- doesFileExist ".bit"
+        if isFile then do
+            bs <- BS.readFile ".bit"
+            let content = either (const "") T.unpack (T.decodeUtf8' bs)
+            case lines content of
+                (firstLine:_) -> pure (Just (drop 8 (filter (/= '\r') firstLine)))
+                [] -> pure Nothing
+        else pure Nothing
 
 -- | Read the entire config file and return TextConfig
 -- Falls back to defaultTextConfig if file doesn't exist or parsing fails
 -- Uses strict ByteString reading to avoid Windows file locking issues
 readTextConfig :: IO TextConfig
 readTextConfig = do
-  exists <- doesFileExist configPath
-  if not exists
-    then pure defaultTextConfig
-    else do
-      bs <- BS.readFile configPath
-      let content = either (const T.empty) id (T.decodeUtf8' bs)
-      pure $ parseConfig content
+  mBitRoot <- resolveBitRoot
+  case mBitRoot of
+    Nothing -> pure defaultTextConfig
+    Just bitRoot -> do
+      let cfgPath = bitRoot </> "config"
+      exists <- doesFileExist cfgPath
+      if not exists
+        then pure defaultTextConfig
+        else do
+          bs <- BS.readFile cfgPath
+          let content = either (const T.empty) id (T.decodeUtf8' bs)
+          pure $ parseConfig content
 
 -- | Read config file (for future expansion)
 readConfig :: IO TextConfig

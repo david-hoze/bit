@@ -95,6 +95,31 @@ project.git/                # Standard git bare repo
 
 Bare repos are standard git bare repos with a `bit/` subdirectory. Git commands work naturally (git discovers the bare repo). bit does not wrap bare repos in `.bit/index/`. The `bit/` directory (not `.bit/`) is used because bare repos have no hidden directory convention — all contents are visible at the top level.
 
+**Separated repo** (`bit init --separate-git-dir <sgdir> [dir]`):
+
+```
+sgdir/                      # Git database (objects, refs, HEAD, config)
+├── objects/
+├── refs/
+├── HEAD
+├── config
+├── bundles/
+├── bit/                    # bit metadata (same structure as .bit/)
+│   ├── index/              # Git working tree
+│   │   └── .git            # gitlink file: "gitdir: /abs/sgdir"
+│   ├── cas/
+│   ├── devices/
+│   ├── remotes/
+│   └── config
+
+workdir/
+├── .bit                    # FILE (bitlink): "bitdir: /abs/sgdir/bit"
+├── .git                    # FILE (gitlink): "gitdir: /abs/sgdir"
+├── actual_files/           # User's working files
+```
+
+Separated repos place the git database and bit metadata at a separate directory (`sgdir`), leaving only bitlink and gitlink pointer files in the working directory. This is useful when the working directory is on a slow or space-constrained device. The bitlink file (`.bit` as a file, not a directory) contains `bitdir: <absolute-path>` pointing to the resolved bit metadata directory. All bit operations follow the bitlink transparently.
+
 **Transient paths (created and removed by operations):** Fetch downloads the cloud bundle to `.bit/temp_remote.bundle` before copying it to `.bit/index/.git/bundles/<name>.bundle`. Cloud text-file repair uses a temp file under `.bit/` when uploading restored content.
 
 ### The Index Invariant
@@ -389,6 +414,7 @@ Help (`bit help`, `bit -h`, `bit --help`, and `bit help <command>`) works withou
 |---------|---------------|---------------|
 | `bit init` | `git init` | Initialize `.bit/` with internal Git repo |
 | `bit init --bare` | `git init --bare` | Create standard bare repo with `bit/cas/` |
+| `bit init --separate-git-dir <dir>` | `git init --separate-git-dir` | Place git DB and bit metadata at `<dir>`, leave bitlink/gitlink in working dir |
 | `bit add <path>` | `git add` | Compute metadata, write to `.bit/index/`, stage in Git |
 | `bit add .` | `git add .` | Add all modified/new files |
 | `bit commit -m "msg"` | `git commit` | Commit staged metadata changes |
@@ -1471,6 +1497,7 @@ Interactive per-file conflict resolution:
 
 - `bit init` — creates `.bit/` (including `.bit/cas/`), initializes Git in `.bit/index/.git`; dispatched before repo discovery so nested init works correctly; supports `BIT_GIT_JUNCTION=1` for git test suite compatibility
 - `bit init --bare` — passes through to `git init --bare`, then creates `bit/cas/` inside the bare repo; bare repos are standard git bare repos with no `.bit/index/` wrapper
+- `bit init --separate-git-dir <dir> [workdir]` — places git database and bit metadata at `<dir>`, writes bitlink (`.bit` file with `bitdir:` pointer) and gitlink (`.git` file with `gitdir:` pointer) in the working directory; all operations transparently follow bitlinks
 - `bit add` — scans files, computes MD5 hashes, writes metadata, stages in Git
 - `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `reset`, `rm`, `mv`, `branch`, `merge` — delegate to Git
 - `bit remote add/show` — named remotes with device-aware resolution
@@ -1505,7 +1532,7 @@ Interactive per-file conflict resolution:
 
 | Module | Role |
 |--------|------|
-| `Bit/Commands.hs` | CLI dispatch, `findBitRoot` (walks up to discover repo, returns `BitRoot`: `NormalRoot` or `BareRoot`), prefix computation, env setup; `init` dispatched before repo discovery; bare repos pass unknown commands through to git and reject known bit commands; `tryAlias` expands git aliases and passes unknown commands through to git |
+| `Bit/Commands.hs` | CLI dispatch, `findBitRoot` (walks up to discover repo, returns `BitRoot`: `NormalRoot` or `BareRoot`), prefix computation, env setup; `init` dispatched before repo discovery; bare repos pass unknown commands through to git and reject known bit commands; `tryAlias` expands git aliases and passes unknown commands through to git; `resolveBitDir` follows bitlinks for separated repos |
 | `Bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit/Core.hs` | Re-exports public API from `Bit/Core/*.hs` sub-modules |
 | `Bit/Core/Push.hs` | Push logic + PushSeam transport abstraction |
@@ -1514,7 +1541,7 @@ Interactive per-file conflict resolution:
 | `Bit/Core/Helpers.hs` | Shared types (PullMode, PullOptions) + utility functions |
 | `Bit/Core/RemoteManagement.hs` | Remote add/show and device-name prompting |
 | `Bit/Core/Conflict.hs` | Conflict resolution: Resolution, DeletedSide, ConflictInfo, resolveAll |
-| `Bit/Git/Run.hs` | Git command wrapper; `runGitRawIn`/`runGitWithOutputIn` for prefix-aware subdirectory dispatch; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths; `runGitHere` for running git without `-C` when CWD is a git directory; `spawnGit` respects `BIT_REAL_GIT` to avoid shim recursion |
+| `Bit/Git/Run.hs` | Git command wrapper; `runGitRawIn`/`runGitWithOutputIn` for prefix-aware subdirectory dispatch; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths; `runGitHere` for running git without `-C` when CWD is a git directory; `spawnGit` respects `BIT_REAL_GIT` to avoid shim recursion; `indexPathRef` IORef for dynamic base flags (set via `setIndexPath`, read via `getIndexPath`) |
 | `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, etc.); IO functions take prefix for subdirectory support; BitM functions extract prefix from `envPrefix` |
 | `Bit/Rclone/Run.hs` | Rclone command wrapper; `remoteFilePath` for trailing-slash-safe remote path construction |
 | `Bit/Rclone/Sync.hs` | Shared action derivation + working-tree sync |

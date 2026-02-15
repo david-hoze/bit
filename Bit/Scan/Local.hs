@@ -54,6 +54,23 @@ import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Bit.IO.Concurrency (Concurrency(..), ioConcurrency)
 
+-- | Resolve the .bit root directory from a working directory root.
+-- Follows bitlink files (e.g. "bitdir: /abs/path") for separated git dirs.
+resolveBitRoot :: FilePath -> IO (Maybe FilePath)
+resolveBitRoot root = do
+    let dotBit = root </> ".bit"
+    isDir <- doesDirectoryExist dotBit
+    if isDir then pure (Just dotBit)
+    else do
+        isFile <- doesFileExist dotBit
+        if isFile then do
+            bs <- BS.readFile dotBit
+            let content = either (const "") T.unpack (decodeUtf8' bs)
+            case lines content of
+                (firstLine:_) -> pure (Just (drop 8 (filter (/= '\r') firstLine)))
+                [] -> pure Nothing
+        else pure Nothing
+
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]
 binaryExtensions = [".mp4", ".zip", ".bin", ".exe", ".dll", ".so", ".dylib", ".jpg", ".jpeg", ".png", ".gif", ".pdf", ".gz", ".bz2", ".xz", ".tar", ".rar", ".7z", ".iso", ".img", ".dmg", ".deb", ".rpm", ".msi"]
@@ -194,25 +211,30 @@ parseCacheEntry content = do
 -- | Load cache entry for a file, returns Nothing if missing or malformed
 loadCacheEntry :: FilePath -> FilePath -> IO (Maybe CacheEntry)
 loadCacheEntry root relPath = do
-  let cachePath = root </> ".bit" </> "cache" </> relPath
-  exists <- doesFileExist cachePath
-  if not exists
-    then pure Nothing
-    else do
-      -- Use strict bytestring reading to avoid lazy file handle issues on Windows
-      bs <- BS.readFile cachePath
-      pure $ either (const Nothing) (parseCacheEntry . T.unpack) (decodeUtf8' bs)
+  mBitRoot <- resolveBitRoot root
+  case mBitRoot of
+    Nothing -> pure Nothing
+    Just bitRoot -> do
+      let cachePath = bitRoot </> "cache" </> relPath
+      exists <- doesFileExist cachePath
+      if not exists
+        then pure Nothing
+        else do
+          -- Use strict bytestring reading to avoid lazy file handle issues on Windows
+          bs <- BS.readFile cachePath
+          pure $ either (const Nothing) (parseCacheEntry . T.unpack) (decodeUtf8' bs)
 
 -- | Save cache entry for a file (non-atomic write, cache corruption is acceptable)
 saveCacheEntry :: FilePath -> FilePath -> CacheEntry -> IO ()
 saveCacheEntry root relPath entry = do
-  let bitRoot = root </> ".bit"
-  bitExists <- doesDirectoryExist bitRoot
-  when bitExists $ do
-    let cachePath = bitRoot </> "cache" </> relPath
-    createDirectoryIfMissing True (takeDirectory cachePath)
-    -- Use strict bytestring writing to ensure file handle is closed immediately
-    BS.writeFile cachePath (encodeUtf8 (T.pack (serializeCacheEntry entry)))
+  mBitRoot <- resolveBitRoot root
+  case mBitRoot of
+    Nothing -> pure ()
+    Just bitRoot -> do
+      let cachePath = bitRoot </> "cache" </> relPath
+      createDirectoryIfMissing True (takeDirectory cachePath)
+      -- Use strict bytestring writing to ensure file handle is closed immediately
+      BS.writeFile cachePath (encodeUtf8 (T.pack (serializeCacheEntry entry)))
 
 -- | Normalize a file path for consistent comparison (forward slashes, trimmed)
 normalizePath :: FilePath -> FilePath
@@ -236,7 +258,10 @@ matchesPattern pattern path =
 -- Reads patterns from .bit/index/.gitignore and matches against paths.
 checkIgnoredFiles :: FilePath -> [FilePath] -> IO (Set.Set FilePath)
 checkIgnoredFiles root paths = do
-    let gitignorePath = root </> ".bit" </> "index" </> ".gitignore"
+    mBitRoot <- resolveBitRoot root
+    let gitignorePath = case mBitRoot of
+            Just bitRoot -> bitRoot </> "index" </> ".gitignore"
+            Nothing      -> root </> ".bit" </> "index" </> ".gitignore"
     exists <- doesFileExist gitignorePath
     if not exists
         then pure Set.empty
@@ -359,62 +384,62 @@ measureThroughput filePath = do
 -- | Main scan function. Always hashes all files (no bandwidth abort).
 scanWorkingDir :: FilePath -> Concurrency -> IO [FileEntry]
 scanWorkingDir root concurrencyMode = do
-    let bitRoot = root </> ".bit"
-    bitExists <- doesDirectoryExist bitRoot
-    if not bitExists then pure []
-    else do
-      config <- ConfigFile.readTextConfig
-      allPaths <- collectScannedPaths root
+    mBitRoot <- resolveBitRoot root
+    case mBitRoot of
+      Nothing -> pure []
+      Just _bitRoot -> do
+        config <- ConfigFile.readTextConfig
+        allPaths <- collectScannedPaths root
 
-      let filePaths = [p | ScannedFile p <- allPaths]
-      ignoredSet <- checkIgnoredFiles root filePaths
+        let filePaths = [p | ScannedFile p <- allPaths]
+        ignoredSet <- checkIgnoredFiles root filePaths
 
-      let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
-          filesToHash = [(rel, root </> rel) | ScannedFile rel <- allPaths
-                                             , not (Set.member (normalizePath rel) ignoredSet)]
+        let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
+            filesToHash = [(rel, root </> rel) | ScannedFile rel <- allPaths
+                                               , not (Set.member (normalizePath rel) ignoredSet)]
 
-      let total = length filesToHash
-      counter <- newIORef (0 :: Int)
+        let total = length filesToHash
+        counter <- newIORef (0 :: Int)
 
-      concurrency <- case concurrencyMode of
-        Sequential  -> pure 1
-        Parallel 0  -> ioConcurrency
-        Parallel n  -> pure n
+        concurrency <- case concurrencyMode of
+          Sequential  -> pure 1
+          Parallel 0  -> ioConcurrency
+          Parallel n  -> pure n
 
-      let hashWithProgress (rel, fullPath) = do
-              size <- getFileSize fullPath
-              mtime <- getModificationTime fullPath
-              let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
-              cached <- loadCacheEntry root rel
-              case cached of
-                Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
-                  atomicModifyIORef' counter (\n -> (n + 1, ()))
-                  pure $ FileEntry
-                      { path = Path rel
-                      , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ceContentType ce }
-                      }
-                _ -> do
-                  (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config Nothing
-                  saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
-                  atomicModifyIORef' counter (\n -> (n + 1, ()))
-                  pure $ FileEntry
-                      { path = Path rel
-                      , kind = File { fHash = h, fSize = fromIntegral size, fContentType = contentType }
-                      }
+        let hashWithProgress (rel, fullPath) = do
+                size <- getFileSize fullPath
+                mtime <- getModificationTime fullPath
+                let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+                cached <- loadCacheEntry root rel
+                case cached of
+                  Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
+                    atomicModifyIORef' counter (\n -> (n + 1, ()))
+                    pure $ FileEntry
+                        { path = Path rel
+                        , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ceContentType ce }
+                        }
+                  _ -> do
+                    (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config Nothing
+                    saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
+                    atomicModifyIORef' counter (\n -> (n + 1, ()))
+                    pure $ FileEntry
+                        { path = Path rel
+                        , kind = File { fHash = h, fSize = fromIntegral size, fContentType = contentType }
+                        }
 
-      let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress filesToHash
+        let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress filesToHash
 
-      fileEntries <- if total > 50
-          then do
-              reporterThread <- forkIO (progressLoop counter total)
-              finally hashingAction $ do
-                  killThread reporterThread
-                  clearProgress
-                  hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
-          else
-              hashingAction
+        fileEntries <- if total > 50
+            then do
+                reporterThread <- forkIO (progressLoop counter total)
+                finally hashingAction $ do
+                    killThread reporterThread
+                    clearProgress
+                    hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
+            else
+                hashingAction
 
-      pure $ dirEntries ++ fileEntries
+        pure $ dirEntries ++ fileEntries
 
 -- | Scan with bandwidth detection. Measures storage throughput before committing
 -- to hash all files. If estimated time exceeds 60 seconds, prompts the user.
@@ -422,190 +447,191 @@ scanWorkingDir root concurrencyMode = do
 -- The Concurrency parameter controls hashing parallelism (Sequential = 1 thread).
 scanWorkingDirWithAbort :: FilePath -> Concurrency -> Maybe (ScanPhase -> IO ()) -> IO ScanResult
 scanWorkingDirWithAbort root concurrencyMode mCallback = do
-    let bitRoot = root </> ".bit"
-    bitExists <- doesDirectoryExist bitRoot
-    if not bitExists then pure (ScanResult [] [])
-    else do
-      config <- ConfigFile.readTextConfig
-      allPaths <- collectScannedPaths root
+    mBitRoot <- resolveBitRoot root
+    case mBitRoot of
+      Nothing -> pure (ScanResult [] [])
+      Just _bitRoot -> do
+        config <- ConfigFile.readTextConfig
+        allPaths <- collectScannedPaths root
 
-      let filePaths = [p | ScannedFile p <- allPaths]
-      ignoredSet <- checkIgnoredFiles root filePaths
+        let filePaths = [p | ScannedFile p <- allPaths]
+        ignoredSet <- checkIgnoredFiles root filePaths
 
-      let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
-          filesToProcess = [(rel, root </> rel) | ScannedFile rel <- allPaths
-                                                , not (Set.member (normalizePath rel) ignoredSet)]
+        let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
+            filesToProcess = [(rel, root </> rel) | ScannedFile rel <- allPaths
+                                                  , not (Set.member (normalizePath rel) ignoredSet)]
 
-      -- Report collection phase
-      traverse_ (\cb -> cb (PhaseCollected (length filesToProcess))) mCallback
+        -- Report collection phase
+        traverse_ (\cb -> cb (PhaseCollected (length filesToProcess))) mCallback
 
-      -- Phase 1: stat all files and check cache
-      statResults <- mapM (statAndCheckCache root) filesToProcess
-      let cacheHits    = [e | Right e <- statResults]
-          needsHashing = [fth | Left fth <- statResults]
-          totalBytesNeeded = sum [fthSize fth | fth <- needsHashing]
+        -- Phase 1: stat all files and check cache
+        statResults <- mapM (statAndCheckCache root) filesToProcess
+        let cacheHits    = [e | Right e <- statResults]
+            needsHashing = [fth | Left fth <- statResults]
+            totalBytesNeeded = sum [fthSize fth | fth <- needsHashing]
 
-      -- Report cache result phase
-      if null needsHashing
-          then traverse_ (\cb -> cb (PhaseAllCached (length cacheHits))) mCallback
-          else traverse_ (\cb -> cb (PhaseCacheResult (length cacheHits) (length needsHashing) totalBytesNeeded)) mCallback
+        -- Report cache result phase
+        if null needsHashing
+            then traverse_ (\cb -> cb (PhaseAllCached (length cacheHits))) mCallback
+            else traverse_ (\cb -> cb (PhaseCacheResult (length cacheHits) (length needsHashing) totalBytesNeeded)) mCallback
 
-      -- Phase 2: bandwidth check — only if significant work remains
-      shouldSkip <- if null needsHashing || totalBytesNeeded < 20 * 1024 * 1024
-          then pure False
-          else do
-              throughput <- measureThroughput (fthFull (head needsHashing))
-              let estimatedSecs = fromIntegral totalBytesNeeded / throughput
-              if estimatedSecs <= 60
-                  then pure False
-                  else do
-                      let mins = estimatedSecs / 60
-                          speedStr = formatBytes (round throughput :: Integer) ++ "/s"
-                      hPutStrLn stderr $ "Hashing is slow (" ++ speedStr
-                          ++ "). Estimated: " ++ show (ceiling mins :: Int)
-                          ++ " min for " ++ show (length needsHashing) ++ " files."
-                      hPutStrLn stderr "Size-only verification covers most corruption cases."
-                      hPutStr stderr "Continue full hashing? [y/N] "
-                      hFlush stderr
-                      isTTY <- hIsTerminalDevice stdin
-                      if isTTY
+        -- Phase 2: bandwidth check — only if significant work remains
+        shouldSkip <- if null needsHashing || totalBytesNeeded < 20 * 1024 * 1024
+            then pure False
+            else do
+                throughput <- measureThroughput (fthFull (head needsHashing))
+                let estimatedSecs = fromIntegral totalBytesNeeded / throughput
+                if estimatedSecs <= 60
+                    then pure False
+                    else do
+                        let mins = estimatedSecs / 60
+                            speedStr = formatBytes (round throughput :: Integer) ++ "/s"
+                        hPutStrLn stderr $ "Hashing is slow (" ++ speedStr
+                            ++ "). Estimated: " ++ show (ceiling mins :: Int)
+                            ++ " min for " ++ show (length needsHashing) ++ " files."
+                        hPutStrLn stderr "Size-only verification covers most corruption cases."
+                        hPutStr stderr "Continue full hashing? [y/N] "
+                        hFlush stderr
+                        isTTY <- hIsTerminalDevice stdin
+                        if isTTY
+                            then do
+                                response <- getLine
+                                pure (response /= "y" && response /= "Y")
+                            else pure True  -- non-interactive: skip
+
+        if shouldSkip
+            then pure $ ScanResult
+                { srEntries = dirEntries ++ cacheHits
+                , srSkipped = [(fthRel fth, fthSize fth) | fth <- needsHashing]
+                }
+            else do
+                -- Phase 3: hash remaining files with progress
+                let totalNewFiles = length needsHashing
+                counter <- newIORef (0 :: Int)
+                bytesHashedRef <- newIORef (0 :: Integer)
+                concurrency <- case concurrencyMode of
+                    Sequential  -> pure 1
+                    Parallel 0  -> ioConcurrency
+                    Parallel n  -> pure n
+
+                let hashWithProgress fth = do
+                        entry <- hashFileToEntry root config (Just bytesHashedRef) fth
+                        atomicModifyIORef' counter (\n -> (n + 1, ()))
+                        pure entry
+
+                let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress needsHashing
+
+                hashedEntries <- if totalNewFiles > 0
+                    then do
+                        isTTY <- hIsTerminalDevice stderr
+                        hashStart <- getCurrentTime
+                        if isTTY
                           then do
-                              response <- getLine
-                              pure (response /= "y" && response /= "Y")
-                          else pure True  -- non-interactive: skip
+                            reporterThread <- forkIO (hashProgressLoop counter bytesHashedRef totalNewFiles totalBytesNeeded)
+                            finally hashingAction $ do
+                                killThread reporterThread
+                                clearProgress
+                                actualCount <- readIORef counter
+                                actualBytes <- readIORef bytesHashedRef
+                                hashEnd <- getCurrentTime
+                                let elapsed = realToFrac (diffUTCTime hashEnd hashStart) :: Double
+                                hPutStrLn stderr $ "Hashed " ++ show actualCount
+                                    ++ " files (" ++ formatBytes actualBytes
+                                    ++ ") in " ++ formatElapsed elapsed ++ "."
+                          else do
+                            result <- hashingAction
+                            actualCount <- readIORef counter
+                            actualBytes <- readIORef bytesHashedRef
+                            hashEnd <- getCurrentTime
+                            let elapsed = realToFrac (diffUTCTime hashEnd hashStart) :: Double
+                            hPutStrLn stderr $ "Hashed " ++ show actualCount
+                                ++ " files (" ++ formatBytes actualBytes
+                                ++ ") in " ++ formatElapsed elapsed ++ "."
+                            pure result
+                    else hashingAction
 
-      if shouldSkip
-          then pure $ ScanResult
-              { srEntries = dirEntries ++ cacheHits
-              , srSkipped = [(fthRel fth, fthSize fth) | fth <- needsHashing]
-              }
-          else do
-              -- Phase 3: hash remaining files with progress
-              let totalNewFiles = length needsHashing
-              counter <- newIORef (0 :: Int)
-              bytesHashedRef <- newIORef (0 :: Integer)
-              concurrency <- case concurrencyMode of
-                  Sequential  -> pure 1
-                  Parallel 0  -> ioConcurrency
-                  Parallel n  -> pure n
-
-              let hashWithProgress fth = do
-                      entry <- hashFileToEntry root config (Just bytesHashedRef) fth
-                      atomicModifyIORef' counter (\n -> (n + 1, ()))
-                      pure entry
-
-              let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress needsHashing
-
-              hashedEntries <- if totalNewFiles > 0
-                  then do
-                      isTTY <- hIsTerminalDevice stderr
-                      hashStart <- getCurrentTime
-                      if isTTY
-                        then do
-                          reporterThread <- forkIO (hashProgressLoop counter bytesHashedRef totalNewFiles totalBytesNeeded)
-                          finally hashingAction $ do
-                              killThread reporterThread
-                              clearProgress
-                              actualCount <- readIORef counter
-                              actualBytes <- readIORef bytesHashedRef
-                              hashEnd <- getCurrentTime
-                              let elapsed = realToFrac (diffUTCTime hashEnd hashStart) :: Double
-                              hPutStrLn stderr $ "Hashed " ++ show actualCount
-                                  ++ " files (" ++ formatBytes actualBytes
-                                  ++ ") in " ++ formatElapsed elapsed ++ "."
-                        else do
-                          result <- hashingAction
-                          actualCount <- readIORef counter
-                          actualBytes <- readIORef bytesHashedRef
-                          hashEnd <- getCurrentTime
-                          let elapsed = realToFrac (diffUTCTime hashEnd hashStart) :: Double
-                          hPutStrLn stderr $ "Hashed " ++ show actualCount
-                              ++ " files (" ++ formatBytes actualBytes
-                              ++ ") in " ++ formatElapsed elapsed ++ "."
-                          pure result
-                  else hashingAction
-
-              pure $ ScanResult
-                  { srEntries = dirEntries ++ cacheHits ++ hashedEntries
-                  , srSkipped = []
-                  }
+                pure $ ScanResult
+                    { srEntries = dirEntries ++ cacheHits ++ hashedEntries
+                    , srSkipped = []
+                    }
 
 writeMetadataFiles :: FilePath -> [FileEntry] -> IO ()
 writeMetadataFiles root entries = do
-    let bitRoot = root </> ".bit"
-    bitExists <- doesDirectoryExist bitRoot
-    when bitExists $ do
-      let metaRoot = bitRoot </> "index"
-      createDirectoryIfMissing True metaRoot
+    mBitRoot <- resolveBitRoot root
+    case mBitRoot of
+      Nothing -> pure ()
+      Just bitRoot -> do
+        let metaRoot = bitRoot </> "index"
+        createDirectoryIfMissing True metaRoot
 
-      -- Separate directories from files
-      let (dirs, files) = partitionEntries entries
-    
-      -- First pass: create all directories sequentially (avoid race conditions)
-      forM_ dirs $ \dirPath -> do
-        let fullPath = metaRoot </> dirPath
-        createDirectoryIfMissing True fullPath
-    
-      -- Second pass: create parent directories for files
-      let parentDirs = Set.fromList [takeDirectory (unPath (path e)) | e <- files]
-      forM_ parentDirs $ \dirPath -> do
-        let fullPath = metaRoot </> dirPath
-        createDirectoryIfMissing True fullPath
-    
-      -- Setup progress tracking
-      let total = length files
-      isTTY <- hIsTerminalDevice stderr
-      counter <- newIORef (0 :: Int)
-      skipped <- newIORef (0 :: Int)
-    
-      -- Start progress reporter thread if we're in a TTY and have enough files
-      let shouldShowProgress = isTTY && total > 10
-      reporterThread <- if shouldShowProgress
-          then Just <$> forkIO (writeProgressLoop counter skipped total)
-          else pure Nothing
-    
-      -- Third pass: write files in parallel (bounded concurrency)
-      caps <- getNumCapabilities
-      let concurrency = max 4 (caps * 4)
-    
-      let writeWithProgress entry = do
-              let metaPath = metaRoot </> unPath (path entry)
-              case kind entry of
-                File { fHash, fSize, fContentType } -> do
-                  -- Check if file is unchanged before writing
-                  needsWrite <- shouldWriteFile root metaPath entry fHash fSize fContentType
-                  if needsWrite
-                    then do
-                      case fContentType of
-                        TextContent -> do
-                          -- For text files, copy the actual content directly
-                          let actualPath = root </> unPath (path entry)
-                          copyFileWithMetadata actualPath metaPath
-                        BinaryContent -> do
-                          -- For binary files, write metadata (hash + size). Spec: raw hash value; atomic write.
-                          atomicWriteFileStr metaPath $
-                            serializeMetadata (MetaContent fHash fSize)
-                      atomicModifyIORef' counter (\n -> (n + 1, ()))
-                    else do
-                      atomicModifyIORef' skipped (\n -> (n + 1, ()))
-                      atomicModifyIORef' counter (\n -> (n + 1, ()))
-                Directory -> pure ()  -- Already handled in first pass
-                Symlink _ -> pure ()  -- Symlinks handled separately
-    
-      finally
-          (void $ mapConcurrentlyBounded concurrency writeWithProgress files)
-          (do
-              -- Clean up: kill reporter thread and finalize progress line
-              traverse_ killThread reporterThread
-              when shouldShowProgress $ do
-                  n <- readIORef counter
-                  s <- readIORef skipped
-                  clearProgress
-                  let written = n - s
-                  hPutStr stderr $ "Wrote " ++ show written ++ " metadata files"
-                  when (s > 0) $ hPutStr stderr $ " (skipped " ++ show s ++ " unchanged)"
-                  hPutStrLn stderr "."
-          )
+        -- Separate directories from files
+        let (dirs, files) = partitionEntries entries
+
+        -- First pass: create all directories sequentially (avoid race conditions)
+        forM_ dirs $ \dirPath -> do
+          let fullPath = metaRoot </> dirPath
+          createDirectoryIfMissing True fullPath
+
+        -- Second pass: create parent directories for files
+        let parentDirs = Set.fromList [takeDirectory (unPath (path e)) | e <- files]
+        forM_ parentDirs $ \dirPath -> do
+          let fullPath = metaRoot </> dirPath
+          createDirectoryIfMissing True fullPath
+
+        -- Setup progress tracking
+        let total = length files
+        isTTY <- hIsTerminalDevice stderr
+        counter <- newIORef (0 :: Int)
+        skipped <- newIORef (0 :: Int)
+
+        -- Start progress reporter thread if we're in a TTY and have enough files
+        let shouldShowProgress = isTTY && total > 10
+        reporterThread <- if shouldShowProgress
+            then Just <$> forkIO (writeProgressLoop counter skipped total)
+            else pure Nothing
+
+        -- Third pass: write files in parallel (bounded concurrency)
+        caps <- getNumCapabilities
+        let concurrency = max 4 (caps * 4)
+
+        let writeWithProgress entry = do
+                let metaPath = metaRoot </> unPath (path entry)
+                case kind entry of
+                  File { fHash, fSize, fContentType } -> do
+                    -- Check if file is unchanged before writing
+                    needsWrite <- shouldWriteFile root metaPath entry fHash fSize fContentType
+                    if needsWrite
+                      then do
+                        case fContentType of
+                          TextContent -> do
+                            -- For text files, copy the actual content directly
+                            let actualPath = root </> unPath (path entry)
+                            copyFileWithMetadata actualPath metaPath
+                          BinaryContent -> do
+                            -- For binary files, write metadata (hash + size). Spec: raw hash value; atomic write.
+                            atomicWriteFileStr metaPath $
+                              serializeMetadata (MetaContent fHash fSize)
+                        atomicModifyIORef' counter (\n -> (n + 1, ()))
+                      else do
+                        atomicModifyIORef' skipped (\n -> (n + 1, ()))
+                        atomicModifyIORef' counter (\n -> (n + 1, ()))
+                  Directory -> pure ()  -- Already handled in first pass
+                  Symlink _ -> pure ()  -- Symlinks handled separately
+
+        finally
+            (void $ mapConcurrentlyBounded concurrency writeWithProgress files)
+            (do
+                -- Clean up: kill reporter thread and finalize progress line
+                traverse_ killThread reporterThread
+                when shouldShowProgress $ do
+                    n <- readIORef counter
+                    s <- readIORef skipped
+                    clearProgress
+                    let written = n - s
+                    hPutStr stderr $ "Wrote " ++ show written ++ " metadata files"
+                    when (s > 0) $ hPutStr stderr $ " (skipped " ++ show s ++ " unchanged)"
+                    hPutStrLn stderr "."
+            )
   where
     partitionEntries :: [FileEntry] -> ([FilePath], [FileEntry])
     partitionEntries es =

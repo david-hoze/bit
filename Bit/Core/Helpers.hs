@@ -58,7 +58,6 @@ import Control.Monad.IO.Class (liftIO)
 import Bit.Utils (toPosix, atomicWriteFileStr, trimGitOutput, formatBytes)
 import qualified Bit.Scan.Verify as Verify
 import qualified Bit.Scan.Local as Scan
-import Bit.Config.Paths (bitIndexPath)
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -260,7 +259,21 @@ restoreCheckoutPaths args =
 
 expandPathsToFiles :: FilePath -> [String] -> IO [FilePath]
 expandPathsToFiles cwd paths = do
-    let indexRoot = cwd </> bitIndexPath
+    -- Resolve bitDir to get correct index path (supports bitlinks)
+    let dotBit = cwd </> ".bit"
+    bitDir <- do
+        isDir <- doesDirectoryExist dotBit
+        if isDir then pure dotBit
+        else do
+            isFile <- doesFileExist dotBit
+            if isFile then do
+                bs <- BS.readFile dotBit
+                let content = either (const "") T.unpack (decodeUtf8' bs)
+                case lines content of
+                    (firstLine:_) -> pure (drop 8 (filter (/= '\r') firstLine))
+                    [] -> pure dotBit
+            else pure dotBit
+    let indexRoot = bitDir </> "index"
     allFiles <- Scan.listMetadataPaths indexRoot
     pure $ concatMap (\p ->
         if p == "." || p == "./"

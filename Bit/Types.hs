@@ -66,6 +66,7 @@ data ForceMode
 
 data BitEnv = BitEnv
     { envCwd            :: FilePath
+    , envBitDir         :: FilePath    -- ^ Resolved .bit directory (absolute path; follows bitlinks)
     , envPrefix         :: FilePath    -- ^ Relative path from repo root to user's original cwd ("" at root)
     , envRemote         :: Maybe Remote
     , envForceMode      :: ForceMode

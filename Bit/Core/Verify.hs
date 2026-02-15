@@ -32,7 +32,7 @@ import Bit.Types (BitM, BitEnv(..), Path(..), Hash(..), HashAlgo(..), hashToText
 import Bit.IO.Concurrency (Concurrency)
 import qualified Bit.Scan.Verify as Verify
 import qualified Bit.Scan.Fsck as Fsck
-import Bit.Config.Paths (bundleForRemote, bitIndexPath, bitRemotesDir)
+import Bit.Config.Paths (bundleForRemote, bitIndexPath)
 import Bit.Progress.Report (reportProgress, clearProgress)
 import Bit.Utils (toPosix, atomicWriteFileStr, formatBytes)
 import Bit.Config.Metadata (MetaContent(..), serializeMetadata)
@@ -57,14 +57,16 @@ data RepairMode = PromptRepair | AutoRepair
 verify :: VerifyTarget -> RepairMode -> Concurrency -> BitM ()
 verify VerifyLocal repairMode concurrency = do
     cwd <- asks envCwd
-    liftIO $ verifyFilesystem cwd cwd Nothing repairMode concurrency
+    bitDir <- asks envBitDir
+    liftIO $ verifyFilesystem cwd bitDir cwd Nothing repairMode concurrency
 
 verify (VerifyRemotePath remote) repairMode concurrency = do
     cwd <- asks envCwd
+    bitDir <- asks envBitDir
     isFs <- isFilesystemRemote remote
     if isFs
-        then liftIO $ verifyFilesystem cwd (remoteUrl remote) (Just remote) repairMode concurrency
-        else liftIO $ verifyCloud cwd remote repairMode concurrency
+        then liftIO $ verifyFilesystem cwd bitDir (remoteUrl remote) (Just remote) repairMode concurrency
+        else liftIO $ verifyCloud cwd bitDir remote repairMode concurrency
 
 -- | Repair = verify with AutoRepair.
 repair :: VerifyTarget -> Concurrency -> BitM ()
@@ -78,8 +80,8 @@ repair target = verify target AutoRepair
 -- cwd: the bit repository root (for loading repair sources).
 -- targetPath: the path to scan (cwd for local, remoteUrl for remote).
 -- mTargetRemote: Nothing for local target, Just remote for remote target.
-verifyFilesystem :: FilePath -> FilePath -> Maybe Remote -> RepairMode -> Concurrency -> IO ()
-verifyFilesystem cwd targetPath mTargetRemote repairMode concurrency = do
+verifyFilesystem :: FilePath -> FilePath -> FilePath -> Maybe Remote -> RepairMode -> Concurrency -> IO ()
+verifyFilesystem cwd bitDir targetPath mTargetRemote repairMode concurrency = do
     let label = maybe "local" (\r -> "remote '" ++ remoteName r ++ "'") mTargetRemote
     putStrLn $ "Verifying " ++ label ++ " files..."
 
@@ -100,8 +102,9 @@ verifyFilesystem cwd targetPath mTargetRemote repairMode concurrency = do
     printVerifyResultWithSkipped result skipped
 
     -- Repair flow
-    let loadMeta = Verify.loadCommittedBinaryMetadata (targetPath </> bitIndexPath)
-        loadTextPaths = Verify.loadCommittedTextPaths (targetPath </> bitIndexPath)
+    let indexDir = bitDir </> "index"
+        loadMeta = Verify.loadCommittedBinaryMetadata indexDir
+        loadTextPaths = Verify.loadCommittedTextPaths indexDir
     unless (null result.vrIssues) $
         repairFlow cwd loadMeta loadTextPaths mTargetRemote result.vrIssues repairMode concurrency
 
@@ -110,8 +113,8 @@ verifyFilesystem cwd targetPath mTargetRemote repairMode concurrency = do
 -- ============================================================================
 
 -- | Verify a cloud remote using the fetched bundle.
-verifyCloud :: FilePath -> Remote -> RepairMode -> Concurrency -> IO ()
-verifyCloud cwd remote repairMode concurrency = do
+verifyCloud :: FilePath -> FilePath -> Remote -> RepairMode -> Concurrency -> IO ()
+verifyCloud cwd _bitDir remote repairMode concurrency = do
     putStrLn "Verifying remote files..."
 
     entries <- Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
@@ -285,8 +288,8 @@ repairTextFiles cwd (Just remote) paths = do
 -- | Restore text files locally: git restore in index repo, then copy to working dir.
 repairTextLocal :: FilePath -> [Path] -> IO [RepairResult]
 repairTextLocal cwd paths = do
-    let indexDir = cwd </> bitIndexPath
-        pathStrs = map unPath paths
+    indexDir <- Git.getIndexPath
+    let pathStrs = map unPath paths
     (code, _, err) <- Git.runGitAt indexDir (["restore", "--"] ++ pathStrs)
     case code of
         ExitSuccess -> forM paths $ \p -> do
@@ -301,7 +304,7 @@ repairTextLocal cwd paths = do
 repairTextFilesystem :: Remote -> [Path] -> IO [RepairResult]
 repairTextFilesystem remote paths = do
     let remoteDir = remoteUrl remote
-        indexDir = remoteDir </> bitIndexPath
+        indexDir = remoteDir </> ".bit" </> "index"
         pathStrs = map unPath paths
     (code, _, err) <- Git.runGitAt indexDir (["restore", "--"] ++ pathStrs)
     case code of
@@ -344,12 +347,13 @@ loadRepairSources cwd excludeName includeLocal = do
     -- Include local metadata if requested
     localSources <- if includeLocal
         then do
-            meta <- Verify.loadCommittedBinaryMetadata (cwd </> bitIndexPath)
+            indexDir <- Git.getIndexPath
+            meta <- Verify.loadCommittedBinaryMetadata indexDir
             pure [LocalSource cwd meta | not (null meta)]
         else pure []
 
     -- List all configured remotes
-    let remotesDir = cwd </> bitRemotesDir
+    let remotesDir = cwd </> ".bit" </> "remotes"
     dirExists <- Dir.doesDirectoryExist remotesDir
     remoteNames <- if dirExists
         then filter (\n -> Just n /= excludeName) <$> Dir.listDirectory remotesDir
@@ -364,7 +368,7 @@ loadRepairSources cwd excludeName includeLocal = do
                 mType <- Device.readRemoteType cwd name
                 let isFs = maybe False Device.isFilesystemType mType
                 meta <- if isFs
-                    then Verify.loadCommittedBinaryMetadata (remoteUrl remote </> bitIndexPath)
+                    then Verify.loadCommittedBinaryMetadata (remoteUrl remote </> ".bit" </> "index")
                     else do
                         entries <- Verify.loadMetadataFromBundle (bundleForRemote name)
                         pure (Verify.binaryEntries entries)
@@ -494,8 +498,9 @@ repairFileProgress bytesRef totalSize progressLabel = go
 
 -- | Restore the local .bit/index/ metadata file after repair.
 restoreLocalMetadata :: FilePath -> Path -> Hash 'MD5 -> Integer -> IO ()
-restoreLocalMetadata cwd destPath expectedHash expectedSize = do
-    let metaPath = cwd </> bitIndexPath </> unPath destPath
+restoreLocalMetadata _cwd destPath expectedHash expectedSize = do
+    indexDir <- Git.getIndexPath
+    let metaPath = indexDir </> unPath destPath
     Dir.createDirectoryIfMissing True (takeDirectory metaPath)
     atomicWriteFileStr metaPath (serializeMetadata (MetaContent expectedHash expectedSize))
 

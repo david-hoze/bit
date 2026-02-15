@@ -19,7 +19,7 @@ import System.IO (hPutStrLn, stderr)
 import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
 import qualified Bit.Git.Run as Git
-import Data.List (dropWhileEnd, isPrefixOf)
+import Data.List (dropWhileEnd, isPrefixOf, stripPrefix)
 import qualified System.Info
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
@@ -53,12 +53,15 @@ parseInitArgs :: [String] -> (Bit.InitOptions, Maybe FilePath)
 parseInitArgs = go Bit.defaultInitOptions Nothing
   where
     consumesNext f = f `elem`
-        ["--template", "--separate-git-dir", "--object-format", "--ref-format"
+        ["--template", "--object-format", "--ref-format"
         , "-b", "--initial-branch"]
     go opts dir [] = (opts, dir)
     go opts dir ("-q":rest) = go opts { Bit.initQuiet = True } dir rest
     go opts dir ("--quiet":rest) = go opts { Bit.initQuiet = True } dir rest
     go opts dir ("--bare":rest) = go opts { Bit.initBare = True, Bit.initGitFlags = Bit.initGitFlags opts ++ ["--bare"] } dir rest
+    go opts dir ("--separate-git-dir":v:rest) = go opts { Bit.initSeparateGitDir = Just v } dir rest
+    go opts dir (f:rest)
+        | Just v <- stripPrefix "--separate-git-dir=" f = go opts { Bit.initSeparateGitDir = Just v } dir rest
     go opts dir (f:v:rest)
         | consumesNext f = go opts { Bit.initGitFlags = Bit.initGitFlags opts ++ [f, v] } dir rest
     go opts dir (f:rest)
@@ -102,9 +105,13 @@ isGitGlobalFlag _ = False
 -- otherwise pass through to git unchanged.
 handleDashC :: FilePath -> [String] -> IO ()
 handleDashC dir rest = do
-    hasBit <- Dir.doesDirectoryExist (dir </> ".bit")
-    let target = if hasBit then dir </> ".bit" </> "index" else dir
-    Git.runGitRawAt target rest >>= exitWith
+    hasBitDir <- Dir.doesDirectoryExist (dir </> ".bit")
+    hasBitLink <- Dir.doesFileExist (dir </> ".bit")
+    if hasBitDir || hasBitLink
+        then do
+            bitDir <- resolveBitDir dir
+            Git.runGitRawAt (bitDir </> "index") rest >>= exitWith
+        else Git.runGitRawAt dir rest >>= exitWith
 
 -- | Commands that bit handles natively (not aliases).
 isKnownCommand :: String -> Bool
@@ -180,6 +187,9 @@ runRemoteCommand remoteName args = do
             Just (NormalRoot r) -> r
             _                   -> origCwd
     Dir.setCurrentDirectory cwd
+    -- Resolve bitDir and set index path for git commands
+    remoteBitDir' <- resolveBitDir cwd
+    Git.setIndexPath (remoteBitDir' </> "index")
 
     mRemote <- resolveRemote cwd remoteName
     case mRemote of
@@ -191,7 +201,8 @@ runRemoteCommand remoteName args = do
                 concurrency = if isSequential then Sequential else Parallel 0
                 cmd = filter (/= "--sequential") args
                 runVerifyCmd repairMode = do
-                    let env = BitEnv cwd "" (Just remote) NoForce
+                    remoteBitDir <- resolveBitDir cwd
+                    let env = BitEnv cwd remoteBitDir "" (Just remote) NoForce
                     runBitM env $ Bit.verify (Bit.VerifyRemotePath remote) repairMode concurrency
                 rejectFilesystem = do
                     mType <- Device.readRemoteType cwd remoteName
@@ -233,10 +244,10 @@ pushWithUpstream env cwd name = do
     putStrLn $ "branch 'main' set up to track '" ++ name ++ "/main'."
 
 -- | Sync .bitignore to .bit/index/.gitignore with normalization
-syncBitignoreToIndex :: FilePath -> IO ()
-syncBitignoreToIndex cwd = do
+syncBitignoreToIndex :: FilePath -> FilePath -> IO ()
+syncBitignoreToIndex cwd bitDir = do
     let bitignoreSrc = cwd </> ".bitignore"
-        bitignoreDest = cwd </> ".bit" </> "index" </> ".gitignore"
+        bitignoreDest = bitDir </> "index" </> ".gitignore"
     bitignoreExists <- Dir.doesFileExist bitignoreSrc
     if bitignoreExists
         then writeBitignore bitignoreSrc bitignoreDest
@@ -257,6 +268,26 @@ syncBitignoreToIndex cwd = do
     
     trim :: String -> String
     trim = dropWhile (== ' ') . dropWhileEnd (== ' ')
+
+-- | Resolve the .bit directory from a repo root.
+-- For normal repos, .bit is a directory. For separated repos, .bit is a file
+-- (bitlink) containing "bitdir: <path>" pointing to the real bit directory.
+resolveBitDir :: FilePath -> IO FilePath
+resolveBitDir root = do
+    let dotBit = root </> ".bit"
+    isDir <- Dir.doesDirectoryExist dotBit
+    if isDir
+        then pure dotBit
+        else do
+            isFile <- Dir.doesFileExist dotBit
+            if isFile
+                then do
+                    bs <- BS.readFile dotBit
+                    let content = either (const "") T.unpack (decodeUtf8' bs)
+                    case lines content of
+                        (firstLine:_) -> pure (drop 8 (filter (/= '\r') firstLine))
+                        [] -> error "not a bit repository: empty .bit file"
+                else error "not a bit repository"
 
 -- | Extract the command key from args for help lookup.
 -- Handles multi-word commands like "remote add", "merge --continue", etc.
@@ -288,7 +319,8 @@ findBitRoot start = do
   where
     go ceilings dir = do
         hasDotBit <- Dir.doesDirectoryExist (dir </> ".bit")
-        if hasDotBit
+        hasBitLink <- Dir.doesFileExist (dir </> ".bit")
+        if hasDotBit || hasBitLink
             then pure (Just (NormalRoot dir))
             else do
                 hasBitDir <- Dir.doesDirectoryExist (dir </> "bit")
@@ -364,9 +396,15 @@ runCommand args = do
                                    in if rel == "." then "" else rel
             _                   -> ""
 
+    -- Resolve the actual .bit directory (follows bitlinks for --separate-git-dir)
+    bitDir <- if bitExists then resolveBitDir root else pure (root </> ".bit")
+    let indexPath = bitDir </> "index"
+
+    -- Set the global index path for git commands
+    when bitExists $ Git.setIndexPath indexPath
+
     -- For unknown commands, try alias expansion before the repo check.
     -- This allows global aliases to work even without a .bit directory.
-    let indexPath = root </> ".bit" </> "index"
     let mIndexPath = if bitExists then Just indexPath else Nothing
     case cmd of
         (name:rest) | not (isKnownCommand name) -> tryAlias mIndexPath name rest
@@ -381,25 +419,25 @@ runCommand args = do
     when bitExists $
         Dir.setCurrentDirectory root
 
-    -- Ensure .bit/index/<prefix> subdirectory exists for git -C
+    -- Ensure index/<prefix> subdirectory exists for git -C
     when (bitExists && not (null prefix)) $
-        Dir.createDirectoryIfMissing True (root </> ".bit" </> "index" </> prefix)
+        Dir.createDirectoryIfMissing True (indexPath </> prefix)
 
     let cwd = root
 
     -- Lightweight env (no scan) — for fetch, verify, and explicit-remote commands (falls back to "origin")
     let baseEnv = do
             mRemote <- getDefaultRemote cwd
-            pure $ BitEnv cwd prefix mRemote forceMode
+            pure $ BitEnv cwd bitDir prefix mRemote forceMode
 
     -- Strict upstream env — requires branch.main.remote (for push and pull without explicit remote)
     let upstreamEnv = do
             mRemote <- getUpstreamRemote cwd
-            pure $ BitEnv cwd prefix mRemote forceMode
+            pure $ BitEnv cwd bitDir prefix mRemote forceMode
 
     -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
     let scanAndWrite = do
-            syncBitignoreToIndex cwd
+            syncBitignoreToIndex cwd bitDir
             localFiles <- Scan.scanWorkingDir cwd concurrency
             Scan.writeMetadataFiles cwd localFiles
 

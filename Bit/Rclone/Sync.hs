@@ -25,7 +25,7 @@ import Bit.IO.Concurrency (ioConcurrency, mapConcurrentlyBounded)
 import Data.Foldable (traverse_)
 import qualified Bit.Git.Run as Git
 import qualified Bit.Rclone.Run as Transport
-import Bit.Config.Paths (bitIndexPath, bundleForRemote)
+import Bit.Config.Paths (bundleForRemote)
 import Data.List (isPrefixOf)
 import Bit.Utils (toPosix)
 import Bit.Domain.Plan (RcloneAction(..), resolveSwaps)
@@ -175,8 +175,9 @@ safeDeleteWorkFile cwd filePath = do
 -- | True if the path is a text file in the index (content stored in metadata, not hash/size).
 -- Used during pull to avoid re-downloading from rclone when content is already in the bundle.
 isTextFileInIndex :: FilePath -> FilePath -> IO Bool
-isTextFileInIndex localRoot filePath = do
-    let metaPath = localRoot </> bitIndexPath </> filePath
+isTextFileInIndex _localRoot filePath = do
+    indexDir <- Git.getIndexPath
+    let metaPath = indexDir </> filePath
     exists <- Platform.doesFileExist metaPath
     if not exists then pure False
     else do
@@ -187,7 +188,8 @@ isTextFileInIndex localRoot filePath = do
 -- is a text file (content in index). Creates parent dirs as needed.
 copyFromIndexToWorkTree :: FilePath -> FilePath -> IO ()
 copyFromIndexToWorkTree localRoot filePath = do
-    let metaPath = localRoot </> bitIndexPath </> filePath
+    indexDir <- Git.getIndexPath
+    let metaPath = indexDir </> filePath
         workPath = localRoot </> filePath
     createDirectoryIfMissing True (takeDirectory workPath)
     copyFile metaPath workPath

@@ -133,10 +133,11 @@ filesystemFetchHistory _cwd remote = do
 
 -- | Filesystem: pull local metadata into remote's index via git pull --ff-only.
 filesystemPushMetadata :: FilePath -> Remote -> IO ()
-filesystemPushMetadata cwd remote = do
+filesystemPushMetadata _cwd remote = do
     let remotePath = remoteUrl remote
-        localIndexGit = cwd </> ".bit" </> "index" </> ".git"
         remoteIndex = remotePath </> ".bit" </> "index"
+    localIndexPath <- Git.getIndexPath
+    let localIndexGit = localIndexPath </> ".git"
     (code, _, err) <- Git.runGitAt remoteIndex
         ["pull", "--ff-only", localIndexGit, "main"]
     when (code /= ExitSuccess) $ do

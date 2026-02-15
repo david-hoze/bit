@@ -39,7 +39,7 @@ import Bit.Config.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, h
 import qualified Bit.Scan.Remote as Remote.Scan
 import qualified Bit.Remote
 import qualified Bit.Rclone.Run as Transport
-import Bit.Config.Paths (bundleForRemote, bitIndexPath, bundleCwdPath, fromCwdPath, BundleName)
+import Bit.Config.Paths (bundleForRemote, bundleCwdPath, fromCwdPath, BundleName)
 -- System.Process no longer needed: all git calls go through Git.spawnGit
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
@@ -145,8 +145,9 @@ loadMetadata (FromFilesystem indexDir) concurrency = do
 
 loadMetadata (FromCommit commitHash) _concurrency = do
   -- ls-tree at ROOT level (no prefix!) to enumerate all files
+  indexDir <- Git.getIndexPath
   (code, out, _) <- Git.spawnGit
-    [ "-C", bitIndexPath, "-c", "core.quotePath=false", "ls-tree", "-r", "--name-only", commitHash ]
+    [ "-C", indexDir, "-c", "core.quotePath=false", "ls-tree", "-r", "--name-only", commitHash ]
   case code of
     ExitSuccess -> do
       let paths = filter isUserFile $ filter (not . null) $ lines out
@@ -162,8 +163,9 @@ readEntryFromFilesystem indexDir relPath =
 readEntryFromCommit :: String -> FilePath -> IO MetadataEntry
 readEntryFromCommit commitHash relPath = do
   -- NOTE: path is at root level in the commit tree, NOT under index/
+  indexDir <- Git.getIndexPath
   (code, content, _) <- Git.spawnGit
-    [ "-C", bitIndexPath, "show", commitHash ++ ":" ++ relPath ]
+    [ "-C", indexDir, "show", commitHash ++ ":" ++ relPath ]
   pure $ case code of
     ExitSuccess -> classifyMetadata (Path relPath) content
     _           -> TextEntry (Path relPath)
@@ -213,11 +215,27 @@ loadCommittedTextPaths indexDir = do
       Set.fromList . textEntryPaths <$> loadMetadata (FromCommit headHash) Sequential
     _ -> pure Set.empty
 
+-- | Resolve the index directory for a given root path.
+-- Follows bitlinks (when .bit is a file containing "bitdir: <path>").
+resolveIndexDir :: FilePath -> IO FilePath
+resolveIndexDir root = do
+    let dotBit = root </> ".bit"
+    isDir <- doesDirectoryExist dotBit
+    if isDir then pure (dotBit </> "index")
+    else do
+        isFile <- doesFileExist dotBit
+        if isFile then do
+            content <- readFile dotBit
+            case lines content of
+                (firstLine:_) -> pure (drop 8 (filter (/= '\r') firstLine) </> "index")
+                [] -> pure (dotBit </> "index")
+        else pure (dotBit </> "index")
+
 -- | Given scan entries for a root path, write metadata, defeat racy git, and
 -- find issues via git diff. Shared logic for all verify variants.
 findIssuesFromScan :: FilePath -> [FileEntry] -> IO VerifyResult
 findIssuesFromScan root entries = do
-  let indexDir = root </> bitIndexPath
+  indexDir <- resolveIndexDir root
 
   -- 1. Write metadata
   Scan.writeMetadataFiles root entries
@@ -318,7 +336,8 @@ verifyWithAbort root mCounter concurrency mCallback = do
   sizeEntries <- if null skipped
       then pure []
       else do
-          committedMeta <- loadCommittedBinaryMetadata (root </> bitIndexPath)
+          indexDir' <- resolveIndexDir root
+          committedMeta <- loadCommittedBinaryMetadata indexDir'
           let metaMap = Map.fromList
                 [(unPath (bfmPath m), (bfmHash m, bfmSize m)) | m <- committedMeta]
           pure $ concatMap (\(rel, actualSize) ->
@@ -351,8 +370,9 @@ loadMetadataFromBundle bundleName = do
         then do
           -- Objects not in repo yet — fetch from bundle file directly
           let bundlePath = fromCwdPath (bundleCwdPath bundleName)
+          indexDir <- Git.getIndexPath
           (fetchCode, _, _) <- Git.spawnGit
-            ["-C", bitIndexPath, "fetch", bundlePath, "+refs/heads/*:refs/remotes/bundle/*"]
+            ["-C", indexDir, "fetch", bundlePath, "+refs/heads/*:refs/remotes/bundle/*"]
           case fetchCode of
             ExitSuccess -> loadMetadata (FromCommit headHash) Sequential
             _ -> pure []

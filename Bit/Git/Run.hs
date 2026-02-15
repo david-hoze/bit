@@ -59,6 +59,8 @@ module Bit.Git.Run
     , runGitHere
     , runGitGlobal
     , spawnGit
+    , setIndexPath
+    , getIndexPath
     ) where
 
 import Data.Maybe (mapMaybe, listToMaybe)
@@ -73,6 +75,8 @@ import Prelude hiding (init)
 import Data.List (isPrefixOf)
 import System.IO (hPutStr, hPutStrLn, stderr)
 import System.Environment (lookupEnv)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- | The ONLY place in the entire codebase that spawns git.
 -- Respects BIT_REAL_GIT env var to avoid recursion when bit masquerades as git.
@@ -81,8 +85,24 @@ spawnGit args = do
     bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
     readProcessWithExitCode bin args ""
 
-baseFlags :: [String]
-baseFlags = ["-C", bitIndexPath]
+-- | Global mutable index path. Set once by Commands.runCommand after resolving
+-- the bitlink. Defaults to the standard relative path for normal repos.
+indexPathRef :: IORef FilePath
+indexPathRef = unsafePerformIO $ newIORef bitIndexPath
+{-# NOINLINE indexPathRef #-}
+
+-- | Set the index path for all subsequent git commands in this process.
+setIndexPath :: FilePath -> IO ()
+setIndexPath = writeIORef indexPathRef
+
+-- | Read the current index path (for code that needs the resolved path outside BitM).
+getIndexPath :: IO FilePath
+getIndexPath = readIORef indexPathRef
+
+getBaseFlags :: IO [String]
+getBaseFlags = do
+    p <- readIORef indexPathRef
+    pure ["-C", p]
 
 -- | Build the tracking ref for a named remote: @refs/remotes/\<name\>/main@
 remoteTrackingRef :: String -> String
@@ -117,7 +137,8 @@ data GitCommand
 runGit :: GitCommand -> IO (ExitCode, String, String)
 runGit cmd = do
     let subArgs = translateCommand cmd
-    let fullArgs = baseFlags ++ subArgs
+    flags <- getBaseFlags
+    let fullArgs = flags ++ subArgs
     -- We use readProcessWithExitCode so we can handle errors without crashing
     spawnGit fullArgs
   where
@@ -217,8 +238,9 @@ runGitRaw args = do
         Just "1" -> "never"
         Just "true" -> "never"
         _ -> "auto"
+  flags <- getBaseFlags
   let fullArgs =
-        baseFlags
+        flags
         ++ ["-c", "color.ui=" ++ colorFlag]
         ++ args
 
@@ -239,14 +261,17 @@ runGitRaw args = do
 -- relative to the subdirectory. When prefix is empty, delegates to runGitRaw.
 runGitRawIn :: FilePath -> [String] -> IO ExitCode
 runGitRawIn "" args = runGitRaw args
-runGitRawIn prefix args = runGitRawAt (bitIndexPath </> prefix) args
+runGitRawIn prefix args = do
+    indexPath <- readIORef indexPathRef
+    runGitRawAt (indexPath </> prefix) args
 
 -- | Like runGitWithOutput but targets .bit/index/<prefix>.
 -- When prefix is empty, delegates to runGitWithOutput.
 runGitWithOutputIn :: FilePath -> [String] -> IO (ExitCode, String, String)
 runGitWithOutputIn "" args = runGitWithOutput args
 runGitWithOutputIn prefix args = do
-  let fullArgs = ["-C", bitIndexPath </> prefix] ++ ["-c", "color.ui=never"] ++ args
+  indexPath <- readIORef indexPathRef
+  let fullArgs = ["-C", indexPath </> prefix] ++ ["-c", "color.ui=never"] ++ args
   spawnGit fullArgs
 
 -- | Like runGitRaw but targets an arbitrary directory instead of .bit/index.
@@ -300,17 +325,19 @@ merge   = runGitRaw . ("merge" :)
 -- | Add or update a remote (Git-style: git remote add <name> <url> / set-url if exists)
 addRemote :: String -> String -> IO ExitCode
 addRemote remoteName url = do
-    (code, _, _) <- spawnGit (baseFlags ++ ["remote", "get-url", remoteName])
+    flags <- getBaseFlags
+    (code, _, _) <- spawnGit (flags ++ ["remote", "get-url", remoteName])
     case code of
         ExitSuccess -> do
-            spawnGit (baseFlags ++ ["remote", "set-url", remoteName, url]) >>= \(c, _, _) -> pure c
+            spawnGit (flags ++ ["remote", "set-url", remoteName, url]) >>= \(c, _, _) -> pure c
         ExitFailure _ -> do
-            spawnGit (baseFlags ++ ["remote", "add", remoteName, url]) >>= \(c, _, _) -> pure c
+            spawnGit (flags ++ ["remote", "add", remoteName, url]) >>= \(c, _, _) -> pure c
 
 -- | Get the URL for a remote by name (git remote get-url <name>). Returns Nothing if remote missing.
 getRemoteUrl :: String -> IO (Maybe String)
 getRemoteUrl remoteName = do
-    (code, out, _) <- spawnGit (baseFlags ++ ["remote", "get-url", remoteName])
+    flags <- getBaseFlags
+    (code, out, _) <- spawnGit (flags ++ ["remote", "get-url", remoteName])
     pure $ case code of
         ExitSuccess -> Just (filter (/= '\n') out)
         _ -> Nothing
@@ -321,7 +348,8 @@ getRemoteUrl remoteName = do
 -- that "origin" fallback doesn't mean tracking IS configured.
 getTrackedRemoteName :: IO String
 getTrackedRemoteName = do
-    (code, out, _) <- spawnGit (baseFlags ++ ["config", "--get", "branch.main.remote"])
+    flags <- getBaseFlags
+    (code, out, _) <- spawnGit (flags ++ ["config", "--get", "branch.main.remote"])
     pure $ case code of
         ExitSuccess -> filter (/= '\n') out
         _ -> "origin"
@@ -333,7 +361,8 @@ getTrackedRemoteName = do
 -- (falls back to "origin", git-standard behavior).
 getConfiguredRemoteName :: IO (Maybe String)
 getConfiguredRemoteName = do
-    (code, out, _) <- spawnGit (baseFlags ++ ["config", "--get", "branch.main.remote"])
+    flags <- getBaseFlags
+    (code, out, _) <- spawnGit (flags ++ ["config", "--get", "branch.main.remote"])
     pure $ case code of
         ExitSuccess -> let name = filter (/= '\n') out
                        in if null name then Nothing else Just name
@@ -348,8 +377,9 @@ updateRemoteTrackingBranch name bundleName =
 -- | Set refs/remotes/<name>/main to a specific hash. Use after a successful pull so status shows
 -- "up to date with '<name>/main'" instead of "ahead by N commits".
 updateRemoteTrackingBranchToHash :: String -> String -> IO ExitCode
-updateRemoteTrackingBranchToHash name hash =
-    spawnGit (baseFlags ++ ["update-ref", remoteTrackingRef name, hash]) >>= \(c, _, _) -> pure c
+updateRemoteTrackingBranchToHash name hash = do
+    flags <- getBaseFlags
+    spawnGit (flags ++ ["update-ref", remoteTrackingRef name, hash]) >>= \(c, _, _) -> pure c
 
 -- | Set refs/remotes/<name>/main to current HEAD.
 -- WARNING: Only correct after PUSH (where remote now matches local HEAD).
@@ -358,7 +388,8 @@ updateRemoteTrackingBranchToHash name hash =
 -- See: "Tracking Ref Invariant" in docs/spec.md.
 updateRemoteTrackingBranchToHead :: String -> IO ExitCode
 updateRemoteTrackingBranchToHead name = do
-    (code, out, _) <- spawnGit (baseFlags ++ ["rev-parse", "HEAD"])
+    flags <- getBaseFlags
+    (code, out, _) <- spawnGit (flags ++ ["rev-parse", "HEAD"])
     case filter (/= '\n') out of
         hash | code == ExitSuccess && not (null hash) ->
             updateRemoteTrackingBranchToHash name hash
@@ -368,10 +399,11 @@ updateRemoteTrackingBranchToHead name = do
 -- Configures branch.main.remote and branch.main.merge
 setupBranchTrackingFor :: String -> IO ExitCode
 setupBranchTrackingFor remoteName = do
+    flags <- getBaseFlags
     (code1, _, _) <- spawnGit
-        (baseFlags ++ ["config", "branch.main.remote", remoteName])
+        (flags ++ ["config", "branch.main.remote", remoteName])
     (code2, _, _) <- spawnGit
-        (baseFlags ++ ["config", "branch.main.merge", "refs/heads/main"])
+        (flags ++ ["config", "branch.main.merge", "refs/heads/main"])
     case (code1, code2) of
         (ExitSuccess, ExitSuccess) -> pure ExitSuccess
         _ -> pure (ExitFailure 1)
@@ -384,13 +416,15 @@ setupBranchTracking = setupBranchTrackingFor "origin"
 -- | Unset the upstream for the current branch (clears "upstream is gone" when remote refs are missing)
 unsetBranchUpstream :: IO ExitCode
 unsetBranchUpstream = do
-    (code, _, _) <- spawnGit (baseFlags ++ ["branch", "--unset-upstream"])
+    flags <- getBaseFlags
+    (code, _, _) <- spawnGit (flags ++ ["branch", "--unset-upstream"])
     pure code
 
 -- | Run git with baseFlags; returns (exitCode, stdout, stderr). Does not rewrite hints.
 runGitWithOutput :: [String] -> IO (ExitCode, String, String)
 runGitWithOutput args = do
-  let fullArgs = baseFlags ++ ["-c", "color.ui=never"] ++ args
+  flags <- getBaseFlags
+  let fullArgs = flags ++ ["-c", "color.ui=never"] ++ args
   spawnGit fullArgs
 
 -- | Abort an in-progress merge.

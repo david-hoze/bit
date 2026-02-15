@@ -36,7 +36,6 @@ import Control.Monad.Trans.Class (lift)
 import System.Exit (ExitCode(..), exitWith)
 import Control.Exception (throwIO, IOException, catch)
 import qualified Bit.Git.Run as Git
-import Bit.Config.Paths (bitIndexPath)
 import System.IO (stderr, hPutStrLn, hPutStr)
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
@@ -143,9 +142,9 @@ checkout = doCheckout
 
 mergeContinue :: BitM ()
 mergeContinue = do
-    cwd <- asks envCwd
+    bitDir <- asks envBitDir
     mRemote <- asks envRemote
-    let conflictsDir = cwd </> ".bit" </> "conflicts"
+    let conflictsDir = bitDir </> "conflicts"
     conflictsExist <- liftIO $ Dir.doesDirectoryExist conflictsDir
 
     gitConflicts <- liftIO Conflict.getConflictedFilesE
@@ -164,7 +163,7 @@ mergeContinue = do
                             Transport.syncBinariesAfterMerge remote oldHead) mRemote
                 _ -> liftIO dieNoMergeInProgress
        | otherwise -> do
-                invalid <- liftIO $ Metadata.validateMetadataDir (cwd </> bitIndexPath)
+                invalid <- liftIO $ Metadata.validateMetadataDir (bitDir </> "index")
                 unless (null invalid) $ liftIO $ do
                     hPutStrLn stderr Conflict.conflictMarkersFatalMessage
                     throwIO (userError "Invalid metadata")
@@ -199,7 +198,20 @@ dieNoMergeInProgress = do
 doMergeAbort :: IO ()
 doMergeAbort = do
     cwd <- Dir.getCurrentDirectory
-    let conflictsDir = cwd </> ".bit" </> "conflicts"
+    -- Check for bitlink (separated repos) or normal .bit directory
+    let dotBit = cwd </> ".bit"
+    isDir <- Dir.doesDirectoryExist dotBit
+    bitDir <- if isDir then pure dotBit
+              else do
+                isFile <- Dir.doesFileExist dotBit
+                if isFile
+                    then do
+                        content <- readFile dotBit
+                        case lines content of
+                            (firstLine:_) -> pure (drop 8 (filter (/= '\r') firstLine))
+                            [] -> pure dotBit
+                    else pure dotBit
+    let conflictsDir = bitDir </> "conflicts"
     
     -- Abort git merge
     code <- Git.mergeAbort
@@ -256,9 +268,10 @@ doCheckout args = do
 -- to the working directory. Binary metadata files are left alone.
 syncTextFilesFromIndex :: FilePath -> [FilePath] -> BitM ()
 syncTextFilesFromIndex cwd rawPaths = do
+    bitDir <- asks envBitDir
     paths <- lift $ expandPathsToFiles cwd rawPaths
     forM_ paths $ \filePath -> do
-        let metaPath = cwd </> bitIndexPath </> filePath
+        let metaPath = bitDir </> "index" </> filePath
         let workPath = cwd </> filePath
         metaExists <- lift $ fileExistsE metaPath
         when metaExists $ do

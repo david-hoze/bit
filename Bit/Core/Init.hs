@@ -24,13 +24,14 @@ import Data.Char (isSpace)
 
 -- | Options for 'bit init'.
 data InitOptions = InitOptions
-    { initQuiet    :: Bool      -- ^ Suppress bit output
-    , initBare     :: Bool      -- ^ Bare repository (stub, not yet implemented)
-    , initGitFlags :: [String]  -- ^ Extra flags passed through to 'git init'
+    { initQuiet          :: Bool            -- ^ Suppress bit output
+    , initBare           :: Bool            -- ^ Bare repository (stub, not yet implemented)
+    , initGitFlags       :: [String]        -- ^ Extra flags passed through to 'git init'
+    , initSeparateGitDir :: Maybe FilePath  -- ^ Place git database at this path
     } deriving (Show)
 
 defaultInitOptions :: InitOptions
-defaultInitOptions = InitOptions False False []
+defaultInitOptions = InitOptions False False [] Nothing
 
 init :: IO ()
 init = initWith defaultInitOptions
@@ -53,13 +54,23 @@ initializeBareRepoAt _dir = pure ()
 -- This is used both for local `bit init` and for creating filesystem remotes.
 initializeRepoAt :: FilePath -> InitOptions -> IO ()
 initializeRepoAt targetDir opts = do
-    let targetBitDir = targetDir </> ".bit"
+    let separated = initSeparateGitDir opts
+
+    -- For --separate-git-dir, compute absolute sgdir and put bit metadata there
+    mAbsSgdir <- traverse Dir.makeAbsolute separated
+
+    let targetBitDir = case mAbsSgdir of
+            Just sgdir -> sgdir </> "bit"
+            Nothing    -> targetDir </> ".bit"
     let targetBitIndexPath = targetBitDir </> "index"
     let targetBitGitDir = targetBitIndexPath </> ".git"
     let targetBitDevicesDir = targetBitDir </> "devices"
     let targetBitRemotesDir = targetBitDir </> "remotes"
 
-    -- 1. Create .bit directory
+    -- Ensure target directory exists (needed for --separate-git-dir with dir arg)
+    Dir.createDirectoryIfMissing True targetDir
+
+    -- 1. Create .bit directory (or sgdir/bit/)
     Platform.createDirectoryIfMissing True targetBitDir
 
     -- 2. Create .bit/index directory (needed before git init)
@@ -70,8 +81,12 @@ initializeRepoAt targetDir opts = do
     hasGitDir <- Platform.doesDirectoryExist targetBitGitDir
     hasGitFile <- Platform.doesFileExist targetBitGitDir
     unless (hasGitDir || hasGitFile) $ do
+        -- For separated repos, prepend --separate-git-dir to the git init flags
+        let extraFlags = case mAbsSgdir of
+                Just sgdir -> ["--separate-git-dir", sgdir]
+                Nothing    -> []
         -- Initialize git in .bit/index, which will create .bit/index/.git
-        void $ Git.runGitAt targetBitIndexPath ("init" : initGitFlags opts)
+        void $ Git.runGitAt targetBitIndexPath ("init" : extraFlags ++ initGitFlags opts)
 
         -- Fix for Windows external/USB drives: add to safe.directory
         -- git 2.35.2+ rejects directories with different ownership
@@ -79,9 +94,8 @@ initializeRepoAt targetDir opts = do
         let safePath = toPosix absIndex
         void $ Git.spawnGit ["config", "--global", "--add", "safe.directory", safePath]
 
-    -- 3a. Create .git/bundles directory for storing bundle files
-    -- With --separate-git-dir, .git is a gitlink file; git resolves it transparently
-    -- so we create bundles via git config dir
+    -- 3a. Create bundles directory for storing bundle files
+    -- With --separate-git-dir, .git is a gitlink file; resolve real git dir
     when hasGitDir $
         Platform.createDirectoryIfMissing True (targetBitGitDir </> "bundles")
     when (not hasGitDir && not hasGitFile) $ do
@@ -134,10 +148,20 @@ initializeRepoAt targetDir opts = do
     Platform.createDirectoryIfMissing True infoDir
     atomicWriteFileStr (infoDir </> "attributes") "* merge=bit-metadata -text\n"
 
-    -- 6. Create .git junction for test compatibility (BIT_GIT_JUNCTION=1).
-    -- Points <targetDir>/.git -> <targetDir>/.bit/index/.git so git's
-    -- repo discovery works without -C override.
-    createGitJunction targetDir targetBitGitDir
+    -- 7. For --separate-git-dir: write bitlink and gitlink files in working dir
+    case mAbsSgdir of
+        Just sgdir -> do
+            -- bitlink file: .bit as FILE pointing to sgdir/bit
+            atomicWriteFileStr (targetDir </> ".bit")
+                ("bitdir: " ++ toPosix (sgdir </> "bit") ++ "\n")
+            -- gitlink file: .git as FILE pointing to sgdir
+            atomicWriteFileStr (targetDir </> ".git")
+                ("gitdir: " ++ toPosix sgdir ++ "\n")
+        Nothing ->
+            -- 8. Create .git junction for test compatibility (BIT_GIT_JUNCTION=1).
+            -- Points <targetDir>/.git -> <targetDir>/.bit/index/.git so git's
+            -- repo discovery works without -C override.
+            createGitJunction targetDir targetBitGitDir
 
 -- | When BIT_GIT_JUNCTION=1, create a directory junction from
 -- @\<dir\>/.git@ to @\<dir\>/.bit/index/.git@ (if the target exists

@@ -25,7 +25,6 @@ import Data.Foldable (traverse_)
 import System.Exit (ExitCode(..), exitWith)
 import qualified Bit.Git.Run as Git
 import qualified Bit.Rclone.Run as Transport
-import Bit.Config.Paths (bitIndexPath)
 import qualified Bit.Scan.Verify as Verify
 import qualified Bit.Core.Conflict as Conflict
 import qualified Bit.Scan.Remote as Remote.Scan
@@ -196,7 +195,6 @@ pullAcceptRemoteImpl remote = do
 -- Fetch is already done by the seam; this reads the tracking ref directly.
 pullManualMergeImpl :: Remote -> BitM ()
 pullManualMergeImpl remote = do
-    cwd <- asks envCwd
     let name = remoteName remote
 
     -- Tracking ref already set by seam (cloud: saveFetchedBundle, filesystem: git fetch)
@@ -212,7 +210,8 @@ pullManualMergeImpl remote = do
                 Left _ -> lift $ tellErr "Error: Could not fetch remote file list."
                 Right remoteFiles -> do
                     let filteredRemoteFiles = filterOutBitPaths remoteFiles
-                    localMeta <- lift $ Verify.loadBinaryMetadata (cwd </> bitIndexPath) (Parallel 0)
+                    bitDir <- asks envBitDir
+                    localMeta <- lift $ Verify.loadBinaryMetadata (bitDir </> "index") (Parallel 0)
 
                     let remoteFileMap = Map.fromList
                           [ (normalise (unPath e.path), (h, e.kind))
@@ -324,7 +323,8 @@ pullNormalImpl remote = do
                             resolutions <- lift $ Conflict.resolveAll conflicts
                             let total = length resolutions
 
-                            invalid <- lift $ validateMetadataDir (cwd </> bitIndexPath)
+                            bitDir' <- asks envBitDir
+                            invalid <- lift $ validateMetadataDir (bitDir' </> "index")
                             unless (null invalid) $ lift $ do
                                 void $ gitRaw ["merge", "--abort"]
                                 tellErr Conflict.conflictMarkersFatalMessage
@@ -373,7 +373,8 @@ findDivergentFiles remoteFileMap remoteMetaMap =
 createConflictDirectories :: Remote -> [DivergentFile] -> Map.Map FilePath (Hash 'MD5, Integer) -> BitM ()
 createConflictDirectories remote divergentFiles localMetaMap = do
     cwd <- asks envCwd
-    let conflictsDir = cwd </> ".bit" </> "conflicts"
+    bitDir <- asks envBitDir
+    let conflictsDir = bitDir </> "conflicts"
     lift $ createDirE conflictsDir
 
     forM_ divergentFiles $ \df -> do

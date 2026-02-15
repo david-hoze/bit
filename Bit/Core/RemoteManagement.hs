@@ -26,7 +26,7 @@ import Data.UUID (UUID)
 import System.IO (stderr, hPutStrLn)
 import Control.Exception (try, IOException)
 import Data.Maybe (fromMaybe)
-import Bit.Config.Paths (bitDevicesDir, bitRemotesDir, bundleForRemote, bundleCwdPath, fromCwdPath, BundleName(..), bundleGitRelPath, fromGitRelPath)
+import Bit.Config.Paths (bundleForRemote, bundleCwdPath, fromCwdPath, BundleName(..), bundleGitRelPath, fromGitRelPath)
 import Bit.Types (BitM, BitEnv(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -43,8 +43,6 @@ remoteAdd = addRemote
 addRemote :: String -> String -> IO ()
 addRemote name pathOrUrl = do
     cwd <- Dir.getCurrentDirectory
-    Dir.createDirectoryIfMissing True bitDevicesDir
-    Dir.createDirectoryIfMissing True bitRemotesDir
     pathType <- Device.classifyRemotePath pathOrUrl
     case pathType of
         Device.CloudRemote url -> do
@@ -147,7 +145,8 @@ remoteShow mRemoteName = do
     cwd <- asks envCwd
     case mRemoteName of
         Nothing -> do
-            let remotesDir = cwd </> bitRemotesDir
+            bitDir <- asks envBitDir
+            let remotesDir = bitDir </> "remotes"
             dirExists <- liftIO $ Dir.doesDirectoryExist remotesDir
             if not dirExists
                 then liftIO $ putStrLn "No remotes configured. Use 'bit remote add <name> <url>' to add one."
