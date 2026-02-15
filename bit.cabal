@@ -70,6 +70,7 @@ executable bit
     default-language: Haskell2010
 
 executable generate-literate
+    buildable:           False
     main-is:             GenerateLiterate.hs
     hs-source-dirs:      scripts
     ghc-options:         -Wall
@@ -138,6 +139,7 @@ test-suite plan
     default-language:    Haskell2010
 
 test-suite generate-literate-docs
+    buildable:           False
     type:                exitcode-stdio-1.0
     main-is:             GenerateLiterate.hs
     hs-source-dirs:      scripts
