@@ -77,6 +77,7 @@ project/
     │       └── dataset.bin # Metadata file (NOT the actual data)
     ├── cache/              # Scan/verify cache (mtime+size) to skip re-hashing
     ├── cas/                # Content-addressed store (populated when mode=solid)
+    ├── config              # Repo-local config (INI format, git-style sections)
     ├── remotes/            # Named remote configs (typed)
     │   └── origin          # Remote type + optional target
     ├── devices/            # Device identity files
@@ -126,17 +127,41 @@ Separated repos place the git database and bit metadata at a separate directory 
 
 ### Mode Configuration (lite vs solid)
 
-The mode is stored in `.bit/config` as a single key:
+The mode is stored in `.bit/config` using git-style INI format under the `[core]` section:
 
-```
-mode: lite
+```ini
+[core]
+    mode = lite
 ```
 or
-```
-mode: solid
+```ini
+[core]
+    mode = solid
 ```
 
-**Default:** `lite`. If `.bit/config` does not exist or does not contain a `mode` key, the repo operates in lite mode. This preserves backward compatibility — all existing repos are implicitly lite.
+**Setting the mode:** Use `bit config`:
+
+```
+bit config core.mode solid    # switch to solid
+bit config core.mode lite     # switch to lite
+bit config core.mode          # prints current mode
+```
+
+When switching to solid, bit prints a hint:
+```
+$ bit config core.mode solid
+Mode set to solid. bit add will now store file content in .bit/cas/.
+hint: Run 'bit cas backfill' to store current files for existing commits.
+```
+
+When switching to lite:
+```
+$ bit config core.mode lite
+Mode set to lite. bit add will no longer store file content in .bit/cas/.
+Existing CAS data is preserved.
+```
+
+**Default:** `lite`. If `.bit/config` does not exist or does not contain a `core.mode` key, the repo operates in lite mode. This preserves backward compatibility — all existing repos are implicitly lite.
 
 **What the mode controls:** A single behavior — whether `bit add` copies file content into `.bit/cas/` in addition to writing metadata to `.bit/index/`.
 
@@ -145,15 +170,39 @@ mode: solid
 
 **Switching modes:**
 
-**lite → solid**: Set `mode: solid` in `.bit/config`. From this point forward, `bit add` populates the CAS. Existing history has no CAS backing — the CAS is simply incomplete for older commits. An optional `bit cas backfill` command can walk historical commits and store any blobs that are currently present in the working tree, but it is not required.
+**lite → solid**: `bit config core.mode solid`. From this point forward, `bit add` populates the CAS. Existing history has no CAS backing — the CAS is simply incomplete for older commits. An optional `bit cas backfill` command can walk historical commits and store any blobs that are currently present in the working tree, but it is not required.
 
-**solid → lite**: Set `mode: lite` in `.bit/config`. `bit add` stops writing to the CAS. The existing `.bit/cas/` directory is preserved with all its data — nothing is deleted.
+**solid → lite**: `bit config core.mode lite`. `bit add` stops writing to the CAS. The existing `.bit/cas/` directory is preserved with all its data — nothing is deleted.
 
 **CAS reads are mode-independent.** Regardless of the current mode, any operation that needs old file content (e.g. `bit restore` from a historical commit) checks `.bit/cas/` as a fallback. If the requested blob exists in CAS, it is used. If not (because the commit predates solid mode), the operation fails with "no content available for this version." This means the mode only gates *writes* — reads always consult the CAS if data is present.
 
 **The mode is local-only.** It is not committed or tracked in git. Different clones of the same project can run in different modes — a laptop might use lite to save space while a NAS uses solid for full history.
 
 **CAS garbage collection:** `bit cas gc` (future) can prune blobs that are not referenced by any reachable commit. The safe default is to never delete CAS data automatically.
+
+### `bit config` Command
+
+`bit config` reads and writes `.bit/config`, which uses git-style INI format with `section.key` keys (matching `git config` conventions). Every key must contain at least one dot.
+
+```
+bit config <key>              # get — prints value
+bit config <key> <value>      # set — writes value
+bit config --list             # dump all key=value pairs
+```
+
+`.bit/config` file format:
+```ini
+[core]
+    mode = solid
+```
+
+**Validation:** Each key has its own validation. `core.mode` only accepts `lite` or `solid`. Unknown keys are rejected. This prevents typos from silently creating garbage config entries.
+
+**Current config keys:**
+
+| Key | Values | Default | Description |
+|-----|--------|---------|-------------|
+| `core.mode` | `lite`, `solid` | `lite` | Whether `bit add` writes to CAS |
 
 ### The Index Invariant
 
@@ -312,7 +361,7 @@ Bit/Commands.hs → Bit/Core/*.hs → Bit/Rclone/Run.hs → rclone (only here!)
 
 - **Bit/Rclone/Run.hs** — Dumb rclone wrapper. Exposes `copyToRemote`, `copyFromRemote`, `copyFromRemoteDetailed`, `moveRemote`, `deleteRemote`, `listRemoteJson`, `listRemoteJsonWithHash`, `checkRemote`, etc. Takes `Remote` + relative paths. Does NOT know about `.bit/`, bundles, `RemoteState`, or `FetchResult`. Captures rclone JSON output as raw UTF-8 bytes to correctly handle non-ASCII filenames (Hebrew, Chinese, emoji, etc.). Uses `bracket` for exception-safe subprocess resource cleanup. **copyFromRemoteDetailed** returns **CopyResult** (NotFound, NetworkError, OtherError) by parsing rclone stderr so fetch and remote-workspace can distinguish "no bundle" from network or other errors for user-facing messaging and retry.
 - **Bit/Git/Run.hs** — Dumb git wrapper. Knows how to run git commands. Takes args. Does NOT interpret results in domain terms.
-- **Bit/Core/*.hs** — Smart business logic, split by concern. `Bit.Core` re-exports the public API. Sub-modules: `Bit.Core.Push` (push logic + PushSeam), `Bit.Core.Pull` (pull + merge + conflict), `Bit.Core.Fetch` (fetch + remote state classification), `Bit.Rclone.Sync` (shared action derivation + working-tree sync), `Bit.Core.Verify` (verify + repair), `Bit.Core.Init` (repo initialization), `Bit.Core.Helpers` (shared types + utilities), `Bit.Core.RemoteManagement` (remote add/show), `Bit.Git.Passthrough` (git command delegation), `Bit.Core.Conflict` (merge conflict resolution). All domain knowledge lives here. Calls Rclone.Run and Git.Run, never calls `readProcessWithExitCode` directly.
+- **Bit/Core/*.hs** — Smart business logic, split by concern. `Bit.Core` re-exports the public API. Sub-modules: `Bit.Core.Push` (push logic + PushSeam), `Bit.Core.Pull` (pull + merge + conflict), `Bit.Core.Fetch` (fetch + remote state classification), `Bit.Rclone.Sync` (shared action derivation + working-tree sync), `Bit.Core.Verify` (verify + repair), `Bit.Core.Init` (repo initialization), `Bit.Core.Helpers` (shared types + utilities), `Bit.Core.RemoteManagement` (remote add/show), `Bit.Core.Config` (bit config get/set/list), `Bit.Git.Passthrough` (git command delegation), `Bit.Core.Conflict` (merge conflict resolution). All domain knowledge lives here. Calls Rclone.Run and Git.Run, never calls `readProcessWithExitCode` directly.
 - **Bit/Commands.hs** — Entry point. Discovers repository root via `findBitRoot` (walks up from cwd), computes subdirectory prefix, parses CLI, resolves the remote, builds `BitEnv`, dispatches to `Bit.Core`.
 
 ### Key Types
@@ -342,6 +391,8 @@ Bit/Commands.hs → Bit/Core/*.hs → Bit/Rclone/Run.hs → rclone (only here!)
 | `VerifyTarget` | `bit.Core.Verify` | VerifyLocal or VerifyRemotePath Remote — whether verify checks local or a specific remote |
 | `DeviceInfo` | `Bit.Device.Identity` | UUID + storage type + optional hardware serial |
 | `RemoteType` | `Bit.Device.Identity` | RemoteFilesystem, RemoteDevice, RemoteCloud |
+| `RemoteLayout` | `Bit.Device.Identity` | LayoutFull, LayoutBare — cloud remote storage layout (set via `--bare` on `remote add`) |
+| `BitMode` | `Bit.Core.Config` | ModeLite, ModeSolid — repo mode controlling CAS writes (set via `bit config core.mode`) |
 
 ### Sync Pipeline
 
@@ -472,8 +523,12 @@ Help (`bit help`, `bit -h`, `bit --help`, and `bit help <command>`) works withou
 | `bit mv <src> <dst>` | `git mv` | Move/rename tracked file |
 | `bit branch` | `git branch` | Branch management |
 | `bit merge` | `git merge` | Merge branches |
-| `bit remote add <name> <url>` | `git remote add` | Add named remote (does NOT set upstream) |
-| `bit remote show [name]` | `git remote show` | Show remote status |
+| `bit remote add <name> <url>` | `git remote add` | Add named remote (does NOT set upstream); cloud defaults to full layout |
+| `bit remote add <name> <url> --bare` | — | Add cloud remote with bare (CAS-only) layout |
+| `bit remote show [name]` | `git remote show` | Show remote status (includes layout for cloud remotes) |
+| `bit config <key>` | `git config <key>` | Get config value |
+| `bit config <key> <value>` | `git config <key> <value>` | Set config value |
+| `bit config --list` | `git config --list` | List all config entries |
 | `bit repair` | — | Verify and auto-repair local files from remotes |
 | `bit push [<remote>]` | `git push [<remote>]` | Push to specified or default remote |
 | `bit push -u <remote>` | `git push -u <remote>` | Push and set upstream tracking |
@@ -498,7 +553,20 @@ Help (`bit help`, `bit -h`, `bit --help`, and `bit help <command>`) works withou
 | `bit --remote <name> ls-files` | — | Show tracked files on remote (read-only, ephemeral) |
 | `bit @<remote> <cmd>` | — | Shorthand for `--remote` (needs quoting in PowerShell) |
 
-**Remote show:** For the given remote (or default), bit prints the remote name, Fetch URL, and Push URL. For cloud remotes, Push URL is N/A (push goes via rclone to the same target). For filesystem remotes, both URLs are shown. When the local branch has an upstream, status (ahead/behind) is also shown. **Cloud remotes:** Status is derived from the local bundle at `.bit/index/.git/bundles/<name>.bundle`. If that bundle does not exist, `bit remote show <name>` fetches it first (same as `bit fetch`), then shows status; the user may see fetch output (e.g. "Updated: …" or "Fetched: …") as a side effect. If the fetch fails (e.g. network error), bit prints only the URLs and reports status as (unknown) — "HEAD branch: (unknown)", "main pushes to main (unknown)" — so the command still completes without crashing.
+**Remote show:** For the given remote (or default), bit prints the remote name, Fetch URL, and Push URL. For cloud remotes, Push URL is N/A (push goes via rclone to the same target); layout is always shown (`Layout: full` or `Layout: bare`). For filesystem remotes, both URLs are shown (no layout — filesystem remotes are always full repos). When the local branch has an upstream, status (ahead/behind) is also shown.
+
+Example output for a bare cloud remote:
+```
+$ bit remote show backup
+  Remote: backup
+  Type: cloud
+  Target: gdrive:Backup/myproject
+  Layout: bare
+  HEAD branch: main
+    main pushes to main (up to date)
+```
+
+**Cloud remotes:** Status is derived from the local bundle at `.bit/index/.git/bundles/<n>.bundle`. If that bundle does not exist, `bit remote show <n>` fetches it first (same as `bit fetch`), then shows status; the user may see fetch output (e.g. “Updated: …” or “Fetched: …”) as a side effect. If the fetch fails (e.g. network error), bit prints only the URLs and reports status as (unknown) — “HEAD branch: (unknown)”, “main pushes to main (unknown)” — so the command still completes without crashing.
 
 ---
 
@@ -578,6 +646,11 @@ The `Bit.Device.Identity` module handles remote type classification and device r
   - `layout: full` (default, backward compatible): Files are stored at human-readable paths mirroring the working tree. Users can browse files in Google Drive / S3 / etc. This is the current behavior.
   - `layout: bare`: Files are stored only in CAS layout (`cas/<prefix>/<hash>`). The cloud folder is opaque to humans — no browsable file tree, just hashed blobs and a metadata bundle. This is for pure backup where browsability is not needed.
   - Example remote config for bare layout: `type: cloud\ntarget: gdrive:Backup/foo\nlayout: bare`
+- **`bit remote add --bare`**: The `--bare` flag on `bit remote add` sets `layout: bare` in the remote config. It is only valid for cloud remotes — filesystem and device remotes are always full repos. Without `--bare`, cloud remotes default to `layout: full`. Examples:
+  ```
+  bit remote add origin gdrive:Projects/foo            # layout: full (default)
+  bit remote add backup gdrive:Backup/foo --bare       # layout: bare
+  ```
 - **No cloud remote layout conversion.** Switching a remote between `layout: full` and `layout: bare` is not supported. To change layout, create a new remote with the desired layout and push to it. This avoids complex migration logic and keeps the remote lifecycle simple.
 - **Device add fallback:** When adding a removable or network path, bit may prompt for a device name and write `.bit-store` at the volume root. If writing `.bit-store` fails (e.g. permission denied on `C:\`), the remote is added as path-only (RemoteFilesystem) so the user still has a working remote; device identity is not persisted. This silent degradation is worth specifying so users and maintainers know the fallback exists.
 
@@ -1557,19 +1630,22 @@ Interactive per-file conflict resolution:
     fails on Windows when temp directories aren't fully cleaned up).
 
 19. **Mode is local-only, gates writes only**: The lite/solid mode is stored in
-    `.bit/config` (not tracked by git) and controls a single behavior: whether
-    `bit add` writes blobs to `.bit/cas/`. CAS reads are always available
-    regardless of mode — `bit restore` and similar commands check CAS as a
-    fallback. This means switching from solid to lite preserves all previously
-    stored history, and switching from lite to solid starts accumulating history
-    from that point forward. No migration, no data loss, instant switch.
+    `.bit/config` (git-style INI format, `core.mode` key, not tracked by git)
+    and controlled via `bit config core.mode lite|solid`. It affects a single
+    behavior: whether `bit add` writes blobs to `.bit/cas/`. CAS reads are
+    always available regardless of mode — `bit restore` and similar commands
+    check CAS as a fallback. This means switching from solid to lite preserves
+    all previously stored history, and switching from lite to solid starts
+    accumulating history from that point forward. No migration, no data loss,
+    instant switch.
 
 20. **Cloud remote layout (full vs bare) with streaming CAS**: Cloud remotes
     support two layouts: `full` (files at readable paths, browsable in Google
-    Drive) and `bare` (CAS-only, opaque blobs). A lite-mode repo can push to a
-    bare remote by streaming content directly into the remote's CAS layout
-    without populating local CAS — the local repo pays no disk cost while the
-    remote gets a complete content-addressed backup. This is the compelling
+    Drive) and `bare` (CAS-only, opaque blobs), set at creation time via
+    `bit remote add <n> <url> --bare`. A lite-mode repo can push to a bare
+    remote by streaming content directly into the remote's CAS layout without
+    populating local CAS — the local repo pays no disk cost while the remote
+    gets a complete content-addressed backup. This is the compelling
     "laptop-constrained user who wants a safety net" use case. Layout conversion
     between full and bare is not supported — create a new remote instead.
 
@@ -1601,7 +1677,7 @@ Interactive per-file conflict resolution:
 
 ### Future (bit-solid)
 
-- **Mode switching**: `mode: solid` in `.bit/config` activates CAS writes on `bit add`. Switching is instant and non-destructive in both directions. See "Mode Configuration" in Core Architecture.
+- **Mode switching**: `bit config core.mode solid` activates CAS writes on `bit add`. Switching is instant and non-destructive in both directions. See "Mode Configuration" in Core Architecture.
 - **CAS structure**: `.bit/cas/<first-2-chars>/<full-hash>` for normal repos, `bit/cas/` for bare repos. Directory structure already created by `bit init`.
 - **`bit cas backfill`**: Walk historical commits, store any blobs currently present in the working tree into CAS. Optional — incomplete CAS is fine.
 - **`bit cas gc`**: Prune unreferenced blobs. Safe default: never auto-delete.
@@ -1659,7 +1735,8 @@ Interactive per-file conflict resolution:
 | `Bit/Core/Pull.hs` | Pull + merge + conflict resolution |
 | `Bit/Core/Fetch.hs` | Fetch + remote state classification |
 | `Bit/Core/Helpers.hs` | Shared types (PullMode, PullOptions) + utility functions |
-| `Bit/Core/RemoteManagement.hs` | Remote add/show and device-name prompting |
+| `Bit/Core/RemoteManagement.hs` | Remote add/show, device-name prompting, `--bare` layout flag for cloud remotes |
+| `Bit/Core/Config.hs` | `bit config` command: get/set/list for `.bit/config` (git-style INI format); per-key validation (e.g. `core.mode` only accepts `lite`/`solid`) |
 | `Bit/Core/Conflict.hs` | Conflict resolution: Resolution, DeletedSide, ConflictInfo, resolveAll |
 | `Bit/Git/Run.hs` | Git command wrapper; `runGitRawIn`/`runGitWithOutputIn` for prefix-aware subdirectory dispatch; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths; `runGitHere` for running git without `-C` when CWD is a git directory; `spawnGit` respects `BIT_REAL_GIT` to avoid shim recursion; `indexPathRef` IORef for dynamic base flags (set via `setIndexPath`, read via `getIndexPath`) |
 | `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, etc.); IO functions take prefix for subdirectory support; BitM functions extract prefix from `envPrefix` |
