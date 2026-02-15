@@ -92,8 +92,13 @@ powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # Full suit
 ### Git Test Suite
 - Consult `docs/git-test-suite.md` for setup, environment variables, and how the shim works
 - One-time setup: `extern/git-shim/setup.sh`
-- Run a test: `cd extern/git/t && GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose`
+- **Always save results to a file** (avoids re-running expensive tests):
+```bash
+cd extern/git/t
+GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose 2>&1 > ../../t0001-results-latest.txt
+```
 - Use `--run=N` to run a single test number
+- Analyze results from the saved file, not by re-running
 
 ### Cloud Remote Tests
 - `gdrive-test` is a configured rclone remote for cloud tests (`test/cli/gdrive-remote.test`)

@@ -37,6 +37,7 @@ run = do
         ["-h"]           -> printMainHelp >> exitSuccess
         ["--help"]       -> printMainHelp >> exitSuccess
         _ | isGitGlobalFlag args -> Git.runGitGlobal args >>= exitWith
+        ("-C":dir:rest) -> handleDashC dir rest
         _  -> case extractRemoteTarget args of
             RemoteError msg -> do
                 hPutStrLn stderr $ "fatal: " ++ msg
@@ -95,6 +96,15 @@ isGitGlobalFlag :: [String] -> Bool
 isGitGlobalFlag (flag:_) = flag `elem`
     ["--exec-path", "--version", "--html-path", "--man-path", "--info-path"]
 isGitGlobalFlag _ = False
+
+-- | Handle @git -C \<dir\> ...@ passthrough.
+-- If the target directory contains a .bit/ repo, redirect into its index;
+-- otherwise pass through to git unchanged.
+handleDashC :: FilePath -> [String] -> IO ()
+handleDashC dir rest = do
+    hasBit <- Dir.doesDirectoryExist (dir </> ".bit")
+    let target = if hasBit then dir </> ".bit" </> "index" else dir
+    Git.runGitRawAt target rest >>= exitWith
 
 -- | Commands that bit handles natively (not aliases).
 isKnownCommand :: String -> Bool

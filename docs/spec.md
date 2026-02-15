@@ -1119,6 +1119,15 @@ Unknown commands (not handled by bit, no alias match) are forwarded to git:
 - **Inside a git directory** (CWD has a `HEAD` file, e.g. user `cd`'d into `.git`): uses `runGitHere` — runs git without `-C` override, letting git's own repo discovery work. This is necessary because adding `-C .bit/index` would point to a nonexistent path relative to the `.git` directory.
 - **Outside any repo**: uses `runGitGlobal` (no `-C`)
 
+### `-C <dir>` Flag
+
+When invoked as `bit -C <dir> <args...>`, bit intercepts the `-C` flag before any command dispatch. This is a pure passthrough — no alias expansion, no bit command handling:
+
+- **`<dir>` has `.bit/`** (bit repo): runs `git -C <dir>/.bit/index <args...>`
+- **Otherwise** (plain git repo, bare repo, or nonexistent): runs `git -C <dir> <args...>`
+
+This is necessary because without interception, `-C` would be treated as an unknown command, alias lookup would fail, and passthrough would prepend `-C .bit/index` — producing `git -C .bit/index -C <dir> ...`. Git resolves `-C` sequentially, so the second `-C <dir>` would resolve relative to `.bit/index/` (wrong directory).
+
 ### Init Dispatch Order
 
 `init` is dispatched **before** repository discovery (`findBitRoot`). This is critical because `init` creates repos — it must not be affected by a parent repo's `.bit/` directory. Without this, `cd existing-repo/subdir && bit init` would `setCurrentDirectory` to the parent root and re-initialize the parent instead of creating a new repo in `subdir/`.

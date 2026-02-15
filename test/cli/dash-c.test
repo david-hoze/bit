@@ -1,0 +1,107 @@
+# =============================================================================
+# -C <dir> Passthrough - bit translates -C for bit repos and plain git repos
+#
+# When invoked as `bit -C <dir> <cmd>`, bit should:
+# - If <dir> has .bit/ → run git -C <dir>/.bit/index <cmd>
+# - Otherwise → run git -C <dir> <cmd> (plain passthrough)
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_dashc 2>nul & rmdir /s /q test\cli\output\work_dashc_plain 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: create a bit repo and a plain git repo
+# ======================================================================
+
+mkdir test\cli\output\work_dashc
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_dashc & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Add a file and commit so rev-parse and log have something to work with
+cd test\cli\output\work_dashc & echo hello> file.txt & bit add file.txt & bit commit -m "Initial commit"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Create a plain git repo (no .bit, just .git)
+mkdir test\cli\output\work_dashc_plain
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_dashc_plain & git init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_dashc_plain & echo hello> file.txt & git add file.txt & git commit -m "Initial commit"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: -C with a bit repo — redirects into .bit/index
+# ======================================================================
+
+# ---- rev-parse HEAD should work (proves git runs inside .bit/index) ----
+bit -C test\cli\output\work_dashc rev-parse HEAD
+<<<
+>>> /^[0-9a-f]{40}/
+>>>= 0
+
+# ---- log should show our commit ----
+bit -C test\cli\output\work_dashc log --oneline
+<<<
+>>> /Initial commit/
+>>>= 0
+
+# ---- status should work ----
+bit -C test\cli\output\work_dashc status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: -C with a plain git repo — passes through unchanged
+# ======================================================================
+
+# ---- rev-parse HEAD should work in plain git repo ----
+bit -C test\cli\output\work_dashc_plain rev-parse HEAD
+<<<
+>>> /^[0-9a-f]{40}/
+>>>= 0
+
+# ---- log should show commit from plain git repo ----
+bit -C test\cli\output\work_dashc_plain log --oneline
+<<<
+>>> /Initial commit/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: -C with nonexistent directory — git reports error
+# ======================================================================
+
+bit -C test\cli\output\work_dashc_nosuchdir rev-parse HEAD
+<<<
+>>>2 /cannot change to/
+>>>= 128
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_dashc 2>nul & rmdir /s /q test\cli\output\work_dashc_plain 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
