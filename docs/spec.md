@@ -55,6 +55,8 @@ When you find yourself writing logic that git or rclone already handles, stop an
 
 ### Directory Structure
 
+**Non-bare repo** (`bit init`):
+
 ```
 project/
 ├── actual_files/           # User's working directory (large files live here)
@@ -72,11 +74,26 @@ project/
     │   └── data/
     │       └── dataset.bin # Metadata file (NOT the actual data)
     ├── cache/              # Scan/verify cache (mtime+size) to skip re-hashing
+    ├── cas/                # Content-addressed store (bit-solid, structure only)
     ├── remotes/            # Named remote configs (typed)
     │   └── origin          # Remote type + optional target
     ├── devices/            # Device identity files
     └── target              # Legacy: single remote URL
 ```
+
+**Bare repo** (`bit init --bare project.git`):
+
+```
+project.git/                # Standard git bare repo
+├── HEAD
+├── config
+├── objects/
+├── refs/
+└── bit/                    # bit-specific data (note: bit/, not .bit/)
+    └── cas/                # Content-addressed store (bit-solid, structure only)
+```
+
+Bare repos are standard git bare repos with a `bit/` subdirectory. Git commands work naturally (git discovers the bare repo). bit does not wrap bare repos in `.bit/index/`. The `bit/` directory (not `.bit/`) is used because bare repos have no hidden directory convention — all contents are visible at the top level.
 
 **Transient paths (created and removed by operations):** Fetch downloads the cloud bundle to `.bit/temp_remote.bundle` before copying it to `.bit/index/.git/bundles/<name>.bundle`. Cloud text-file repair uses a temp file under `.bit/` when uploading restored content.
 
@@ -196,7 +213,13 @@ bit runs Git with:
 - Working tree is `.bit/index` (not the project root)
 - Ignore rules: user creates `.bitignore` in the project root. Before any command that uses working tree state (add, commit, status, diff, restore, checkout, merge, reset, mv), bit runs **syncBitignoreToIndex**: if `.bitignore` exists it is copied to `.bit/index/.gitignore` with normalization (line endings, trim, drop empty lines); if `.bitignore` does not exist, `.bit/index/.gitignore` is removed if present so the index has no ignore file. The index working tree is thus always in sync with the user's ignore rules for those commands.
 
-**Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes.
+**Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes. Creates `.bit/cas/` for future content-addressed storage.
+
+### Bare Init
+
+`bit init --bare [dir]` passes through directly to `git init --bare`, then creates a `bit/cas/` subdirectory inside the resulting bare repo. bit does not create `.bit/index/` or any other bit-specific structure — the bare repo is a standard git bare repo that git can discover and operate on natively.
+
+Known bit commands (`add`, `commit`, `status`, etc.) are rejected in bare repos with "fatal: this operation must be run in a work tree" (exit 128). Unknown commands pass through to git, which discovers the bare repo naturally.
 
 ### File Handling
 
@@ -365,6 +388,7 @@ Help (`bit help`, `bit -h`, `bit --help`, and `bit help <command>`) works withou
 | Command | Git Equivalent | bit Behavior |
 |---------|---------------|---------------|
 | `bit init` | `git init` | Initialize `.bit/` with internal Git repo |
+| `bit init --bare` | `git init --bare` | Create standard bare repo with `bit/cas/` |
 | `bit add <path>` | `git add` | Compute metadata, write to `.bit/index/`, stage in Git |
 | `bit add .` | `git add .` | Add all modified/new files |
 | `bit commit -m "msg"` | `git commit` | Commit staged metadata changes |
@@ -1091,12 +1115,22 @@ Alias types:
 Unknown commands (not handled by bit, no alias match) are forwarded to git:
 
 - **Inside a bit repo**: uses `runGitRawAt` to target `.bit/index/` via `-C`
+- **Inside a bare bit repo** (has `bit/` + `HEAD`): uses `runGitGlobal` (no `-C`) — git discovers the bare repo naturally
 - **Inside a git directory** (CWD has a `HEAD` file, e.g. user `cd`'d into `.git`): uses `runGitHere` — runs git without `-C` override, letting git's own repo discovery work. This is necessary because adding `-C .bit/index` would point to a nonexistent path relative to the `.git` directory.
 - **Outside any repo**: uses `runGitGlobal` (no `-C`)
 
 ### Init Dispatch Order
 
 `init` is dispatched **before** repository discovery (`findBitRoot`). This is critical because `init` creates repos — it must not be affected by a parent repo's `.bit/` directory. Without this, `cd existing-repo/subdir && bit init` would `setCurrentDirectory` to the parent root and re-initialize the parent instead of creating a new repo in `subdir/`.
+
+### Repo Discovery (`findBitRoot`)
+
+`findBitRoot` walks up from CWD and returns a `BitRoot` sum type:
+
+- **`NormalRoot FilePath`** — directory has `.bit/` (standard bit repo)
+- **`BareRoot FilePath`** — directory has `bit/` + `HEAD` (bare bit repo)
+
+Both are checked at each level, so a bare repo nested inside a normal repo's tree is detected at the correct (closest) level. This is important for git's test suite, where bare repos are created inside a trash directory that itself has a `.bit/` repo.
 
 ### BIT_CEILING_DIRECTORIES
 
@@ -1416,7 +1450,7 @@ Interactive per-file conflict resolution:
 
 ### Future (bit-solid)
 
-- Content-Addressed Storage (CAS)
+- Content-Addressed Storage (CAS) — directory structure exists (`.bit/cas/` for normal repos, `bit/cas/` for bare repos); wiring into `bit add`/push/pull is deferred
 - Sparse checkout via symlinks to CAS blobs
 - `bit materialize` / `bit checkout --sparse`
 
@@ -1426,7 +1460,8 @@ Interactive per-file conflict resolution:
 
 ### Implemented and Working
 
-- `bit init` — creates `.bit/`, initializes Git in `.bit/index/.git`; dispatched before repo discovery so nested init works correctly; supports `BIT_GIT_JUNCTION=1` for git test suite compatibility
+- `bit init` — creates `.bit/` (including `.bit/cas/`), initializes Git in `.bit/index/.git`; dispatched before repo discovery so nested init works correctly; supports `BIT_GIT_JUNCTION=1` for git test suite compatibility
+- `bit init --bare` — passes through to `git init --bare`, then creates `bit/cas/` inside the bare repo; bare repos are standard git bare repos with no `.bit/index/` wrapper
 - `bit add` — scans files, computes MD5 hashes, writes metadata, stages in Git
 - `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `reset`, `rm`, `mv`, `branch`, `merge` — delegate to Git
 - `bit remote add/show` — named remotes with device-aware resolution
@@ -1461,7 +1496,7 @@ Interactive per-file conflict resolution:
 
 | Module | Role |
 |--------|------|
-| `Bit/Commands.hs` | CLI dispatch, `findBitRoot` (walks up to discover repo), prefix computation, env setup; `init` dispatched before repo discovery; `tryAlias` expands git aliases and passes unknown commands through to git |
+| `Bit/Commands.hs` | CLI dispatch, `findBitRoot` (walks up to discover repo, returns `BitRoot`: `NormalRoot` or `BareRoot`), prefix computation, env setup; `init` dispatched before repo discovery; bare repos pass unknown commands through to git and reject known bit commands; `tryAlias` expands git aliases and passes unknown commands through to git |
 | `Bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit/Core.hs` | Re-exports public API from `Bit/Core/*.hs` sub-modules |
 | `Bit/Core/Push.hs` | Push logic + PushSeam transport abstraction |
