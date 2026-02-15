@@ -256,12 +256,12 @@ The rule applies symmetrically:
 **Push to full remote (sender must prove possession):**
 1. Verify local — every binary file must be substantiated (working tree or CAS)
 2. If verification fails, refuse to push
-3. If verified, sync files then push metadata (files first so the remote never has metadata referencing missing content)
+3. If verified, upload to remote CAS and sync readable paths, then push metadata
 
 **Pull from full remote (sender must prove possession):**
-1. Verify remote — every binary file on the remote must match the remote's metadata
+1. Verify remote — every binary file on the remote's readable tree must match the remote's metadata
 2. If verification fails, refuse to pull (suggest `--accept-remote`, `--force`, or `--manual-merge`)
-3. If verified, pull metadata then copy files
+3. If verified, pull metadata then copy files from readable paths
 
 **Push to bare remote (no verification needed):**
 1. Hash working tree files and upload into remote CAS layout
@@ -664,8 +664,8 @@ The `Bit.Device.Identity` module handles remote type classification and device r
   - `type: filesystem` (path lives only in git config as named remote)
   - `type: cloud\ntarget: gdrive:Projects/foo` (rclone path for transport)
   - `type: device\ntarget: black_usb:Backup` (device identity for resolution)
-- **Cloud remote layout:** Cloud remotes have a `layout` field that controls what is stored on the cloud:
-  - `layout: full` (default, backward compatible): Files are stored at human-readable paths mirroring the working tree. Users can browse files in Google Drive / S3 / etc. This is the current behavior.
+- **Cloud remote layout:** Cloud remotes have a `layout` field that controls what is stored on the cloud. Both layouts include a `cas/` directory for content-addressed storage:
+  - `layout: full` (default, backward compatible): Files are stored at human-readable paths mirroring the working tree AND in CAS. Users can browse files in Google Drive / S3 / etc.
   - `layout: bare`: Files are stored only in CAS layout (`cas/<prefix>/<hash>`). The cloud folder is opaque to humans — no browsable file tree, just hashed blobs and a metadata bundle. This is for pure backup where browsability is not needed.
   - Example remote config for bare layout: `type: cloud\ntarget: gdrive:Backup/foo\nlayout: bare`
 - **`bit remote add --bare`**: The `--bare` flag on `bit remote add` sets `layout: bare` in the remote config. It is only valid for cloud remotes — filesystem and device remotes are always full repos. Without `--bare`, cloud remotes default to `layout: full`. Examples:
@@ -698,7 +698,7 @@ resolveRemote :: FilePath -> String -> IO (Maybe Remote)
 Before push or fetch, the implementation classifies the remote with `classifyRemoteState`: it lists the remote at **depth 2** (`listRemoteItems remote 2`), then interprets the result purely:
 
 - **StateEmpty** — No items. Push will create and initialize the remote (e.g. `initializeRepoAt`). Fetch/pull abort with "Remote is empty. Run 'bit push' first."
-- **StateValidBit** — Any of: path `.bit/bit.bundle`, path `.bit/index`, any path with prefix `.bit/`, or name `.bit` (covers path format differences). Push and fetch proceed.
+- **StateValidBit** — Any of: path `.bit/bit.bundle`, path `.bit/index`, any path with prefix `.bit/`, or name `.bit` (covers path format differences). A `cas/` directory alongside `.bit/` also indicates a valid bit remote (both full and bare cloud layouts include `cas/`). Push and fetch proceed.
 - **StateNonBitOccupied** — Otherwise; up to 3 paths are shown. Push and fetch abort with "The remote path is not empty and not a bit repository" and the listed paths.
 
 ### Transport Strategies
@@ -719,14 +719,19 @@ For cloud remotes (Google Drive, S3, etc.), bit uses **dumb storage**:
 - Files are synced via rclone copy/move/delete operations
 - The remote is just a directory of files — no Git repo, no bit commands work there
 
-Cloud remotes support two layouts:
+Cloud remotes support two layouts. **Both layouts include a CAS directory** — the difference is whether a human-readable file tree also exists.
 
-**Full layout** (`layout: full`, default): Files are stored at human-readable paths on the cloud, mirroring the working tree structure. Users can open Google Drive and browse files directly. This is the current behavior.
+**Full layout** (`layout: full`, default): Files are stored at human-readable paths on the cloud, mirroring the working tree structure, AND in CAS. Users can open Google Drive and browse files directly. The CAS provides content-addressed backup alongside the browsable tree.
 
 ```
 gdrive:Projects/foo/
 ├── .bit/
 │   └── bit.bundle          # Metadata bundle
+├── cas/                     # Content-addressed store (always present)
+│   ├── a1/
+│   │   └── a1b2c3d4e5f6...
+│   └── f8/
+│       └── f8e9a0b1c2d3...
 ├── lectures/
 │   ├── lecture-01.mp3       # Actual files at readable paths
 │   └── lecture-02.mp3
@@ -734,7 +739,7 @@ gdrive:Projects/foo/
     └── dataset.bin
 ```
 
-**Bare layout** (`layout: bare`): Files are stored only in CAS layout — hashed blobs organized by prefix. No human-readable file tree exists on the cloud. This is for pure backup where browsability is not needed.
+**Bare layout** (`layout: bare`): Files are stored only in CAS layout — no human-readable file tree exists on the cloud. This is for pure backup where browsability is not needed.
 
 ```
 gdrive:Backup/foo/
@@ -748,11 +753,11 @@ gdrive:Backup/foo/
     └── ...
 ```
 
-**Bare layout push behavior:** On push to a bare remote, bit hashes each file in the working tree and uploads it into the remote's CAS layout (`cas/<first-2-chars>/<full-hash>`) via rclone, then uploads the metadata bundle. This works regardless of local mode — a lite-mode repo streams content directly to the remote CAS without populating local CAS. The local repo pays no disk cost; the remote gets a complete content-addressed backup.
+**Push behavior (both layouts):** On push, bit always uploads content into the remote's CAS layout (`cas/<first-2-chars>/<full-hash>`) via rclone, then uploads the metadata bundle. For full-layout remotes, bit additionally syncs files to human-readable paths (the existing diff-based rclone sync). This works regardless of local mode — a lite-mode repo streams content directly to the remote CAS without populating local CAS.
 
-**Bare layout pull behavior:** On pull from a bare remote, bit fetches the metadata bundle and merges as usual. For file sync, it reads the metadata to determine which hashes are needed, then downloads the corresponding blobs from `cas/<prefix>/<hash>` on the remote and places them at the correct working tree paths.
+**Pull behavior (both layouts):** On pull, bit fetches the metadata bundle and merges as usual. For file sync from a full remote, bit uses the existing diff-based sync from readable paths. For a bare remote, bit reads the metadata to determine which hashes are needed, then downloads the corresponding blobs from `cas/<prefix>/<hash>` on the remote and places them at the correct working tree paths.
 
-**Bare layout verification:** For bare cloud remotes, remote verification compares the hashes in the remote's metadata bundle against the CAS blob names on the remote (the blob filename *is* the hash). No content re-hashing is needed — if `cas/a1/a1b2c3d4e5f6...` exists, the content is correct by construction.
+**CAS verification:** On both full and bare cloud remotes, the CAS is self-verifying — blob filenames *are* content hashes. If `cas/a1/a1b2c3d4e5f6...` exists, the content is correct by construction. For full remotes, the proof of possession rule additionally verifies that the readable file tree matches metadata (since those mutable paths can drift independently of the CAS).
 
 **Cloud bundle lifecycle (both layouts):**
 
@@ -806,10 +811,11 @@ file sync — no remote scan), ancestry checks, `--force`/`--force-with-lease`, 
 
 **Cloud seam** (`mkCloudSeam`): Downloads/uploads git bundles via rclone. Bundles
 are stored per-remote at `.bit/index/.git/bundles/<name>.bundle` so `bit status`
-can compare against them. For bare-layout remotes, file sync uploads content
-into CAS layout (`cas/<prefix>/<hash>`) instead of readable paths — the seam
-reads the remote's `layout` field from `.bit/remotes/<n>` to determine the
-target path scheme.
+can compare against them. For both layouts, file sync uploads content
+into CAS layout (`cas/<prefix>/<hash>`). For full-layout remotes, it
+additionally syncs files to readable paths. The seam reads the remote's
+`layout` field from `.bit/remotes/<n>` to determine whether readable-path
+sync is needed.
 
 **Filesystem seam** (`mkFilesystemSeam`): Takes current working directory and remote; uses native git fetch/pull. The local index registers the remote's `.bit/index` as a named git remote; metadata is pushed via `git pull --ff-only` at the remote side.
 
@@ -819,7 +825,7 @@ target path scheme.
 3. **Classify remote state** via rclone (`classifyRemoteState`)
 4. **Fetch remote history** via seam (`ptFetchHistory`)
 5. **Ancestry/force checks** (`processExistingRemote`)
-6. **Sync files** via git diff + rclone (`syncRemoteFiles`) — for full remotes, derives actions from `getDiffNameStatus`; for bare remotes, uploads blobs to CAS layout
+6. **Sync files** — always upload to remote CAS; for full remotes, additionally sync readable paths via git diff + rclone (`syncRemoteFiles`)
 7. **Push metadata** via seam (`ptPushMetadata`)
 8. **Update tracking ref** (`Git.updateRemoteTrackingBranchToHead`) — same for both
 
@@ -1661,15 +1667,15 @@ Interactive per-file conflict resolution:
     accumulating history from that point forward. No migration, no data loss,
     instant switch.
 
-20. **Cloud remote layout (full vs bare) with streaming CAS**: Cloud remotes
-    support two layouts: `full` (files at readable paths, browsable in Google
-    Drive) and `bare` (CAS-only, opaque blobs), set at creation time via
-    `bit remote add <n> <url> --bare`. A lite-mode repo can push to a bare
-    remote by streaming content directly into the remote's CAS layout without
-    populating local CAS — the local repo pays no disk cost while the remote
-    gets a complete content-addressed backup. This is the compelling
-    "laptop-constrained user who wants a safety net" use case. Layout conversion
-    between full and bare is not supported — create a new remote instead.
+20. **Cloud remote layout (full vs bare), CAS always present**: Cloud remotes
+    support two layouts: `full` (readable file tree + CAS) and `bare`
+    (CAS-only), set at creation time via `bit remote add <n> <url> --bare`.
+    Both layouts always include a `cas/` directory — the only difference is
+    whether the human-readable file tree also exists. Push always uploads to
+    CAS; full-layout push additionally syncs readable paths. A lite-mode repo
+    streams content directly into the remote's CAS without populating local
+    CAS — the local repo pays no disk cost. Layout conversion between full and
+    bare is not supported — create a new remote instead.
 
 ### What We Deliberately Do NOT Do
 
