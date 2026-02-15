@@ -242,6 +242,8 @@ bit runs Git with:
 
 **Branch naming:** On fresh init, bit sets `init.defaultBranch=main` and renames `master` to `main` — unless the user passed `--initial-branch`/`-b`, in which case git's own branch naming is respected and bit does not override it.
 
+**Template path resolution:** `--template=<path>` and `--template <path>` flags are resolved to absolute paths before forwarding to git. This is necessary because git runs inside `.bit/index/` via `-C`, so relative template paths would resolve from the wrong directory.
+
 **Re-init:** Running `bit init` on an existing repo always forwards to `git init` (including on `.bit` bitlink repos from `--separate-git-dir`). Git prints "Reinitialized existing Git repository" and handles format changes, gitdir moves, etc. bit propagates git's exit code and output verbatim.
 
 **Global flags before init:** `bit -c key=val init [dir]` and `bit --bare init [dir]` are dispatched correctly — `-c` pairs and `--bare` are peeled from before the `init` subcommand and forwarded to git in the right position.
@@ -1148,10 +1150,13 @@ Alias types:
 
 Unknown commands (not handled by bit, no alias match) are forwarded to git:
 
-- **Inside a bit repo**: uses `runGitRawAt` to target `.bit/index/` via `-C`
+- **Inside a bit repo with `.git` junction/gitlink**: uses `runGitHere` (no `-C`) — when CWD has a `.git` directory (junction) or `.git` file (gitlink from `--separate-git-dir`), git's own repo discovery works natively. Using `-C .bit/index` would break commands like `git config -f <relative-path>` that expect paths relative to CWD.
+- **Inside a bit repo without `.git`**: uses `runGitRawAt` to target `.bit/index/` via `-C`
 - **Inside a bare bit repo** (has `bit/` + `HEAD`): uses `runGitGlobal` (no `-C`) — git discovers the bare repo naturally
 - **Inside a git directory** (CWD has a `HEAD` file, e.g. user `cd`'d into `.git`): uses `runGitHere` — runs git without `-C` override, letting git's own repo discovery work. This is necessary because adding `-C .bit/index` would point to a nonexistent path relative to the `.git` directory.
 - **Outside any repo**: uses `runGitGlobal` (no `-C`)
+
+**`GIT_DIR=/dev/null` bypass:** When `GIT_DIR` is set to `/dev/null` (or `NUL`/`nul` on Windows via MSYS2 path conversion), bit passes through to git immediately without any command parsing or `-C` insertion. This is needed for tools like `test_cmp` in git's test suite, which use `GIT_DIR=/dev/null git diff --no-index` to compare files outside any repository.
 
 ### `-C <dir>` Flag
 

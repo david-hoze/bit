@@ -22,7 +22,7 @@ import System.Exit (ExitCode(..))
 import System.IO (hPutStr, stderr)
 import Bit.Utils (atomicWriteFileStr, toPosix)
 import Bit.Path (RemotePath(..))
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, stripPrefix)
 import Data.Char (isSpace)
 
 -- | Options for 'bit init'.
@@ -94,10 +94,13 @@ initializeRepoAt targetDir opts = do
     let extraFlags = case mAbsSgdir of
             Just sgdir -> ["--separate-git-dir", sgdir]
             Nothing    -> []
+    -- Resolve relative --template paths to absolute (git runs with -C inside
+    -- .bit/index, so relative paths would resolve from the wrong directory)
+    resolvedGitFlags <- resolveTemplatePaths (initGitFlags opts)
     (code, out, err) <- Git.spawnGit $
         ["-C", targetBitIndexPath]
         ++ initGitGlobalFlags opts
-        ++ ("init" : extraFlags ++ initGitFlags opts)
+        ++ ("init" : extraFlags ++ resolvedGitFlags)
 
     -- Print git's output (tests need "Initialized empty" / "Reinitialized existing")
     putStr out
@@ -203,6 +206,24 @@ resolveBitLink path = do
             let raw = drop 8 (filter (/= '\r') firstLine)  -- drop "bitdir: "
             in pure raw
         [] -> pure path  -- fallback: treat as normal
+
+-- | Resolve --template paths in git init flags to absolute.
+-- git runs with -C inside .bit/index, so relative paths would resolve wrong.
+-- Handles both "--template=path" and "--template" "path" forms.
+resolveTemplatePaths :: [String] -> IO [String]
+resolveTemplatePaths [] = pure []
+resolveTemplatePaths ("--template":v:rest) = do
+    absV <- Dir.makeAbsolute v
+    rest' <- resolveTemplatePaths rest
+    pure ("--template" : absV : rest')
+resolveTemplatePaths (f:rest)
+    | Just v <- stripPrefix "--template=" f = do
+        absV <- if null v then pure v else Dir.makeAbsolute v
+        rest' <- resolveTemplatePaths rest
+        pure (("--template=" ++ absV) : rest')
+    | otherwise = do
+        rest' <- resolveTemplatePaths rest
+        pure (f : rest')
 
 -- | When BIT_GIT_JUNCTION=1, create a directory junction from
 -- @\<dir\>/.git@ to @\<dir\>/.bit/index/.git@ (if the target exists

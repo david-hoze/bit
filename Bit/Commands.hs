@@ -29,6 +29,13 @@ import Data.Text.Encoding (decodeUtf8')
 run :: IO ()
 run = do
     args <- getArgs
+    -- When GIT_DIR=/dev/null, git is being used as a standalone tool
+    -- (e.g. test_cmp on Windows uses "GIT_DIR=/dev/null git diff --no-index").
+    -- Pass through to git directly without .bit repo discovery.
+    -- MSYS2 converts /dev/null to NUL when passing to Windows processes.
+    mGitDir <- lookupEnv "GIT_DIR"
+    when (mGitDir `elem` [Just "/dev/null", Just "NUL", Just "nul"]) $
+        Git.runGitGlobal args >>= exitWith
     case args of
         []               -> Git.runGitGlobal [] >>= exitWith
         ["help"]         -> printMainHelp >> exitSuccess
@@ -160,10 +167,13 @@ tryAlias mIndexPath name rest = do
   where
     passthrough args = case mIndexPath of
         Just p  -> do
-            -- If CWD is itself a git dir (e.g. user cd'd into .git),
-            -- don't override with -C — let git's own discovery work.
-            insideGitDir <- Dir.doesFileExist "HEAD"
-            if insideGitDir
+            -- If CWD has .git (junction, gitlink, or directory), let git
+            -- discover the repo itself. This preserves the user's CWD for
+            -- relative paths in args (e.g. git config -f <path>).
+            -- Otherwise use -C .bit/index for repo discovery.
+            hasGitDir <- Dir.doesDirectoryExist ".git"
+            hasGitFile <- Dir.doesFileExist ".git"
+            if hasGitDir || hasGitFile
                 then Git.runGitHere args >>= exitWith
                 else Git.runGitRawAt p args >>= exitWith
         Nothing -> Git.runGitGlobal args >>= exitWith   -- no bit repo: bare git
@@ -375,7 +385,11 @@ runCommand args = do
           | hasForceWithLease = ForceWithLease
           | otherwise         = NoForce
     let concurrency = if isSequential then Sequential else Parallel 0
-    let cmd = filter (`notElem` ["--force", "-f", "--force-with-lease", "--sequential", "-h", "--help"]) args
+    -- Note: -f is NOT stripped here because it means different things per command
+    -- (e.g. -f = --file for config, -f = --force for checkout). The hasForce
+    -- check above detects it for push/pull force mode; passthrough commands
+    -- keep -f for git to interpret per-command.
+    let cmd = filter (`notElem` ["--force", "--force-with-lease", "--sequential", "-h", "--help"]) args
 
     -- Help intercept (before repo check — help works without a repo)
     when (hasHelp || hasTerseHelp) $ do
@@ -479,6 +493,8 @@ runCommand args = do
     let runPushWithUpstream name = baseEnv >>= \env -> pushWithUpstream env cwd name
     let optsAcceptRemote = Bit.PullOptions Bit.PullAcceptRemote
     let optsManualMerge = Bit.PullOptions Bit.PullManualMerge
+    let isPush ("push":_) = True
+        isPush _ = False
 
     case cmd of
         -- ── No env needed ────────────────────────────────────
@@ -524,10 +540,13 @@ runCommand args = do
         ("checkout":rest)               -> runScanned (Bit.checkout rest) >>= exitWith
         
         -- push (no scan needed — uses git metadata diff; requires upstream)
-        ["push"]                        -> runUpstream Bit.push
-        ["push", "-u", name]            -> runPushWithUpstream name
-        ["push", "--set-upstream", name] -> runPushWithUpstream name
-        ["push", name]                  -> runBaseWithRemote name Bit.push
+        -- Filter -f from push args (it means --force for push, detected via forceMode)
+        _ | isPush cmd -> case filter (/= "-f") cmd of
+            ["push"]                        -> runUpstream Bit.push
+            ["push", "-u", name]            -> runPushWithUpstream name
+            ["push", "--set-upstream", name] -> runPushWithUpstream name
+            ["push", name]                  -> runBaseWithRemote name Bit.push
+            _ -> Git.runGitRaw cmd >>= exitWith
         
         -- pull (no explicit remote: requires upstream, no "origin" fallback)
         ["pull"]                        -> runScannedUpstream $ Bit.pull Bit.defaultPullOptions

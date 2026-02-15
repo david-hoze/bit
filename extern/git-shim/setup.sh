@@ -20,8 +20,19 @@ DC_SHA1=
 X=''
 EOF
 
-# 2. Create templates/blt directory (test harness requires it)
-mkdir -p "$GIT_DIR/templates/blt"
+# 2. Create templates/blt directory with default template files
+# The test harness sets GIT_TEMPLATE_DIR to this directory.
+# Tests expect standard template files (e.g. info/exclude) to exist.
+mkdir -p "$GIT_DIR/templates/blt/info"
+mkdir -p "$GIT_DIR/templates/blt/hooks"
+cat > "$GIT_DIR/templates/blt/info/exclude" <<'TMPL'
+# git ls-files --others --exclude-from=.git/info/exclude
+# Lines that start with '#' are comments.
+# For a project-specific exclude file see gitignore(5).
+TMPL
+cat > "$GIT_DIR/templates/blt/description" <<'TMPL'
+Unnamed repository; edit this file 'description' to name the repository.
+TMPL
 
 echo "Git test infrastructure ready."
 echo "Run tests with:"
