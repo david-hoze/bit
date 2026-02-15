@@ -56,12 +56,12 @@ cd test\cli\output\work_alias & bit st
 >>>= 0
 
 # ======================================================================
-# TEST: Unknown command with no alias — should error
+# TEST: Unknown command with no alias — passes through to git
 # ======================================================================
 
 cd test\cli\output\work_alias & bit notacommand
 <<<
->>>2 /not a bit command/
+>>>2 /not a git command/
 >>>= 1
 
 # ======================================================================

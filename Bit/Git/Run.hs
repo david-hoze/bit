@@ -56,7 +56,9 @@ module Bit.Git.Run
     , NameStatusChange(..)
     , parseNameStatusOutput
     , getRemoteTrackingHash
+    , runGitHere
     , runGitGlobal
+    , spawnGit
     ) where
 
 import Data.Maybe (mapMaybe, listToMaybe)
@@ -71,6 +73,13 @@ import Prelude hiding (init)
 import Data.List (isPrefixOf)
 import System.IO (hPutStr, hPutStrLn, stderr)
 import System.Environment (lookupEnv)
+
+-- | The ONLY place in the entire codebase that spawns git.
+-- Respects BIT_REAL_GIT env var to avoid recursion when bit masquerades as git.
+spawnGit :: [String] -> IO (ExitCode, String, String)
+spawnGit args = do
+    bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
+    readProcessWithExitCode bin args ""
 
 baseFlags :: [String]
 baseFlags = ["-C", bitIndexPath]
@@ -110,7 +119,7 @@ runGit cmd = do
     let subArgs = translateCommand cmd
     let fullArgs = baseFlags ++ subArgs
     -- We use readProcessWithExitCode so we can handle errors without crashing
-    readProcessWithExitCode "git" fullArgs ""
+    spawnGit fullArgs
   where
     translateCommand :: GitCommand -> [String]
     translateCommand c = case c of
@@ -213,7 +222,7 @@ runGitRaw args = do
         ++ ["-c", "color.ui=" ++ colorFlag]
         ++ args
 
-  (code, out, err) <- readProcessWithExitCode "git" fullArgs ""
+  (code, out, err) <- spawnGit fullArgs
 
   putStr (rewriteGitHints out)
   hPutStr stderr (rewriteGitHints err)
@@ -238,7 +247,7 @@ runGitWithOutputIn :: FilePath -> [String] -> IO (ExitCode, String, String)
 runGitWithOutputIn "" args = runGitWithOutput args
 runGitWithOutputIn prefix args = do
   let fullArgs = ["-C", bitIndexPath </> prefix] ++ ["-c", "color.ui=never"] ++ args
-  readProcessWithExitCode "git" fullArgs ""
+  spawnGit fullArgs
 
 -- | Like runGitRaw but targets an arbitrary directory instead of .bit/index.
 runGitRawAt :: FilePath -> [String] -> IO ExitCode
@@ -253,7 +262,7 @@ runGitRawAt dir args = do
         ++ ["-c", "color.ui=" ++ colorFlag]
         ++ args
 
-  (code, out, err) <- readProcessWithExitCode "git" fullArgs ""
+  (code, out, err) <- spawnGit fullArgs
 
   putStr (rewriteGitHints out)
   hPutStr stderr (rewriteGitHints err)
@@ -291,17 +300,17 @@ merge   = runGitRaw . ("merge" :)
 -- | Add or update a remote (Git-style: git remote add <name> <url> / set-url if exists)
 addRemote :: String -> String -> IO ExitCode
 addRemote remoteName url = do
-    (code, _, _) <- readProcessWithExitCode "git" (baseFlags ++ ["remote", "get-url", remoteName]) ""
+    (code, _, _) <- spawnGit (baseFlags ++ ["remote", "get-url", remoteName])
     case code of
         ExitSuccess -> do
-            readProcessWithExitCode "git" (baseFlags ++ ["remote", "set-url", remoteName, url]) "" >>= \(c, _, _) -> pure c
+            spawnGit (baseFlags ++ ["remote", "set-url", remoteName, url]) >>= \(c, _, _) -> pure c
         ExitFailure _ -> do
-            readProcessWithExitCode "git" (baseFlags ++ ["remote", "add", remoteName, url]) "" >>= \(c, _, _) -> pure c
+            spawnGit (baseFlags ++ ["remote", "add", remoteName, url]) >>= \(c, _, _) -> pure c
 
 -- | Get the URL for a remote by name (git remote get-url <name>). Returns Nothing if remote missing.
 getRemoteUrl :: String -> IO (Maybe String)
 getRemoteUrl remoteName = do
-    (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["remote", "get-url", remoteName]) ""
+    (code, out, _) <- spawnGit (baseFlags ++ ["remote", "get-url", remoteName])
     pure $ case code of
         ExitSuccess -> Just (filter (/= '\n') out)
         _ -> Nothing
@@ -312,7 +321,7 @@ getRemoteUrl remoteName = do
 -- that "origin" fallback doesn't mean tracking IS configured.
 getTrackedRemoteName :: IO String
 getTrackedRemoteName = do
-    (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["config", "--get", "branch.main.remote"]) ""
+    (code, out, _) <- spawnGit (baseFlags ++ ["config", "--get", "branch.main.remote"])
     pure $ case code of
         ExitSuccess -> filter (/= '\n') out
         _ -> "origin"
@@ -324,7 +333,7 @@ getTrackedRemoteName = do
 -- (falls back to "origin", git-standard behavior).
 getConfiguredRemoteName :: IO (Maybe String)
 getConfiguredRemoteName = do
-    (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["config", "--get", "branch.main.remote"]) ""
+    (code, out, _) <- spawnGit (baseFlags ++ ["config", "--get", "branch.main.remote"])
     pure $ case code of
         ExitSuccess -> let name = filter (/= '\n') out
                        in if null name then Nothing else Just name
@@ -340,7 +349,7 @@ updateRemoteTrackingBranch name bundleName =
 -- "up to date with '<name>/main'" instead of "ahead by N commits".
 updateRemoteTrackingBranchToHash :: String -> String -> IO ExitCode
 updateRemoteTrackingBranchToHash name hash =
-    readProcessWithExitCode "git" (baseFlags ++ ["update-ref", remoteTrackingRef name, hash]) "" >>= \(c, _, _) -> pure c
+    spawnGit (baseFlags ++ ["update-ref", remoteTrackingRef name, hash]) >>= \(c, _, _) -> pure c
 
 -- | Set refs/remotes/<name>/main to current HEAD.
 -- WARNING: Only correct after PUSH (where remote now matches local HEAD).
@@ -349,7 +358,7 @@ updateRemoteTrackingBranchToHash name hash =
 -- See: "Tracking Ref Invariant" in docs/spec.md.
 updateRemoteTrackingBranchToHead :: String -> IO ExitCode
 updateRemoteTrackingBranchToHead name = do
-    (code, out, _) <- readProcessWithExitCode "git" (baseFlags ++ ["rev-parse", "HEAD"]) ""
+    (code, out, _) <- spawnGit (baseFlags ++ ["rev-parse", "HEAD"])
     case filter (/= '\n') out of
         hash | code == ExitSuccess && not (null hash) ->
             updateRemoteTrackingBranchToHash name hash
@@ -359,10 +368,10 @@ updateRemoteTrackingBranchToHead name = do
 -- Configures branch.main.remote and branch.main.merge
 setupBranchTrackingFor :: String -> IO ExitCode
 setupBranchTrackingFor remoteName = do
-    (code1, _, _) <- readProcessWithExitCode "git"
-        (baseFlags ++ ["config", "branch.main.remote", remoteName]) ""
-    (code2, _, _) <- readProcessWithExitCode "git"
-        (baseFlags ++ ["config", "branch.main.merge", "refs/heads/main"]) ""
+    (code1, _, _) <- spawnGit
+        (baseFlags ++ ["config", "branch.main.remote", remoteName])
+    (code2, _, _) <- spawnGit
+        (baseFlags ++ ["config", "branch.main.merge", "refs/heads/main"])
     case (code1, code2) of
         (ExitSuccess, ExitSuccess) -> pure ExitSuccess
         _ -> pure (ExitFailure 1)
@@ -375,14 +384,14 @@ setupBranchTracking = setupBranchTrackingFor "origin"
 -- | Unset the upstream for the current branch (clears "upstream is gone" when remote refs are missing)
 unsetBranchUpstream :: IO ExitCode
 unsetBranchUpstream = do
-    (code, _, _) <- readProcessWithExitCode "git" (baseFlags ++ ["branch", "--unset-upstream"]) ""
+    (code, _, _) <- spawnGit (baseFlags ++ ["branch", "--unset-upstream"])
     pure code
 
 -- | Run git with baseFlags; returns (exitCode, stdout, stderr). Does not rewrite hints.
 runGitWithOutput :: [String] -> IO (ExitCode, String, String)
 runGitWithOutput args = do
   let fullArgs = baseFlags ++ ["-c", "color.ui=never"] ++ args
-  readProcessWithExitCode "git" fullArgs ""
+  spawnGit fullArgs
 
 -- | Abort an in-progress merge.
 mergeAbort :: IO ExitCode
@@ -554,13 +563,33 @@ getFilesAtCommit gitRef = do
 -- This is used when operating on a remote filesystem repo directly.
 -- The indexPath should be the path to the .bit/index directory (NOT the .git subdirectory).
 runGitAt :: FilePath -> [String] -> IO (ExitCode, String, String)
-runGitAt indexPath args = readProcessWithExitCode "git" (["-C", indexPath] ++ args) ""
+runGitAt indexPath args = spawnGit (["-C", indexPath] ++ args)
+
+-- | Run git in the current directory without -C override.
+-- Used when CWD itself is a git directory (e.g. user cd'd into .git)
+-- and git's own repo discovery should be trusted as-is.
+runGitHere :: [String] -> IO ExitCode
+runGitHere args = do
+  noColor <- lookupEnv "BIT_NO_COLOR"
+  let colorFlag = case noColor of
+        Just "1" -> "never"
+        Just "true" -> "never"
+        _ -> "auto"
+  let fullArgs = ["-c", "color.ui=" ++ colorFlag] ++ args
+  (code, out, err) <- spawnGit fullArgs
+  putStr (rewriteGitHints out)
+  hPutStr stderr (rewriteGitHints err)
+  case code of
+    ExitSuccess   -> pure ()
+    ExitFailure n ->
+      hPutStrLn stderr ("bit: git exited with code " ++ show n)
+  pure code
 
 -- | Run git without -C .bit/index (no repo context).
 -- For commands that don't need a repo: --exec-path, --version, etc.
 runGitGlobal :: [String] -> IO ExitCode
 runGitGlobal args = do
-  (code, out, err) <- readProcessWithExitCode "git" args ""
+  (code, out, err) <- spawnGit args
   putStr out
   hPutStr stderr err
   pure code

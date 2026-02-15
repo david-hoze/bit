@@ -1,38 +1,16 @@
 #!/bin/bash
-# Shim: runs bit as git, then creates a .git directory junction for test compatibility.
+# Shim: runs bit as git for the git test suite.
+# Creates .git directory junctions via BIT_GIT_JUNCTION so git's repo
+# discovery works (tests expect a standard .git layout).
 
-case "$1" in
-init)
-    bit "$@"
-    rc=$?
-    [ $rc -ne 0 ] && exit $rc
+# Set BIT_REAL_GIT so bit's internal git calls don't recurse through this shim.
+# Find the real git by temporarily removing our directory from PATH.
+if [ -z "$BIT_REAL_GIT" ]; then
+    shim_dir="$(cd "$(dirname "$0")" && pwd)"
+    clean_path=$(echo "$PATH" | tr ':' '\n' | grep -v "^${shim_dir}$" | tr '\n' ':' | sed 's/:$//')
+    BIT_REAL_GIT=$(PATH="$clean_path" command -v git)
+    export BIT_REAL_GIT
+fi
 
-    # Find the target directory from args (last non-flag argument, or cwd)
-    dir=
-    skip_next=false
-    shift  # skip "init"
-    for arg; do
-        if $skip_next; then skip_next=false; continue; fi
-        case "$arg" in
-            --template|--separate-git-dir|--object-format|--ref-format|-b|--initial-branch)
-                skip_next=true ;;
-            --template=*|--separate-git-dir=*|--object-format=*|--ref-format=*|--initial-branch=*) ;;
-            --bare|--quiet|-q|--shared*) ;;
-            -*) ;;
-            *) dir="$arg" ;;
-        esac
-    done
-    dir="${dir:-.}"
-
-    # Create directory junction: <dir>/.git -> <dir>/.bit/index/.git
-    if [ -d "$dir/.bit/index/.git" ] && [ ! -e "$dir/.git" ]; then
-        target=$(cygpath -w "$(cd "$dir/.bit/index/.git" && pwd)")
-        link=$(cygpath -w "$(cd "$dir" && pwd)/.git")
-        cmd //c mklink //j "$link" "$target" > /dev/null 2>&1
-    fi
-    exit $rc
-    ;;
-*)
-    exec bit "$@"
-    ;;
-esac
+export BIT_GIT_JUNCTION=1
+exec bit "$@"

@@ -74,8 +74,9 @@ $jobs = $parallelTests | ForEach-Object {
     $file = $_.FullName
     $pathForJob = $env:PATH
     Start-Job -ScriptBlock {
-        param($file, $pathEnv)
+        param($file, $pathEnv, $workDir)
         $env:PATH = $pathEnv
+        Set-Location $workDir
         $output = shelltest --debug $file 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
         $passed = 0; $failed = 0
@@ -88,7 +89,7 @@ $jobs = $parallelTests | ForEach-Object {
             ExitCode = $exitCode
             Output   = $output
         }
-    } -ArgumentList $file, $pathForJob
+    } -ArgumentList $file, $pathForJob, $projectRoot
 }
 
 $results = @($jobs | Wait-Job | Receive-Job)

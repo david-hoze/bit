@@ -40,7 +40,7 @@ import qualified Bit.Scan.Remote as Remote.Scan
 import qualified Bit.Remote
 import qualified Bit.Rclone.Run as Transport
 import Bit.Config.Paths (bundleForRemote, bitIndexPath, bundleCwdPath, fromCwdPath, BundleName)
-import System.Process (readProcessWithExitCode)
+-- System.Process no longer needed: all git calls go through Git.spawnGit
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
 import System.IO (hPutStrLn, stderr)
@@ -145,8 +145,8 @@ loadMetadata (FromFilesystem indexDir) concurrency = do
 
 loadMetadata (FromCommit commitHash) _concurrency = do
   -- ls-tree at ROOT level (no prefix!) to enumerate all files
-  (code, out, _) <- readProcessWithExitCode "git"
-    [ "-C", bitIndexPath, "-c", "core.quotePath=false", "ls-tree", "-r", "--name-only", commitHash ] ""
+  (code, out, _) <- Git.spawnGit
+    [ "-C", bitIndexPath, "-c", "core.quotePath=false", "ls-tree", "-r", "--name-only", commitHash ]
   case code of
     ExitSuccess -> do
       let paths = filter isUserFile $ filter (not . null) $ lines out
@@ -162,8 +162,8 @@ readEntryFromFilesystem indexDir relPath =
 readEntryFromCommit :: String -> FilePath -> IO MetadataEntry
 readEntryFromCommit commitHash relPath = do
   -- NOTE: path is at root level in the commit tree, NOT under index/
-  (code, content, _) <- readProcessWithExitCode "git"
-    [ "-C", bitIndexPath, "show", commitHash ++ ":" ++ relPath ] ""
+  (code, content, _) <- Git.spawnGit
+    [ "-C", bitIndexPath, "show", commitHash ++ ":" ++ relPath ]
   pure $ case code of
     ExitSuccess -> classifyMetadata (Path relPath) content
     _           -> TextEntry (Path relPath)
@@ -351,8 +351,8 @@ loadMetadataFromBundle bundleName = do
         then do
           -- Objects not in repo yet — fetch from bundle file directly
           let bundlePath = fromCwdPath (bundleCwdPath bundleName)
-          (fetchCode, _, _) <- readProcessWithExitCode "git"
-            ["-C", bitIndexPath, "fetch", bundlePath, "+refs/heads/*:refs/remotes/bundle/*"] ""
+          (fetchCode, _, _) <- Git.spawnGit
+            ["-C", bitIndexPath, "fetch", bundlePath, "+refs/heads/*:refs/remotes/bundle/*"]
           case fetchCode of
             ExitSuccess -> loadMetadata (FromCommit headHash) Sequential
             _ -> pure []

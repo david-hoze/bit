@@ -13,7 +13,6 @@ import Bit.IO.Concurrency (Concurrency(..))
 import qualified Bit.Device.RemoteWorkspace as RemoteWorkspace
 import System.Environment (getArgs, lookupEnv)
 import Bit.Help (printMainHelp, printTerseHelp, printCommandHelp)
-import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..), exitWith, exitSuccess)
 import System.FilePath ((</>), makeRelative, takeDirectory)
 import System.IO (hPutStrLn, stderr)
@@ -99,27 +98,34 @@ isKnownCommand name = name `elem`
     , "help"
     ]
 
--- | Try to expand a git alias and re-dispatch. Falls back to error.
+-- | Try to expand a git alias and re-dispatch, or pass through to git.
 -- When a .bit/index path is available, queries local+global config;
 -- otherwise queries global config only.
+-- If no alias is found, passes the command through to git directly.
 tryAlias :: Maybe FilePath -> String -> [String] -> IO ()
 tryAlias mIndexPath name rest = do
     let gitArgs = case mIndexPath of
             Just p  -> ["-C", p, "config", "--get", "alias." ++ name]
             Nothing -> ["config", "--get", "alias." ++ name]
-    (code, out, _) <- readProcessWithExitCode "git" gitArgs ""
+    (code, out, _) <- Git.spawnGit gitArgs
     case code of
         ExitSuccess ->
             let expanded = words (filter (/= '\r') (filter (/= '\n') out))
             in case expanded of
                 ("!":_) -> Git.runGitGlobal (name : rest) >>= exitWith  -- shell alias
-                [] -> do
-                    hPutStrLn stderr $ "bit: '" ++ name ++ "' is not a bit command. See 'bit help'."
-                    exitWith (ExitFailure 1)
-                _ -> runCommand (expanded ++ rest)
-        _ -> do
-            hPutStrLn stderr $ "bit: '" ++ name ++ "' is not a bit command. See 'bit help'."
-            exitWith (ExitFailure 1)
+                [] -> passthrough (name : rest)
+                _ -> runCommand (expanded ++ rest) >> exitSuccess
+        _ -> passthrough (name : rest)
+  where
+    passthrough args = case mIndexPath of
+        Just p  -> do
+            -- If CWD is itself a git dir (e.g. user cd'd into .git),
+            -- don't override with -C — let git's own discovery work.
+            insideGitDir <- Dir.doesFileExist "HEAD"
+            if insideGitDir
+                then Git.runGitHere args >>= exitWith
+                else Git.runGitRawAt p args >>= exitWith
+        Nothing -> Git.runGitGlobal args >>= exitWith   -- no bit repo: bare git
 
 -- | Result of extracting a remote target from CLI args.
 data RemoteExtract
@@ -300,6 +306,11 @@ runCommand args = do
                 then printTerseHelp key >> exitSuccess
                 else printCommandHelp key >> exitSuccess
 
+    -- init runs before repo discovery — it creates repos, not uses them.
+    case cmd of
+        ("init":rest) -> runInit rest >> exitSuccess
+        _ -> pure ()
+
     origCwd <- Dir.getCurrentDirectory
     mRoot <- findBitRoot origCwd
     let bitExists = case mRoot of { Just _ -> True; Nothing -> False }
@@ -317,9 +328,8 @@ runCommand args = do
         (name:rest) | not (isKnownCommand name) -> tryAlias mIndexPath name rest
         _ -> pure ()
 
-    -- Repo existence check (skip for init and unknown commands handled above)
-    let needsRepo = case cmd of { ("init":_) -> False; _ -> True }
-    when (needsRepo && not bitExists) $ do
+    -- Repo existence check (init and unknown commands already handled above)
+    when (not bitExists) $ do
         hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
         exitWith (ExitFailure 1)
 
@@ -370,7 +380,7 @@ runCommand args = do
 
     case cmd of
         -- ── No env needed ────────────────────────────────────
-        ("init":rest)                   -> runInit rest
+        -- (init is dispatched earlier, before repo discovery)
         ["remote", "add", name, url]    -> Bit.remoteAdd name url
         ["fsck"]                        -> Bit.fsck cwd
         ["merge", "--abort"]            -> Bit.mergeAbort

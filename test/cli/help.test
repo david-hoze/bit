@@ -73,10 +73,10 @@ cd test\cli\output\work_help & bit help merge --continue
 >>> /usage: bit merge --continue/
 >>>= 0
 
-# bit with unknown command prints error to stderr and exits 1 (needs repo)
+# bit with unknown command passes through to git (needs repo)
 cd test\cli\output\work_help & bit init >nul 2>&1 & bit frobnicate 2>&1
 <<<
->>> /not a bit command/
+>>> /not a git command/
 >>>= 1
 
 # Cleanup

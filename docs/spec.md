@@ -1036,7 +1036,7 @@ File copy operations during push/pull now have progress reporting (`Bit/CopyProg
 
 **Command Classification**:
 
-1. **No env needed**: `init`, `remote add`, `fsck`, `merge --abort`, `branch --unset-upstream`. Also `log`, `ls-files`, and `branch` (with args) — in the code they are invoked directly (no `runBase`); they call `Git.runGitRawIn` with the subdirectory prefix so git resolves paths relative to the user's cwd. They do not build or use a `BitEnv`.
+1. **No env needed**: `remote add`, `fsck`, `merge --abort`, `branch --unset-upstream`. Also `log`, `ls-files`, and `branch` (with args) — in the code they are invoked directly (no `runBase`); they call `Git.runGitRawIn` with the subdirectory prefix so git resolves paths relative to the user's cwd. They do not build or use a `BitEnv`. **Note:** `init` is dispatched even earlier — before `findBitRoot` — so it never enters the env/scan machinery.
 
 2. **Env, no scan** (runBase or runUpstream or runBaseWithRemote):
    - `remote show` — runBase; read config/remote state
@@ -1069,6 +1069,58 @@ bit commands work from any subdirectory of a bit repository, matching git's beha
 **Passthrough Functions**: IO passthrough functions (`add`, `commit`, `diff`, `log`, `lsFiles`, etc.) take `FilePath` prefix as their first parameter. BitM passthrough functions (`status`, `rm`, `doRestore`, `doCheckout`) extract prefix from `envPrefix`. `doRestore` and `doCheckout` prepend prefix to user path arguments before passing them to `syncTextFilesFromIndex`, which needs paths relative to the repo root.
 
 **Unchanged**: Internal repo-level operations (`mergeContinue`, `doMergeAbort`, `unsetUpstream`) and all Core modules (Push, Pull, Fetch, Verify, etc.) continue using un-prefixed git operations — they always operate on the full repository.
+
+---
+
+## Alias Expansion and Passthrough
+
+### Alias Expansion
+
+bit expands git aliases before dispatching, matching git's behavior. When a command is not a known bit command, `tryAlias` queries git config for `alias.<name>`:
+
+- **Inside a bit repo**: queries local config (`.bit/index/.git/config`) and global config
+- **Outside a bit repo**: queries global config only
+
+Alias types:
+- **Simple aliases** (e.g. `alias.ci = commit`): expanded and re-dispatched through `runCommand`
+- **Shell aliases** (starting with `!`): forwarded to git directly via `runGitGlobal`
+- **No alias found**: passed through to git (see Passthrough below)
+
+### Passthrough
+
+Unknown commands (not handled by bit, no alias match) are forwarded to git:
+
+- **Inside a bit repo**: uses `runGitRawAt` to target `.bit/index/` via `-C`
+- **Inside a git directory** (CWD has a `HEAD` file, e.g. user `cd`'d into `.git`): uses `runGitHere` — runs git without `-C` override, letting git's own repo discovery work. This is necessary because adding `-C .bit/index` would point to a nonexistent path relative to the `.git` directory.
+- **Outside any repo**: uses `runGitGlobal` (no `-C`)
+
+### Init Dispatch Order
+
+`init` is dispatched **before** repository discovery (`findBitRoot`). This is critical because `init` creates repos — it must not be affected by a parent repo's `.bit/` directory. Without this, `cd existing-repo/subdir && bit init` would `setCurrentDirectory` to the parent root and re-initialize the parent instead of creating a new repo in `subdir/`.
+
+### BIT_CEILING_DIRECTORIES
+
+Analogous to `GIT_CEILING_DIRECTORIES`. When set, `findBitRoot` stops walking up at the specified directory and will not search above it. Used by tests to prevent accidental discovery of the development repo's `.bit/`.
+
+---
+
+## Git Test Suite Compatibility
+
+### Git Shim (`extern/git-shim/`)
+
+The shim allows running git's own test suite with bit acting as git. It sets two environment variables and delegates everything to bit:
+
+- **`BIT_REAL_GIT`**: Path to the real git binary. Prevents recursion when bit's internal git calls would go through the shim. `spawnGit` in `Bit/Git/Run.hs` checks this variable and uses the real git instead of the shim.
+- **`BIT_GIT_JUNCTION=1`**: Tells `initializeRepoAt` to create a `.git` directory junction pointing to `.bit/index/.git` after creating a repo. This allows git's repo discovery to work naturally — tests that do `cd .git && git config` find the git directory through the junction.
+
+The junction uses Windows `mklink /j` (directory junction), which does not require admin privileges. It is only created when `BIT_GIT_JUNCTION=1` is set — normal bit usage does not create junctions.
+
+### Running Tests
+
+```bash
+cd extern/git/t
+GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
+```
 
 ---
 
@@ -1374,7 +1426,7 @@ Interactive per-file conflict resolution:
 
 ### Implemented and Working
 
-- `bit init` — creates `.bit/`, initializes Git in `.bit/index/.git`
+- `bit init` — creates `.bit/`, initializes Git in `.bit/index/.git`; dispatched before repo discovery so nested init works correctly; supports `BIT_GIT_JUNCTION=1` for git test suite compatibility
 - `bit add` — scans files, computes MD5 hashes, writes metadata, stages in Git
 - `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `reset`, `rm`, `mv`, `branch`, `merge` — delegate to Git
 - `bit remote add/show` — named remotes with device-aware resolution
@@ -1393,6 +1445,8 @@ Interactive per-file conflict resolution:
 - Device-identity system for filesystem remotes (UUID + hardware serial)
 - Filesystem remote transport (full bit repo at remote, direct git fetch/merge)
 - Conflict resolution module with structured traversal (always commits when MERGE_HEAD exists)
+- Git alias expansion and catch-all passthrough for unknown commands
+- Git test suite shim (`extern/git-shim/`) with `BIT_REAL_GIT` and `BIT_GIT_JUNCTION` env vars
 - Unified metadata parsing/serialization
 - `oldHead` pattern for diff-based working-tree sync across all pull/merge paths
 - Strict ByteString IO throughout — no lazy IO, eliminates Windows file locking issues
@@ -1407,7 +1461,7 @@ Interactive per-file conflict resolution:
 
 | Module | Role |
 |--------|------|
-| `Bit/Commands.hs` | CLI dispatch, `findBitRoot` (walks up to discover repo), prefix computation, env setup |
+| `Bit/Commands.hs` | CLI dispatch, `findBitRoot` (walks up to discover repo), prefix computation, env setup; `init` dispatched before repo discovery; `tryAlias` expands git aliases and passes unknown commands through to git |
 | `Bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit/Core.hs` | Re-exports public API from `Bit/Core/*.hs` sub-modules |
 | `Bit/Core/Push.hs` | Push logic + PushSeam transport abstraction |
@@ -1416,7 +1470,7 @@ Interactive per-file conflict resolution:
 | `Bit/Core/Helpers.hs` | Shared types (PullMode, PullOptions) + utility functions |
 | `Bit/Core/RemoteManagement.hs` | Remote add/show and device-name prompting |
 | `Bit/Core/Conflict.hs` | Conflict resolution: Resolution, DeletedSide, ConflictInfo, resolveAll |
-| `Bit/Git/Run.hs` | Git command wrapper; `runGitRawIn`/`runGitWithOutputIn` for prefix-aware subdirectory dispatch; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths |
+| `Bit/Git/Run.hs` | Git command wrapper; `runGitRawIn`/`runGitWithOutputIn` for prefix-aware subdirectory dispatch; `AncestorQuery` (aqAncestor, aqDescendant) for `checkIsAhead`; `runGitAt`/`runGitRawAt` for arbitrary paths; `runGitHere` for running git without `-C` when CWD is a git directory; `spawnGit` respects `BIT_REAL_GIT` to avoid shim recursion |
 | `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, etc.); IO functions take prefix for subdirectory support; BitM functions extract prefix from `envPrefix` |
 | `Bit/Rclone/Run.hs` | Rclone command wrapper; `remoteFilePath` for trailing-slash-safe remote path construction |
 | `Bit/Rclone/Sync.hs` | Shared action derivation + working-tree sync |
@@ -1590,8 +1644,9 @@ See `test/cli/README.md` "Forbidden Patterns" section for detailed explanation a
   not fully complete due to file locking, causing "directory already exists"
   errors; use `git init` + `git fetch` + `git reset --hard` instead
 - Call `git` directly via `readProcessWithExitCode "git"` or `System.Process`
-  outside `Bit/Git/Run.hs` — all git commands must go through `Git.runGitRaw`,
-  `Git.runGitAt`, or the typed wrappers in `Bit/Git/Run.hs`. This keeps the
+  outside `Bit/Git/Run.hs` — all git commands must go through `Git.spawnGit`,
+  `Git.runGitRaw`, `Git.runGitAt`, or the typed wrappers in `Bit/Git/Run.hs`.
+  `spawnGit` respects `BIT_REAL_GIT` to avoid shim recursion. This keeps the
   git interface in one place, makes the `-C .bit/index` base flags consistent,
   and prevents accidental git calls against the wrong working directory
 - Copy or transfer files without rclone outside `Bit/Rclone/Run.hs` —

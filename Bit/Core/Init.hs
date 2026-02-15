@@ -16,9 +16,11 @@ import qualified Bit.IO.Platform as Platform
 import System.FilePath ((</>))
 import Control.Monad (unless, void, when)
 import qualified Bit.Git.Run as Git
-import System.Process (readProcessWithExitCode)
+import System.Environment (lookupEnv)
+import System.Process (callCommand)
 import Bit.Utils (atomicWriteFileStr, toPosix)
 import Bit.Path (RemotePath(..))
+import Data.Char (isSpace)
 
 -- | Options for 'bit init'.
 data InitOptions = InitOptions
@@ -75,7 +77,7 @@ initializeRepoAt targetDir opts = do
         -- git 2.35.2+ rejects directories with different ownership
         absIndex <- Dir.makeAbsolute targetBitIndexPath
         let safePath = toPosix absIndex
-        void $ readProcessWithExitCode "git" ["config", "--global", "--add", "safe.directory", safePath] ""
+        void $ Git.spawnGit ["config", "--global", "--add", "safe.directory", safePath]
 
     -- 3a. Create .git/bundles directory for storing bundle files
     -- With --separate-git-dir, .git is a gitlink file; git resolves it transparently
@@ -130,6 +132,33 @@ initializeRepoAt targetDir opts = do
     infoDir <- getInfoDir
     Platform.createDirectoryIfMissing True infoDir
     atomicWriteFileStr (infoDir </> "attributes") "* merge=bit-metadata -text\n"
+
+    -- 6. Create .git junction for test compatibility (BIT_GIT_JUNCTION=1).
+    -- Points <targetDir>/.git -> <targetDir>/.bit/index/.git so git's
+    -- repo discovery works without -C override.
+    createGitJunction targetDir targetBitGitDir
+
+-- | When BIT_GIT_JUNCTION=1, create a directory junction from
+-- @\<dir\>/.git@ to @\<dir\>/.bit/index/.git@ (if the target exists
+-- and the link doesn't).
+createGitJunction :: FilePath -> FilePath -> IO ()
+createGitJunction targetDir targetBitGitDir = do
+    mJunction <- lookupEnv "BIT_GIT_JUNCTION"
+    -- Trim whitespace: cmd.exe "set VAR=1 &" includes trailing space in value
+    let enabled = case mJunction of
+            Just v  -> filter (not . isSpace) v == "1"
+            Nothing -> False
+    when enabled $ do
+        let link = targetDir </> ".git"
+        linkExists <- Platform.doesDirectoryExist link
+        fileExists <- Platform.doesFileExist link
+        targetExists <- Platform.doesDirectoryExist targetBitGitDir
+        when (targetExists && not linkExists && not fileExists) $ do
+            absTarget <- Dir.makeAbsolute targetBitGitDir
+            absLink <- Dir.makeAbsolute link
+            -- Use mklink /j (directory junction) — no admin rights needed.
+            -- Dir.createDirectoryLink creates a symlink which requires elevation.
+            callCommand $ "mklink /j \"" ++ absLink ++ "\" \"" ++ absTarget ++ "\" >nul"
 
 -- | Initialize a bit repository at a remote filesystem location.
 -- Typed wrapper around 'initializeRepoAt' that accepts 'RemotePath'

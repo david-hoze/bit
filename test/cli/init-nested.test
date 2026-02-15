@@ -1,0 +1,94 @@
+# =============================================================================
+# Init Nested - bit init inside existing repos and with BIT_GIT_JUNCTION
+#
+# Tests that init is dispatched before repo discovery, so nested init
+# works correctly. Also tests BIT_GIT_JUNCTION creating .git junctions.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_init_nested 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_init_nested
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# TEST: Init creates repo in specified directory
+# ======================================================================
+
+cd test\cli\output\work_init_nested & bit init parent
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# TEST: Nested init inside existing repo (no dir argument)
+# ======================================================================
+
+# Create a subdirectory inside the existing repo and init there.
+# bit init must initialize in CWD, not walk up to parent's .bit.
+cd test\cli\output\work_init_nested\parent & mkdir nested & cd nested & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Verify nested dir got its own .bit
+cd test\cli\output\work_init_nested\parent\nested & dir /b .bit
+<<<
+>>> /config/
+>>>= 0
+
+# ======================================================================
+# TEST: Nested init inside existing repo (with dir argument)
+# ======================================================================
+
+cd test\cli\output\work_init_nested\parent & bit init sibling
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Verify sibling got its own .bit
+cd test\cli\output\work_init_nested\parent\sibling & dir /b .bit
+<<<
+>>> /config/
+>>>= 0
+
+# ======================================================================
+# TEST: BIT_GIT_JUNCTION creates .git junction
+# ======================================================================
+
+# With BIT_GIT_JUNCTION=1, init should create a .git directory junction.
+# .git junction contains HEAD (from .bit/index/.git).
+set BIT_GIT_JUNCTION=1 & cd test\cli\output\work_init_nested & bit init junctiontest & dir /b junctiontest\.git
+<<<
+>>> /HEAD/
+>>>= 0
+
+# ======================================================================
+# TEST: Without BIT_GIT_JUNCTION, no .git junction
+# ======================================================================
+
+# Normal init (no BIT_GIT_JUNCTION) should NOT create .git
+cd test\cli\output\work_init_nested & bit init nojunction & dir /b nojunction\.git 2>&1
+<<<
+>>> /File Not Found|cannot find/
+>>>= 1
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_init_nested 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
