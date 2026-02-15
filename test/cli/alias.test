@@ -1,0 +1,75 @@
+# =============================================================================
+# Alias Expansion - bit expands git aliases and re-dispatches
+#
+# Tests that bit reads git aliases from config and expands them before
+# dispatching. Shell aliases (starting with !) are forwarded to git.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_alias 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_alias
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_alias & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# TEST: Simple alias expansion (aliased init in a subdirectory)
+# ======================================================================
+
+# Configure a git alias in the bit repo's git config
+cd test\cli\output\work_alias & git -C .bit\index config alias.ci "commit"
+<<<
+>>>= 0
+
+# Use the alias — should expand to "bit commit" and show "nothing to commit"
+cd test\cli\output\work_alias & bit ci
+<<<
+>>> /nothing to commit/
+>>>= 1
+
+# ======================================================================
+# TEST: Alias with arguments
+# ======================================================================
+
+# Alias that includes flags
+cd test\cli\output\work_alias & git -C .bit\index config alias.st "status --short"
+<<<
+>>>= 0
+
+# Should expand to "bit status --short"
+cd test\cli\output\work_alias & bit st
+<<<
+>>>= 0
+
+# ======================================================================
+# TEST: Unknown command with no alias — should error
+# ======================================================================
+
+cd test\cli\output\work_alias & bit notacommand
+<<<
+>>>2 /not a bit command/
+>>>= 1
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_alias 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

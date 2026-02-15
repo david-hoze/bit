@@ -3,6 +3,7 @@
 import System.Process (callProcess, readProcess)
 import System.Environment (getEnvironment, setEnv)
 import System.FilePath (takeDirectory, (</>))
+import qualified System.Directory as Dir
 import Data.List (lookup)
 import System.Info (os)
 
@@ -45,6 +46,9 @@ main = do
         Nothing -> bitDir
         Just p  -> bitDir ++ pathSep ++ p
   setEnv "PATH" path
+  -- Set BIT_CEILING_DIRECTORIES so findBitRoot won't walk past test output dirs
+  cwd <- Dir.getCurrentDirectory
+  setEnv "BIT_CEILING_DIRECTORIES" (cwd </> "test" </> "cli" </> "output")
   let cliDir = "test" </> "cli"
   let testPaths = map (cliDir </>) cliFastTests
   callProcess "shelltest" testPaths

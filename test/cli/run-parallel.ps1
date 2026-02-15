@@ -13,6 +13,9 @@ $ErrorActionPreference = "Continue"
 $projectRoot = (Get-Location).Path
 $testDir = "test\cli"
 
+# Prevent findBitRoot from walking past test output dirs into the parent repo
+$env:BIT_CEILING_DIRECTORIES = "$projectRoot\test\cli\output"
+
 # Tests that must run sequentially (contend on remote-init resources)
 $serial = @("remote-flag.test", "remote-targeted.test")
 

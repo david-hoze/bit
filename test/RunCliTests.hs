@@ -7,6 +7,7 @@ import Control.Exception (catch, SomeException)
 import Control.Monad (void)
 import System.Environment (getEnvironment, setEnv)
 import System.FilePath (takeDirectory, (</>))
+import qualified System.Directory as Dir
 import Data.List (lookup)
 import System.Info (os)
 
@@ -26,5 +27,9 @@ main = do
         Nothing -> bitDir
         Just p  -> bitDir ++ pathSep ++ p
   setEnv "PATH" path
+  -- Set BIT_CEILING_DIRECTORIES so findBitRoot won't walk past test output dirs
+  -- into the parent repo. Tests create work dirs under test/cli/output/.
+  cwd <- Dir.getCurrentDirectory
+  setEnv "BIT_CEILING_DIRECTORIES" (cwd </> "test" </> "cli" </> "output")
   -- Run shelltest on test/cli (Format 3 .test files)
   callProcess "shelltest" ["test" </> "cli"]

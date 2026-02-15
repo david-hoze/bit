@@ -11,8 +11,9 @@ import qualified Bit.Device.Identity as Device
 import Bit.Utils (atomicWriteFileStr)
 import Bit.IO.Concurrency (Concurrency(..))
 import qualified Bit.Device.RemoteWorkspace as RemoteWorkspace
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
 import Bit.Help (printMainHelp, printTerseHelp, printCommandHelp)
+import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..), exitWith, exitSuccess)
 import System.FilePath ((</>), makeRelative, takeDirectory)
 import System.IO (hPutStrLn, stderr)
@@ -20,6 +21,7 @@ import Control.Monad (when, unless, void)
 import qualified System.Directory as Dir
 import qualified Bit.Git.Run as Git
 import Data.List (dropWhileEnd, isPrefixOf)
+import qualified System.Info
 -- Strict IO imports to avoid Windows file locking issues
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -87,6 +89,37 @@ isGitGlobalFlag :: [String] -> Bool
 isGitGlobalFlag (flag:_) = flag `elem`
     ["--exec-path", "--version", "--html-path", "--man-path", "--info-path"]
 isGitGlobalFlag _ = False
+
+-- | Commands that bit handles natively (not aliases).
+isKnownCommand :: String -> Bool
+isKnownCommand name = name `elem`
+    [ "init", "add", "commit", "diff", "status", "log", "ls-files"
+    , "rm", "mv", "reset", "restore", "checkout", "branch", "merge"
+    , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
+    , "help"
+    ]
+
+-- | Try to expand a git alias and re-dispatch. Falls back to error.
+-- When a .bit/index path is available, queries local+global config;
+-- otherwise queries global config only.
+tryAlias :: Maybe FilePath -> String -> [String] -> IO ()
+tryAlias mIndexPath name rest = do
+    let gitArgs = case mIndexPath of
+            Just p  -> ["-C", p, "config", "--get", "alias." ++ name]
+            Nothing -> ["config", "--get", "alias." ++ name]
+    (code, out, _) <- readProcessWithExitCode "git" gitArgs ""
+    case code of
+        ExitSuccess ->
+            let expanded = words (filter (/= '\r') (filter (/= '\n') out))
+            in case expanded of
+                ("!":_) -> Git.runGitGlobal (name : rest) >>= exitWith  -- shell alias
+                [] -> do
+                    hPutStrLn stderr $ "bit: '" ++ name ++ "' is not a bit command. See 'bit help'."
+                    exitWith (ExitFailure 1)
+                _ -> runCommand (expanded ++ rest)
+        _ -> do
+            hPutStrLn stderr $ "bit: '" ++ name ++ "' is not a bit command. See 'bit help'."
+            exitWith (ExitFailure 1)
 
 -- | Result of extracting a remote target from CLI args.
 data RemoteExtract
@@ -213,14 +246,33 @@ commandKey (cmd:_) = cmd
 commandKey [] = ""
 
 -- | Walk up from the given directory to find the closest ancestor containing .bit/.
+-- Respects BIT_CEILING_DIRECTORIES (path-list separated by ';' on Windows, ':' elsewhere)
+-- to stop the walk, analogous to git's GIT_CEILING_DIRECTORIES.
 findBitRoot :: FilePath -> IO (Maybe FilePath)
-findBitRoot dir = do
-    exists <- Dir.doesDirectoryExist (dir </> ".bit")
-    if exists
-        then pure (Just dir)
-        else let parent = takeDirectory dir
-             in if parent == dir then pure Nothing
-                else findBitRoot parent
+findBitRoot start = do
+    ceilings <- getCeilingDirs
+    canonStart <- Dir.canonicalizePath start
+    go ceilings canonStart
+  where
+    go ceilings dir = do
+        exists <- Dir.doesDirectoryExist (dir </> ".bit")
+        if exists
+            then pure (Just dir)
+            else let parent = takeDirectory dir
+                 in if parent == dir || dir `elem` ceilings
+                    then pure Nothing
+                    else go ceilings parent
+    getCeilingDirs = do
+        mVal <- lookupEnv "BIT_CEILING_DIRECTORIES"
+        case mVal of
+            Nothing -> pure []
+            Just val -> do
+                let sep = if System.Info.os `elem` ["mingw32", "win32"] then ';' else ':'
+                let raw = splitOn sep val
+                mapM Dir.canonicalizePath (filter (not . null) raw)
+    splitOn _ [] = []
+    splitOn c s  = let (w, rest) = break (== c) s
+                   in w : case rest of { [] -> []; (_:t) -> splitOn c t }
 
 runCommand :: [String] -> IO ()
 runCommand args = do
@@ -257,7 +309,15 @@ runCommand args = do
                        in if rel == "." then "" else rel
             Nothing -> ""
 
-    -- Repo existence check (skip for init)
+    -- For unknown commands, try alias expansion before the repo check.
+    -- This allows global aliases to work even without a .bit directory.
+    let indexPath = root </> ".bit" </> "index"
+    let mIndexPath = if bitExists then Just indexPath else Nothing
+    case cmd of
+        (name:rest) | not (isKnownCommand name) -> tryAlias mIndexPath name rest
+        _ -> pure ()
+
+    -- Repo existence check (skip for init and unknown commands handled above)
     let needsRepo = case cmd of { ("init":_) -> False; _ -> True }
     when (needsRepo && not bitExists) $ do
         hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
