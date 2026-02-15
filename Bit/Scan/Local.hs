@@ -331,7 +331,10 @@ collectScannedPaths root = go root
         else if isDir
           then do
             names <- listDirectory path
-            childPaths <- concat <$> mapM (go . (path </>)) names
+            -- Filter .git/.bit at every level, not just root (avoids scanning
+            -- nested .git dirs like newdir/.git which the rel-path prefix check misses)
+            let filtered = filter (\n -> n /= ".git" && n /= ".bit") names
+            childPaths <- concat <$> mapM (go . (path </>)) filtered
             pure (ScannedDir rel : childPaths)
         else pure [ScannedFile rel]
 
