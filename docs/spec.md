@@ -1015,6 +1015,8 @@ HLint errors appear in IDE and CI, preventing lazy IO from being reintroduced.
 
 The file scanner (`Bit/Scan.hs`) uses bounded parallelism for both scanning and writing:
 
+**Directory exclusion** (`collectScannedPaths`): The recursive walk filters `.git` and `.bit` directories by **name** at every level — not just at the root. This prevents scanning into nested `.git/` directories (e.g. `subdir/.git/`) which would pollute the cache and cause `createDirectoryIfMissing` crashes on Windows. Top-level `.bitignore` and `.gitignore` files are also excluded from the walk.
+
 **Scanning**:
 - `QSem` limits concurrent file reads to **ioConcurrency** (4× cores, min 4)
 - Each file is fully read, hashed, and closed before moving to next

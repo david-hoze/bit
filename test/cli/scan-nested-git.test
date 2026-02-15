@@ -1,0 +1,97 @@
+# =============================================================================
+# Scan Nested .git - Verify scan excludes .git dirs inside subdirectories
+#
+# Regression test: collectScannedPaths must filter .git/.bit by directory
+# name at every level, not just the root. Without this, nested .git dirs
+# (e.g. from git init inside a subdirectory) pollute the cache and crash
+# on Windows due to createDirectoryIfMissing conflicts.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_scannested 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_scannested
+<<<
+>>>= 0
+
+cd test\cli\output\work_scannested & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: Create a subdirectory with its own .git
+# ======================================================================
+
+# ---- Create a subdir with a nested git repo (simulates git init inside project) ----
+cd test\cli\output\work_scannested & mkdir subdir & cd subdir & git init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Create a file in the main repo and one inside the nested git repo ----
+cd test\cli\output\work_scannested & echo toplevel> file.txt & echo nested> subdir\file.txt
+<<<
+>>>= 0
+
+# ======================================================================
+# SECTION 2: Scan should work without crashing
+# ======================================================================
+
+# ---- bit add succeeds (scan doesn't crash on nested .git) ----
+cd test\cli\output\work_scannested & bit add .
+<<<
+>>>= 0
+
+# ---- Cache exists for top-level file ----
+if exist "test\cli\output\work_scannested\.bit\cache\file.txt" (echo cached) else (echo missing)
+<<<
+>>>
+cached
+>>>= 0
+
+# ---- Cache exists for nested file (subdir\file.txt) ----
+if exist "test\cli\output\work_scannested\.bit\cache\subdir\file.txt" (echo cached) else (echo missing)
+<<<
+>>>
+cached
+>>>= 0
+
+# ---- No cache entry for .git internals inside subdir ----
+if exist "test\cli\output\work_scannested\.bit\cache\subdir\.git" (echo LEAKED) else (echo excluded)
+<<<
+>>>
+excluded
+>>>= 0
+
+# ======================================================================
+# SECTION 3: Re-scan still works (no directory creation crash)
+# ======================================================================
+
+# ---- Second add also succeeds (cache dirs don't conflict) ----
+cd test\cli\output\work_scannested & bit add .
+<<<
+>>>= 0
+
+# ---- Commit works (nested .git didn't pollute index) ----
+cd test\cli\output\work_scannested & bit commit -m "test nested git"
+<<<
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_scannested 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
