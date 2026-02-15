@@ -68,31 +68,48 @@ parseInitArgs = go Bit.defaultInitOptions Nothing
         | "-" `isPrefixOf` f = go opts { Bit.initGitFlags = Bit.initGitFlags opts ++ [f] } dir rest
         | otherwise = go opts (Just f) rest
 
+-- | Peel git "global" flags that appear before the subcommand.
+-- Currently handles @-c key=val@ and @--bare@.
+peelGitGlobalFlags :: [String] -> ([String], [String])
+peelGitGlobalFlags ("-c":val:rest) =
+    let (more, remaining) = peelGitGlobalFlags rest
+    in ("-c" : val : more, remaining)
+peelGitGlobalFlags ("--bare":rest) =
+    let (more, remaining) = peelGitGlobalFlags rest
+    in ("--bare" : more, remaining)
+peelGitGlobalFlags args = ([], args)
+
+-- | Split peeled flags into @-c key=val@ pairs vs other flags (like @--bare@).
+partitionDashC :: [String] -> ([String], [String])
+partitionDashC ("-c":v:rest) = let (cs, os) = partitionDashC rest in ("-c":v:cs, os)
+partitionDashC (x:rest) = let (cs, os) = partitionDashC rest in (cs, x:os)
+partitionDashC [] = ([], [])
+
 -- | Run 'bit init' with parsed options.
 -- Bare repos are passed through to git directly (bit doesn't manage bare repos).
-runInit :: [String] -> IO ()
-runInit args = do
+-- dashCFlags are @-c key=val@ pairs peeled from before "init".
+runInit :: [String] -> [String] -> IO ()
+runInit dashCFlags args = do
     let (opts, mDir) = parseInitArgs args
-    if Bit.initBare opts
+    let optsWithGlobal = opts { Bit.initGitGlobalFlags = dashCFlags }
+    if Bit.initBare optsWithGlobal
         then do
-            code <- Git.runGitGlobal ("init" : args)
-            let bareDir = maybe "." id mDir
-            Dir.createDirectoryIfMissing True (bareDir </> "bit" </> "cas")
+            code <- Git.runGitGlobal (dashCFlags ++ "init" : args)
+            when (code == ExitSuccess) $ do
+                let bareDir = maybe "." id mDir
+                Dir.createDirectoryIfMissing True (bareDir </> "bit" </> "cas")
             exitWith code
-        else case mDir of
-            Nothing -> do
-                cwd <- Dir.getCurrentDirectory
-                unless (Bit.initQuiet opts) $
-                    putStrLn $ "Initializing bit in: " ++ cwd
-                Bit.initializeRepoAt cwd opts
-                unless (Bit.initQuiet opts) $
+        else do
+            targetDir <- case mDir of
+                Nothing -> Dir.getCurrentDirectory
+                Just d  -> Dir.makeAbsolute d
+            unless (Bit.initQuiet optsWithGlobal) $
+                putStrLn $ "Initializing bit in: " ++ targetDir
+            code <- Bit.initializeRepoAt targetDir optsWithGlobal
+            when (code == ExitSuccess) $
+                unless (Bit.initQuiet optsWithGlobal) $
                     putStrLn "bit initialized successfully!"
-            Just d -> do
-                unless (Bit.initQuiet opts) $
-                    putStrLn $ "Initializing bit in: " ++ d
-                Bit.initializeRepoAt d opts
-                unless (Bit.initQuiet opts) $
-                    putStrLn "bit initialized successfully!"
+            exitWith code
 
 -- | Git flags that don't need a repo (or .bit directory).
 isGitGlobalFlag :: [String] -> Bool
@@ -370,8 +387,11 @@ runCommand args = do
                 else printCommandHelp key >> exitSuccess
 
     -- init runs before repo discovery — it creates repos, not uses them.
-    case cmd of
-        ("init":rest) -> runInit rest >> exitSuccess
+    -- Peel global flags (-c key=val, --bare) that appear before "init".
+    let (peeledFlags, coreCmd) = peelGitGlobalFlags cmd
+    let (dashCFlags, otherPeeled) = partitionDashC peeledFlags
+    case coreCmd of
+        ("init":rest) -> runInit dashCFlags (otherPeeled ++ rest)
         _ -> pure ()
 
     origCwd <- Dir.getCurrentDirectory

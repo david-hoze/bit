@@ -238,7 +238,13 @@ bit runs Git with:
 - Working tree is `.bit/index` (not the project root)
 - Ignore rules: user creates `.bitignore` in the project root. Before any command that uses working tree state (add, commit, status, diff, restore, checkout, merge, reset, mv), bit runs **syncBitignoreToIndex**: if `.bitignore` exists it is copied to `.bit/index/.gitignore` with normalization (line endings, trim, drop empty lines); if `.bitignore` does not exist, `.bit/index/.gitignore` is removed if present so the index has no ignore file. The index working tree is thus always in sync with the user's ignore rules for those commands.
 
-**Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes. Creates `.bit/cas/` for future content-addressed storage.
+**Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes. Creates `.bit/cas/` for future content-addressed storage. These post-init config steps only run on fresh init — re-init (`bit init` on an existing repo) skips them and just forwards to `git init` so that "Reinitialized existing" output, exit codes, and `--initial-branch` warnings work identically to git.
+
+**Branch naming:** On fresh init, bit sets `init.defaultBranch=main` and renames `master` to `main` — unless the user passed `--initial-branch`/`-b`, in which case git's own branch naming is respected and bit does not override it.
+
+**Re-init:** Running `bit init` on an existing repo always forwards to `git init` (including on `.bit` bitlink repos from `--separate-git-dir`). Git prints "Reinitialized existing Git repository" and handles format changes, gitdir moves, etc. bit propagates git's exit code and output verbatim.
+
+**Global flags before init:** `bit -c key=val init [dir]` and `bit --bare init [dir]` are dispatched correctly — `-c` pairs and `--bare` are peeled from before the `init` subcommand and forwarded to git in the right position.
 
 ### Bare Init
 
@@ -1158,6 +1164,10 @@ This is necessary because without interception, `-C` would be treated as an unkn
 
 `init` is dispatched **before** repository discovery (`findBitRoot`). This is critical because `init` creates repos — it must not be affected by a parent repo's `.bit/` directory. Without this, `cd existing-repo/subdir && bit init` would `setCurrentDirectory` to the parent root and re-initialize the parent instead of creating a new repo in `subdir/`.
 
+Before matching `("init":rest)`, the dispatch peels git "global" flags that appear before the subcommand: `-c key=val` pairs and `--bare`. This allows `bit -c init.defaultBranch=test init dir` and `bit --bare init dir` to work. The `-c` pairs are stored in `initGitGlobalFlags` and inserted before `init` in the `spawnGit` call. `--bare` is folded into the remaining args so `parseInitArgs` sees it.
+
+`initializeRepoAt` returns `ExitCode`. On failure (e.g. `--ref-format=garbage`), the exit code propagates to the caller and the process exits with the same code git returned. Git's stdout and stderr are printed verbatim so tests can match on "Initialized empty", "Reinitialized existing", and error messages.
+
 ### Repo Discovery (`findBitRoot`)
 
 `findBitRoot` walks up from CWD and returns a `BitRoot` sum type:
@@ -1495,9 +1505,9 @@ Interactive per-file conflict resolution:
 
 ### Implemented and Working
 
-- `bit init` — creates `.bit/` (including `.bit/cas/`), initializes Git in `.bit/index/.git`; dispatched before repo discovery so nested init works correctly; supports `BIT_GIT_JUNCTION=1` for git test suite compatibility
-- `bit init --bare` — passes through to `git init --bare`, then creates `bit/cas/` inside the bare repo; bare repos are standard git bare repos with no `.bit/index/` wrapper
-- `bit init --separate-git-dir <dir> [workdir]` — places git database and bit metadata at `<dir>`, writes bitlink (`.bit` file with `bitdir:` pointer) and gitlink (`.git` file with `gitdir:` pointer) in the working directory; all operations transparently follow bitlinks
+- `bit init` — creates `.bit/` (including `.bit/cas/`), initializes Git in `.bit/index/.git`; dispatched before repo discovery so nested init works correctly; supports `BIT_GIT_JUNCTION=1` for git test suite compatibility; returns `ExitCode` and prints git's output verbatim; re-init on existing repos forwards to `git init` without stomping config; respects `--initial-branch`/`-b` (skips branch rename); peels `-c key=val` and `--bare` from before `init` subcommand; resolves `.bit` bitlinks on re-init for `--separate-git-dir` repos
+- `bit init --bare` — passes through to `git init --bare`, then creates `bit/cas/` inside the bare repo; bare repos are standard git bare repos with no `.bit/index/` wrapper; `bit --bare init dir` also dispatched correctly
+- `bit init --separate-git-dir <dir> [workdir]` — places git database and bit metadata at `<dir>`, writes bitlink (`.bit` file with `bitdir:` pointer) and gitlink (`.git` file with `gitdir:` pointer) in the working directory; all operations transparently follow bitlinks; re-init resolves bitlinks to find the real `.bit` directory
 - `bit add` — scans files, computes MD5 hashes, writes metadata, stages in Git
 - `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `reset`, `rm`, `mv`, `branch`, `merge` — delegate to Git
 - `bit remote add/show` — named remotes with device-aware resolution
@@ -1532,7 +1542,7 @@ Interactive per-file conflict resolution:
 
 | Module | Role |
 |--------|------|
-| `Bit/Commands.hs` | CLI dispatch, `findBitRoot` (walks up to discover repo, returns `BitRoot`: `NormalRoot` or `BareRoot`), prefix computation, env setup; `init` dispatched before repo discovery; bare repos pass unknown commands through to git and reject known bit commands; `tryAlias` expands git aliases and passes unknown commands through to git; `resolveBitDir` follows bitlinks for separated repos |
+| `Bit/Commands.hs` | CLI dispatch, `findBitRoot` (walks up to discover repo, returns `BitRoot`: `NormalRoot` or `BareRoot`), prefix computation, env setup; `init` dispatched before repo discovery with `peelGitGlobalFlags` to handle `-c key=val` and `--bare` before the subcommand; bare repos pass unknown commands through to git and reject known bit commands; `tryAlias` expands git aliases and passes unknown commands through to git; `resolveBitDir` follows bitlinks for separated repos |
 | `Bit/Help.hs` | Command help metadata; `HelpItem` (hiItem, hiDescription) for options/examples, replaces (String, String) |
 | `Bit/Core.hs` | Re-exports public API from `Bit/Core/*.hs` sub-modules |
 | `Bit/Core/Push.hs` | Push logic + PushSeam transport abstraction |

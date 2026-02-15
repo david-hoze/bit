@@ -182,7 +182,7 @@ push = withRemote $ \remote -> do
             when isFs $ liftIO $ do
                 let remotePath = remoteUrl remote
                 Platform.createDirectoryIfMissing True remotePath
-                initializeRemoteRepoAt (RemotePath remotePath)
+                void $ initializeRemoteRepoAt (RemotePath remotePath)
             executePush seam remote Nothing
 
         StateValidBit -> do

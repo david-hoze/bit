@@ -1,0 +1,155 @@
+# =============================================================================
+# Init Compat - Tests for git-compatible init behavior
+#
+# Covers the 5 root causes fixed for git test suite compatibility:
+# 1. Post-init config overrides: --initial-branch respected, re-init safe
+# 2. Exit code propagation: invalid args return non-zero
+# 3. -c key=val forwarding: global flags before "init" are passed through
+# 4. Re-init works: re-init prints "Reinitialized", doesn't crash
+# 5. --bare before init: "bit --bare init dir" dispatched correctly
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_initcompat 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_initcompat
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 1: --initial-branch is respected (no branch rename)
+# ======================================================================
+
+# ---- Init with --initial-branch=hello creates branch "hello" ----
+cd test\cli\output\work_initcompat & bit init --initial-branch=hello ibranch
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Verify HEAD points to refs/heads/hello (not main) ----
+cd test\cli\output\work_initcompat\ibranch & git -C .bit\index symbolic-ref HEAD
+<<<
+>>>
+refs/heads/hello
+>>>= 0
+
+# ---- Init with -b mybranch creates branch "mybranch" ----
+cd test\cli\output\work_initcompat & bit init -b mybranch bflag
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Verify HEAD points to refs/heads/mybranch ----
+cd test\cli\output\work_initcompat\bflag & git -C .bit\index symbolic-ref HEAD
+<<<
+>>>
+refs/heads/mybranch
+>>>= 0
+
+# ======================================================================
+# SECTION 2: Exit code propagation (invalid args cause failure)
+# ======================================================================
+
+# ---- Invalid ref format returns non-zero ----
+cd test\cli\output\work_initcompat & bit init --ref-format=garbage exittest
+<<<
+>>>2 /unknown ref storage format/
+>>>= /[1-9]/
+
+# ======================================================================
+# SECTION 3: -c key=val forwarding before init
+# ======================================================================
+
+# ---- -c init.defaultBranch=custom is forwarded to git init ----
+cd test\cli\output\work_initcompat & bit -c init.defaultBranch=custom init dashctest
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Verify HEAD points to refs/heads/custom ----
+cd test\cli\output\work_initcompat\dashctest & git -C .bit\index symbolic-ref HEAD
+<<<
+>>>
+refs/heads/custom
+>>>= 0
+
+# ======================================================================
+# SECTION 4: Re-init works (prints "Reinitialized", doesn't crash)
+# ======================================================================
+
+# ---- Create initial repo ----
+cd test\cli\output\work_initcompat & bit init reinittest
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Re-init same repo succeeds with "Reinitialized" ----
+cd test\cli\output\work_initcompat\reinittest & bit init
+<<<
+>>> /Reinitialized/
+>>>= 0
+
+# ---- Re-init preserves existing branch (doesn't rename to main) ----
+cd test\cli\output\work_initcompat\reinittest & git -C .bit\index symbolic-ref HEAD
+<<<
+>>> /refs\/heads\/main/
+>>>= 0
+
+# ======================================================================
+# SECTION 5: --bare before init dispatched correctly
+# ======================================================================
+
+# ---- "bit --bare init dir" creates a bare repo ----
+cd test\cli\output\work_initcompat & bit --bare init globalbare
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Bare repo has HEAD (standard git bare repo) ----
+if exist "test\cli\output\work_initcompat\globalbare\HEAD" (echo exists) else (echo missing)
+<<<
+>>>
+exists
+>>>= 0
+
+# ---- Bare repo has bit/cas/ ----
+if exist "test\cli\output\work_initcompat\globalbare\bit\cas\" (echo exists) else (echo missing)
+<<<
+>>>
+exists
+>>>= 0
+
+# ======================================================================
+# SECTION 6: Re-init with --separate-git-dir (bitlink resolution)
+# ======================================================================
+
+# ---- Init with --separate-git-dir ----
+cd test\cli\output\work_initcompat & mkdir sgdir_store & bit init --separate-git-dir sgdir_store sgdir_work
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Re-init after --separate-git-dir doesn't crash ----
+cd test\cli\output\work_initcompat\sgdir_work & bit init
+<<<
+>>> /Reinitialized/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_initcompat 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
