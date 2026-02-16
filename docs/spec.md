@@ -1399,7 +1399,7 @@ GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
 | t0001-init.sh | 91/91 | 0 | All init tests pass |
 | t0002-gitfile.sh | 14/14 | 0 | All gitfile tests pass |
 | t0003-attributes.sh | 53/54 | 1 | Test 52 (`builtin_objectmode` with submodules) fails due to `.bit/` directory detection |
-| CLI tests | 50/50 files | 0 | All 50 test files pass (including network-remote and gdrive-remote) |
+| CLI tests | 54/54 files (952 tests) | 0 | All 54 test files pass (including network-remote and gdrive-remote) |
 
 **Known failure — t0003 test 52:** The `builtin_objectmode` attribute test creates a submodule and checks its attributes. bit's `.bit/` directory presence causes git to detect the submodule differently than a plain git repo would. This is an inherent limitation of the `.bit/` architecture and does not affect real-world usage.
 
