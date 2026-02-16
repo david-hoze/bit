@@ -176,17 +176,24 @@ tryAlias mIndexPath name rest = do
   where
     passthrough args = case mIndexPath of
         Just p  -> do
-            -- If CWD has .git (junction, gitlink, or directory), let git
-            -- discover the repo itself. This preserves the user's CWD for
-            -- relative paths in args (e.g. git config -f <path>).
-            -- Use runGitGlobal (no -c flags) to avoid leaking GIT_CONFIG_*
-            -- env vars into shell aliases (test 6: No extra GIT_* on alias scripts).
-            -- Otherwise use -C .bit/index for repo discovery.
             hasGitDir <- Dir.doesDirectoryExist ".git"
             hasGitFile <- Dir.doesFileExist ".git"
-            if hasGitDir || hasGitFile
+            if hasGitDir
                 then Git.runGitGlobal args >>= exitWith
-                else Git.runGitRawAt p args >>= exitWith
+                else if hasGitFile
+                    then do
+                        -- Read gitlink target and pass --git-dir to bypass
+                        -- junction resolution (real_pathdup). Without this,
+                        -- git resolves junctions when reading gitlink files,
+                        -- returning .bit/index/.git instead of the gitlink target.
+                        mTarget <- readGitlink ".git"
+                        case mTarget of
+                            Just target ->
+                                Git.runGitGlobal ("--git-dir" : target : args)
+                                    >>= exitWith
+                            Nothing ->
+                                Git.runGitGlobal args >>= exitWith
+                    else Git.runGitRawAt p args >>= exitWith
         Nothing -> Git.runGitGlobal args >>= exitWith   -- no bit repo: bare git
 
 -- | Result of extracting a remote target from CLI args.
@@ -326,6 +333,18 @@ resolveBitDir root = do
                         (firstLine:_) -> pure (drop 8 (filter (/= '\r') firstLine))
                         [] -> error "not a bit repository: empty .bit file"
                 else error "not a bit repository"
+
+-- | Read a gitlink file and extract the gitdir target path.
+-- Returns Nothing if the file is not a valid gitlink (missing "gitdir: " prefix).
+readGitlink :: FilePath -> IO (Maybe String)
+readGitlink path = do
+    raw <- BS.readFile path
+    case decodeUtf8' raw of
+        Left _ -> pure Nothing
+        Right t ->
+            let firstLine = takeWhile (\c -> c /= '\n' && c /= '\r')
+                              (T.unpack t)
+            in pure $ stripPrefix "gitdir: " firstLine
 
 -- | Extract the command key from args for help lookup.
 -- Handles multi-word commands like "remote add", "merge --continue", etc.
