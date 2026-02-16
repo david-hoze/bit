@@ -40,6 +40,7 @@ import qualified Bit.Scan.Remote as Remote.Scan
 import qualified Bit.Remote
 import qualified Bit.Rclone.Run as Transport
 import Bit.Config.Paths (bundleForRemote, bundleCwdPath, fromCwdPath, BundleName)
+import Bit.CAS (hasBlobInCas)
 -- System.Process no longer needed: all git calls go through Git.spawnGit
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
@@ -259,13 +260,27 @@ findIssuesFromScan root entries = do
         | lsCode == ExitSuccess = filter isUserFile $ filter (not . null) (lines lsOut)
         | otherwise             = []
 
-  -- 6. Build issues from changed files (hash mismatches)
-  mismatchIssues <- concat <$> mapM (checkChanged indexDir) changedPaths
+  -- Proof of possession: consult CAS — if blob exists there, treat as verified
+  let casDir = takeDirectory indexDir </> "cas"
 
-  -- 7. Build issues from missing files (committed but not in working tree)
+  -- 6. Build issues from changed files (hash mismatches); skip if CAS has expected blob
+  mismatchIssues <- concat <$> mapM (checkChanged indexDir casDir) changedPaths
+
+  -- 7. Build issues from missing files (committed but not in working tree); skip if CAS has blob
   missingFiltered <- fmap concat $ mapM (\p -> do
     exists <- doesFileExist (root </> p)
-    pure [Missing (Path p) | not exists]
+    if exists then pure []
+    else do
+      (showCode, committedContent, _) <- Git.runGitAt indexDir ["show", "HEAD:" ++ p]
+      case showCode of
+        ExitSuccess -> do
+          let entry = classifyMetadata (Path p) committedContent
+          case entry of
+            BinaryEntry _ eh _ -> do
+              inCas <- hasBlobInCas casDir eh
+              pure [Missing (Path p) | not inCas]
+            TextEntry _ -> pure [Missing (Path p)]
+        _ -> pure [Missing (Path p)]
     ) committedPaths
 
   let allIssues = mismatchIssues ++ missingFiltered
@@ -273,7 +288,7 @@ findIssuesFromScan root entries = do
 
   pure (VerifyResult totalChecked allIssues)
   where
-    checkChanged indexDir relPath = do
+    checkChanged indexDir casDir relPath = do
       (showCode, committedContent, _) <- Git.runGitAt indexDir ["show", "HEAD:" ++ relPath]
       let fsPath = indexDir </> relPath
       fsExists <- doesFileExist fsPath
@@ -282,20 +297,25 @@ findIssuesFromScan root entries = do
           let committed = classifyMetadata (Path relPath) committedContent
           actual <- classifyMetadataFile (Path relPath) fsPath
           case (committed, actual) of
-            (BinaryEntry _ eh es, BinaryEntry _ ah as') ->
-              pure [HashMismatch (Path relPath)
-                      (T.unpack (hashToText eh))
-                      (T.unpack (hashToText ah))
-                      es
-                      as']
+            (BinaryEntry _ eh es, BinaryEntry _ ah as') -> do
+              inCas <- hasBlobInCas casDir eh
+              if inCas then pure []
+              else pure [HashMismatch (Path relPath)
+                          (T.unpack (hashToText eh))
+                          (T.unpack (hashToText ah))
+                          es
+                          as']
             (BinaryEntry _ eh es, TextEntry _) -> do
-              actualHash <- hashFile fsPath
-              actualSize <- fromIntegral . BS.length <$> BS.readFile fsPath
-              pure [HashMismatch (Path relPath)
-                      (T.unpack (hashToText eh))
-                      (T.unpack (hashToText actualHash))
-                      es
-                      actualSize]
+              inCas <- hasBlobInCas casDir eh
+              if inCas then pure []
+              else do
+                actualHash <- hashFile fsPath
+                actualSize <- fromIntegral . BS.length <$> BS.readFile fsPath
+                pure [HashMismatch (Path relPath)
+                        (T.unpack (hashToText eh))
+                        (T.unpack (hashToText actualHash))
+                        es
+                        actualSize]
             (TextEntry _, TextEntry _) ->
               reportTextMismatch fsPath relPath
             (TextEntry _, BinaryEntry _ _ _) ->

@@ -46,6 +46,9 @@ import Bit.Core.Helpers
 import Bit.Core.Init (initializeRemoteRepoAt)
 import Bit.Rclone.Sync (deriveActions, executeCommand)
 import Bit.Core.Fetch (classifyRemoteState, fetchBundle)
+import qualified Bit.Device.Identity as Device
+import Bit.CAS (casBlobPath)
+import Bit.Config.Metadata (parseMetadataFile, MetaContent(..))
 
 -- ============================================================================
 -- Push seam: the only difference between cloud and filesystem push
@@ -152,20 +155,22 @@ push :: BitM ()
 push = withRemote $ \remote -> do
     cwd <- asks envCwd
 
-    -- 1. Proof of possession — always verify local before pushing
-    liftIO $ putStrLn "Verifying local files..."
-    result <- liftIO $ Verify.verifyLocal cwd Nothing (Parallel 0)
-    if null result.vrIssues
-        then liftIO $ putStrLn $ "Verified " ++ show result.vrCount ++ " files. All match metadata."
-        else liftIO $ do
-            hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length result.vrIssues) ++ " issues)."
-            mapM_ (printVerifyIssue id) result.vrIssues
-            hPutStrLn stderr "hint: Run 'bit verify' to see all mismatches."
-            hPutStrLn stderr "hint: Run 'bit add' to update metadata, or 'bit restore' to restore files."
-            exitWith (ExitFailure 1)
+    -- 1. Proof of possession — full remotes only; bare remotes skip (CAS is self-verifying)
+    isFs <- isFilesystemRemote remote
+    layout <- if isFs then pure Device.LayoutFull else liftIO $ Device.readRemoteLayout cwd (remoteName remote)
+    when (isFs || layout == Device.LayoutFull) $ do
+        liftIO $ putStrLn "Verifying local files..."
+        result <- liftIO $ Verify.verifyLocal cwd Nothing (Parallel 0)
+        if null result.vrIssues
+            then liftIO $ putStrLn $ "Verified " ++ show result.vrCount ++ " files. All match metadata."
+            else liftIO $ do
+                hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length result.vrIssues) ++ " issues)."
+                mapM_ (printVerifyIssue id) result.vrIssues
+                hPutStrLn stderr "hint: Run 'bit verify' to see all mismatches."
+                hPutStrLn stderr "hint: Run 'bit add' to update metadata, or 'bit restore' to restore files."
+                exitWith (ExitFailure 1)
 
     -- 2. Detect transport mode and build seam
-    isFs <- isFilesystemRemote remote
     let seam = if isFs
             then mkFilesystemSeam cwd remote
             else mkCloudSeam remote
@@ -183,7 +188,7 @@ push = withRemote $ \remote -> do
                 let remotePath = remoteUrl remote
                 Platform.createDirectoryIfMissing True remotePath
                 void $ initializeRemoteRepoAt (RemotePath remotePath)
-            executePush seam remote Nothing
+            executePush seam remote Nothing layout
 
         StateValidBit -> do
             liftIO $ putStrLn "Remote is a bit repo. Checking history..."
@@ -193,11 +198,11 @@ push = withRemote $ \remote -> do
             preHash <- liftIO $ Git.getRemoteTrackingHash (remoteName remote)
             mRemoteHash <- liftIO $ ptFetchHistory seam
             case mRemoteHash of
-                Just _ -> processExistingRemote remote seam preHash mRemoteHash
+                Just _ -> processExistingRemote remote seam preHash mRemoteHash layout
                 -- No remote commits yet (initialized but empty) — treat as first push
-                Nothing -> executePush seam remote Nothing
+                Nothing -> executePush seam remote Nothing layout
 
-        StateNonBitOccupied samples -> handleNonBit seam remote samples
+        StateNonBitOccupied samples -> handleNonBit seam remote samples layout
 
         StateNetworkError err ->
             liftIO $ hPutStrLn stderr $ "Aborting: Network error -> " ++ err
@@ -208,21 +213,21 @@ push = withRemote $ \remote -> do
 
 -- | Handle existing remote with history. Performs ancestry checks and
 -- force mode logic using the pre-fetch and post-fetch tracking hashes.
-processExistingRemote :: Remote -> PushSeam -> Maybe String -> Maybe String -> BitM ()
-processExistingRemote remote seam preHash mRemoteHash = do
+processExistingRemote :: Remote -> PushSeam -> Maybe String -> Maybe String -> Device.RemoteLayout -> BitM ()
+processExistingRemote remote seam preHash mRemoteHash layout = do
     fMode <- asks envForceMode
     case fMode of
         Force -> do
             lift $ tellErr "Warning: --force used. Overwriting remote history..."
-            executePush seam remote mRemoteHash
+            executePush seam remote mRemoteHash layout
 
         ForceWithLease -> case (preHash, mRemoteHash) of
             (Just pre, Just post) | pre == post -> do
                 lift $ tell "Remote check passed (--force-with-lease). Proceeding..."
-                executePush seam remote mRemoteHash
+                executePush seam remote mRemoteHash layout
             (Nothing, _) -> do
                 lift $ tellErr "Warning: No previous tracking ref. Proceeding..."
-                executePush seam remote mRemoteHash
+                executePush seam remote mRemoteHash layout
             (Just _, Just _) -> liftIO $ do
                 hPutStrLn stderr "---------------------------------------------------"
                 hPutStrLn stderr "ERROR: Remote has changed since last fetch!"
@@ -242,7 +247,7 @@ processExistingRemote remote seam preHash mRemoteHash = do
                     if isAhead
                         then do
                             lift $ tell "Remote check passed. Proceeding with push..."
-                            executePush seam remote mRemoteHash
+                            executePush seam remote mRemoteHash layout
                         else liftIO $ do
                             hPutStrLn stderr "---------------------------------------------------"
                             hPutStrLn stderr "error: Remote history has diverged or is ahead!"
@@ -254,13 +259,13 @@ processExistingRemote remote seam preHash mRemoteHash = do
                     exitWith (ExitFailure 1)
 
 -- | Handle non-bit-occupied remote. Only --force allows overwriting.
-handleNonBit :: PushSeam -> Remote -> [String] -> BitM ()
-handleNonBit seam remote samples = do
+handleNonBit :: PushSeam -> Remote -> [String] -> Device.RemoteLayout -> BitM ()
+handleNonBit seam remote samples layout = do
     fMode <- asks envForceMode
     case fMode of
         Force -> do
             liftIO $ hPutStrLn stderr "Warning: --force used. Overwriting non-bit remote..."
-            executePush seam remote Nothing
+            executePush seam remote Nothing layout
         _ -> liftIO $ do
             hPutStrLn stderr "-------------------------------------------------------"
             hPutStrLn stderr "[!] STOP: Remote is NOT a bit repository!"
@@ -274,9 +279,9 @@ handleNonBit seam remote samples = do
 
 -- | Execute a push: sync files, push metadata, update local tracking ref.
 -- mRemoteHash: the remote's HEAD hash (Nothing for first push / empty remote).
-executePush :: PushSeam -> Remote -> Maybe String -> BitM ()
-executePush seam remote mRemoteHash = do
-    syncRemoteFiles mRemoteHash
+executePush :: PushSeam -> Remote -> Maybe String -> Device.RemoteLayout -> BitM ()
+executePush seam remote mRemoteHash layout = do
+    syncRemoteFiles mRemoteHash layout
     -- Skip metadata push when remote is already at our HEAD (avoids slow
     -- no-op git pull over network paths like \\tsclient\...)
     localHead <- liftIO getLocalHeadE
@@ -289,28 +294,48 @@ executePush seam remote mRemoteHash = do
 
 -- ============================================================================
 -- File sync: derive actions from git metadata diff, execute via rclone
+-- Always upload binaries to remote CAS; for full layout also sync readable paths.
 -- ============================================================================
 
-syncRemoteFiles :: Maybe String -> BitM ()
-syncRemoteFiles mRemoteHash = withRemote $ \remote -> do
+syncRemoteFiles :: Maybe String -> Device.RemoteLayout -> BitM ()
+syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
     cwd <- asks envCwd
+    bitDir <- asks envBitDir
+    let indexDir = bitDir </> "index"
     actions <- liftIO $ deriveActions mRemoteHash "HEAD"
     liftIO $ putStrLn "--- Pushing Changes to Remote ---"
     if null actions
         then liftIO $ putStrLn "Remote is already up to date."
         else do
             let (copies, others) = List.partition isCopy actions
-                copyPaths = [toPosix (unPath src) | Copy src _ <- copies]
-            -- Create progress tracker for all actions
-            progress <- liftIO $ CopyProgress.newSyncProgress (length actions)
-            liftIO $ CopyProgress.withSyncProgressReporter progress $ do
-                -- Batch all copies into a single rclone subprocess
-                unless (null copyPaths) $
-                    CopyProgress.rcloneCopyFiles cwd (remoteUrl remote) copyPaths progress
-                -- Non-copy actions individually
-                forM_ others $ \a -> do
-                    executeCommand cwd remote a
-                    CopyProgress.incrementFilesComplete progress
+                copyPaths = [unPath src | Copy src _ <- copies]
+            -- Always upload binary files to remote CAS (both full and bare).
+            -- TODO: Full layout then syncs same files to readable paths (double bandwidth).
+            --       Future optimization: skip CAS upload for files that already exist at readable path.
+            -- TODO: Batch CAS uploads (single rclone --files-from) instead of one copyToRemote per file.
+            unless (null copyPaths) $
+                liftIO $ putStrLn $ "Uploading " ++ show (length copyPaths) ++ " file(s) to CAS..."
+            forM_ copyPaths $ \filePath -> do
+                -- TODO: Carry hash from deriveActions to avoid re-reading metadata per file.
+                mMeta <- liftIO $ parseMetadataFile (indexDir </> filePath)
+                case mMeta of
+                    Just mc -> do
+                        let localPath = cwd </> filePath
+                            casRelPath = toPosix (casBlobPath "cas" (metaHash mc))
+                        _ <- liftIO $ Transport.copyToRemote localPath remote casRelPath
+                        pure ()
+                    Nothing -> pure ()
+            -- Full layout: also sync readable paths and apply move/delete.
+            -- Bare layout: no readable tree, so Move/Delete are intentionally not applied.
+            when (layout == Device.LayoutFull) $ do
+                let copyPathsPosix = map toPosix copyPaths
+                progress <- liftIO $ CopyProgress.newSyncProgress (length actions)
+                liftIO $ CopyProgress.withSyncProgressReporter progress $ do
+                    unless (null copyPathsPosix) $
+                        CopyProgress.rcloneCopyFiles cwd (remoteUrl remote) copyPathsPosix progress
+                    forM_ others $ \a -> do
+                        executeCommand cwd remote a
+                        CopyProgress.incrementFilesComplete progress
   where
     isCopy (Copy _ _) = True
     isCopy _          = False

@@ -64,6 +64,7 @@ import Bit.Rclone.Sync
     , applyMergeToWorkingDir
     )
 import Bit.Core.Fetch (fetchRemoteBundle, saveFetchedBundle, FetchOutcome(..), printFetchBanner)
+import qualified Bit.Device.Identity as Device
 
 -- ============================================================================
 -- PullSeam: abstracts fetch/verify differences between cloud and filesystem
@@ -152,25 +153,30 @@ pull :: PullOptions -> BitM ()
 pull opts = withRemote $ \remote -> do
     cwd <- asks envCwd
     isFs <- isFilesystemRemote remote
+    layout <- if isFs then pure Device.LayoutFull else liftIO (Device.readRemoteLayout cwd (remoteName remote))
     let seam = if isFs then mkFilesystemPullSeam remote else mkCloudPullSeam remote
 
     fetchOk <- liftIO $ psFetchMetadata seam
     when fetchOk $ do
+        -- Skip verify for bare cloud remotes (no readable tree to verify).
         unless (pullMode opts `elem` [PullAcceptRemote, PullManualMerge]) $
-            liftIO $ psVerifyRemote seam cwd
+            when (isFs || layout == Device.LayoutFull) $
+                liftIO $ psVerifyRemote seam cwd
 
         case pullMode opts of
-            PullAcceptRemote -> pullAcceptRemoteImpl remote
+            PullAcceptRemote -> pullAcceptRemoteImpl remote layout
             PullManualMerge  -> pullManualMergeImpl remote
-            PullNormal       -> pullWithCleanup remote
+            PullNormal       -> pullWithCleanup remote layout
 
 -- | Pull with --accept-remote: force-checkout the remote branch, then sync files.
 -- Fetch is already done by the seam; this only does checkout + sync.
-pullAcceptRemoteImpl :: Remote -> BitM ()
-pullAcceptRemoteImpl remote = do
+pullAcceptRemoteImpl :: Remote -> Device.RemoteLayout -> BitM ()
+pullAcceptRemoteImpl remote layout = do
     cwd <- asks envCwd
+    isFs <- isFilesystemRemote remote
     let name = remoteName remote
         remoteRoot = remoteUrl remote
+        mRemote = if isFs then Nothing else Just remote
     lift $ tell "Accepting remote file state as truth..."
 
     -- Record current HEAD before checkout (for diff-based sync)
@@ -181,8 +187,8 @@ pullAcceptRemoteImpl remote = do
     case checkoutCode of
         ExitSuccess -> do
             -- Sync actual files based on what changed
-            maybe (lift $ syncAllFilesFromHEAD remoteRoot cwd)
-                  (\oh -> lift $ applyMergeToWorkingDir remoteRoot cwd oh) oldHead
+            maybe (lift $ syncAllFilesFromHEAD remoteRoot cwd layout mRemote)
+                  (\oh -> lift $ applyMergeToWorkingDir remoteRoot cwd oh layout mRemote) oldHead
 
             -- Update tracking ref
             maybeRemoteHash <- lift $ Git.getRemoteTrackingHash name
@@ -195,6 +201,8 @@ pullAcceptRemoteImpl remote = do
 -- Fetch is already done by the seam; this reads the tracking ref directly.
 pullManualMergeImpl :: Remote -> BitM ()
 pullManualMergeImpl remote = do
+    cwd <- asks envCwd
+    isFs <- isFilesystemRemote remote
     let name = remoteName remote
 
     -- Tracking ref already set by seam (cloud: saveFetchedBundle, filesystem: git fetch)
@@ -226,8 +234,9 @@ pullManualMergeImpl remote = do
 
                     if null divergentFiles
                         then do
+                            layout' <- if isFs then pure Device.LayoutFull else liftIO (Device.readRemoteLayout cwd name)
                             lift $ tell "No remote divergence detected. Proceeding with normal pull..."
-                            pullWithCleanup remote
+                            pullWithCleanup remote layout'
                         else do
                             (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery ["merge", "--no-commit", "--no-ff", Git.remoteTrackingRef name]
                             (_finalMergeCode, _, _) <- lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
@@ -248,10 +257,10 @@ pullManualMergeImpl remote = do
                                 tell "Or abort: 'bit merge --abort'"
 
 -- | Pull with cleanup: abort merge on failure.
-pullWithCleanup :: Remote -> BitM ()
-pullWithCleanup remote = do
+pullWithCleanup :: Remote -> Device.RemoteLayout -> BitM ()
+pullWithCleanup remote layout = do
     env <- asks id
-    result <- liftIO $ try @SomeException (runBitM env (pullNormalImpl remote))
+    result <- liftIO $ try @SomeException (runBitM env (pullNormalImpl remote layout))
     either (\ex -> do
             inProgress <- lift $ Git.isMergeInProgress
             if inProgress
@@ -264,11 +273,13 @@ pullWithCleanup remote = do
 -- | Normal pull logic: merge remote into local and sync files.
 -- Fetch and verify are already done by the seam; this only does merge + sync.
 -- Works for both cloud and filesystem remotes via the tracking ref.
-pullNormalImpl :: Remote -> BitM ()
-pullNormalImpl remote = do
+pullNormalImpl :: Remote -> Device.RemoteLayout -> BitM ()
+pullNormalImpl remote layout = do
     cwd <- asks envCwd
+    isFs <- isFilesystemRemote remote
     let name = remoteName remote
         remoteRoot = remoteUrl remote
+        mRemote = if isFs then Nothing else Just remote
 
     maybeRemoteHash <- lift $ Git.getRemoteTrackingHash name
     case maybeRemoteHash of
@@ -282,7 +293,7 @@ pullNormalImpl remote = do
                     checkoutCode <- lift $ Git.checkoutRemoteAsMain name
                     case checkoutCode of
                         ExitSuccess -> lift $ do
-                            syncAllFilesFromHEAD remoteRoot cwd
+                            syncAllFilesFromHEAD remoteRoot cwd layout mRemote
                             tell "Syncing binaries... done."
                             void $ Git.updateRemoteTrackingBranchToHash name remoteHash
                         _ -> lift $ tellErr "Error: Failed to checkout remote branch."
@@ -307,7 +318,7 @@ pullNormalImpl remote = do
                             -- the commit would leave MERGE_HEAD dangling (breaking the next push).
                             lift $ void $ gitRaw ["commit", "-m", "Merge remote"]
                             lift $ do
-                                applyMergeToWorkingDir remoteRoot cwd localHash
+                                applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
                                 tell "Syncing binaries... done."
                             lift $ void $ Git.updateRemoteTrackingBranchToHash name remoteHash
                         _ -> do
@@ -334,7 +345,7 @@ pullNormalImpl remote = do
                             when (null conflictsNow) $ lift $ do
                                 void $ gitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
                                 tell $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
-                                applyMergeToWorkingDir remoteRoot cwd localHash
+                                applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
                                 tell "Syncing binaries... done."
                                 void $ Git.updateRemoteTrackingBranchToHash name remoteHash
 

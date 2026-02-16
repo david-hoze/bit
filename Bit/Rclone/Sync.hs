@@ -26,10 +26,13 @@ import Data.Foldable (traverse_)
 import qualified Bit.Git.Run as Git
 import qualified Bit.Rclone.Run as Transport
 import Bit.Config.Paths (bundleForRemote)
+import Bit.Config.Metadata (parseMetadataFile, MetaContent(..))
+import Bit.CAS (casBlobPath)
 import Data.List (isPrefixOf)
 import Bit.Utils (toPosix)
 import Bit.Domain.Plan (RcloneAction(..), resolveSwaps)
 import Bit.Remote (Remote, remoteName, remoteUrl)
+import qualified Bit.Device.Identity as Device
 import Bit.Types (BitM, BitEnv(..), Path(..), unPath)
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
@@ -41,6 +44,7 @@ import Data.Text.Encoding (decodeUtf8')
 import Bit.Core.Helpers
     ( getLocalHeadE
     , readFileMaybe
+    , isFilesystemRemote
     )
 import qualified Bit.IO.Platform as Platform
 
@@ -77,9 +81,9 @@ nameStatusToAction (Git.Copied _ new)    = Copy (Path new) (Path new)
 -- | Execute pull actions: apply rclone actions to the local working directory.
 -- Deletions are processed first (from Delete, Move src, Swap), then copies
 -- (from Copy, Move dest, Swap both).
--- Text files are copied from the index; binary files are batched via rclone.
-executePullActions :: String -> FilePath -> [RcloneAction] -> IO ()
-executePullActions remoteRoot cwd actions = do
+-- Text files are copied from the index; binary files from readable paths (full) or CAS (bare).
+executePullActions :: String -> FilePath -> Device.RemoteLayout -> Maybe Remote -> [RcloneAction] -> IO ()
+executePullActions remoteRoot cwd layout mRemote actions = do
     -- Phase 1: Process all deletions
     forM_ actions $ \action -> case action of
         Delete p            -> safeDeleteWorkFile cwd (unPath p)
@@ -91,7 +95,7 @@ executePullActions remoteRoot cwd actions = do
 
     -- Phase 2: Collect all files to copy
     let filesToCopy = concatMap copyTargets actions
-    classifyAndSync remoteRoot cwd filesToCopy
+    classifyAndSync remoteRoot cwd layout mRemote filesToCopy
   where
     copyTargets (Copy _ dest)       = [unPath dest]
     copyTargets (Move _ dest)       = [unPath dest]
@@ -99,9 +103,9 @@ executePullActions remoteRoot cwd actions = do
     copyTargets (Delete _)          = []
 
 -- | Classify files as text/binary and sync them to the working directory.
--- Text files are copied from the index; binary files are batched via rclone.
-classifyAndSync :: String -> FilePath -> [FilePath] -> IO ()
-classifyAndSync remoteRoot cwd filePaths = do
+-- Text files are copied from the index; binary files from readable paths (full) or CAS (bare).
+classifyAndSync :: String -> FilePath -> Device.RemoteLayout -> Maybe Remote -> [FilePath] -> IO ()
+classifyAndSync remoteRoot cwd layout mRemote filePaths = do
     -- Classify text vs binary
     let classify filePath = do
             fromIndex <- isTextFileInIndex cwd filePath
@@ -113,12 +117,27 @@ classifyAndSync remoteRoot cwd filePaths = do
     concLevel <- ioConcurrency
     void $ mapConcurrentlyBounded concLevel (copyFromIndexToWorkTree cwd) textPaths
 
-    -- Batch binary via rcloneCopyFiles
+    -- Binary files: full layout = rclone from readable paths; bare = copy from remote CAS by hash
     let binaryPaths = [p | BinaryToSync p <- fileInfo]
-    unless (null binaryPaths) $ do
-        progress <- CopyProgress.newSyncProgress (length binaryPaths)
-        CopyProgress.withSyncProgressReporter progress $
-            CopyProgress.rcloneCopyFiles remoteRoot cwd binaryPaths progress
+    unless (null binaryPaths) $
+        case (layout, mRemote) of
+            (Device.LayoutBare, Just remote) -> do
+                putStrLn $ "Downloading " ++ show (length binaryPaths) ++ " file(s) from CAS..."
+                -- TODO: Batch CAS downloads (single rclone copy with multiple src/dst) instead of one per file.
+                indexDir <- Git.getIndexPath
+                forM_ binaryPaths $ \filePath -> do
+                    mMeta <- parseMetadataFile (indexDir </> filePath)
+                    case mMeta of
+                        Just mc -> do
+                            let localPath = cwd </> filePath
+                                casRelPath = casBlobPath "cas" (metaHash mc)
+                            createDirectoryIfMissing True (takeDirectory localPath)
+                            void $ Transport.copyFromRemote remote (toPosix casRelPath) localPath
+                        Nothing -> pure ()
+            _ -> do
+                progress <- CopyProgress.newSyncProgress (length binaryPaths)
+                CopyProgress.withSyncProgressReporter progress $
+                    CopyProgress.rcloneCopyFiles remoteRoot cwd binaryPaths progress
 
 -- ============================================================================
 -- Unified sync operations (work for both cloud and filesystem remotes)
@@ -130,31 +149,31 @@ classifyAndSync remoteRoot cwd filePaths = do
 --
 -- Works for both cloud (remoteRoot = remoteUrl remote, e.g. "gdrive:path")
 -- and filesystem (remoteRoot = local path to remote).
--- Text files are copied from the index; binary files are batched via rclone.
-syncAllFilesFromHEAD :: String -> FilePath -> IO ()
-syncAllFilesFromHEAD remoteRoot localRoot = do
+-- Text files are copied from the index; binary from readable paths (full) or CAS (bare).
+syncAllFilesFromHEAD :: String -> FilePath -> Device.RemoteLayout -> Maybe Remote -> IO ()
+syncAllFilesFromHEAD remoteRoot localRoot layout mRemote = do
     actions <- deriveActions Nothing "HEAD"
-    executePullActions remoteRoot localRoot actions
+    executePullActions remoteRoot localRoot layout mRemote actions
 
 -- | After a merge, mirror git's metadata changes onto the actual working directory.
 -- Uses `git diff --name-status oldHead newHead` to determine what changed,
 -- then downloads/deletes/moves actual files accordingly.
 --
--- remoteRoot: rclone source for binary files (cloud URL or filesystem path).
--- Text files are copied from the local index; binary files are batched via rclone.
+-- remoteRoot: rclone source for binary files (full layout); bare uses CAS by hash.
+-- Text files are copied from the local index; binary from readable paths or CAS.
 --
 -- CRITICAL: Always reads the actual HEAD after merge from git (via getLocalHeadE).
 -- Never accepts newHead as a parameter - this prevents the bug where remoteHash
 -- was passed instead of the merged HEAD, causing local-only files to appear deleted.
-applyMergeToWorkingDir :: String -> FilePath -> String -> IO ()
-applyMergeToWorkingDir remoteRoot cwd oldHead = do
+applyMergeToWorkingDir :: String -> FilePath -> String -> Device.RemoteLayout -> Maybe Remote -> IO ()
+applyMergeToWorkingDir remoteRoot cwd oldHead layout mRemote = do
     newHead <- getLocalHeadE
     traverse_ (\newH -> do
         actions <- deriveActions (Just oldHead) newH
         putStrLn "--- Pulling changes from remote ---"
         if null actions
             then putStrLn "Working tree already up to date with remote."
-            else executePullActions remoteRoot cwd actions
+            else executePullActions remoteRoot cwd layout mRemote actions
         ) newHead
 
 -- ============================================================================
@@ -214,15 +233,18 @@ isTextMetadataFile metaPath = do
 
 
 -- | Sync binaries after a successful merge commit.
--- Uses remoteUrl to determine the rclone source, works for both cloud and filesystem.
+-- Uses remoteUrl to determine the rclone source (full) or CAS (bare), works for both cloud and filesystem.
 syncBinariesAfterMerge :: Remote -> Maybe String -> BitM ()
 syncBinariesAfterMerge remote oldHead = do
     cwd <- asks envCwd
+    isFs <- isFilesystemRemote remote
+    layout <- if isFs then pure Device.LayoutFull else liftIO (Device.readRemoteLayout cwd (remoteName remote))
     let name = remoteName remote
         remoteRoot = remoteUrl remote
+        mRemote = if isFs then Nothing else Just remote
     liftIO $ putStrLn "Syncing binaries... done."
     -- Apply diff-based sync or full sync depending on whether we have an old HEAD
-    liftIO $ maybe (syncAllFilesFromHEAD remoteRoot cwd) (applyMergeToWorkingDir remoteRoot cwd) oldHead
+    liftIO $ maybe (syncAllFilesFromHEAD remoteRoot cwd layout mRemote) (\oh -> applyMergeToWorkingDir remoteRoot cwd oh layout mRemote) oldHead
     maybeRemoteHash <- liftIO $ Git.getHashFromBundle (bundleForRemote (remoteName remote))
     liftIO $ traverse_ (void . Git.updateRemoteTrackingBranchToHash name) maybeRemoteHash
 

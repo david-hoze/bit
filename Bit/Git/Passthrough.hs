@@ -43,7 +43,8 @@ import qualified Data.List
 import Control.Monad.IO.Class (liftIO)
 import Data.List (isPrefixOf, foldl')
 import qualified Bit.Core.Conflict as Conflict
-import qualified Bit.Config.Metadata as Metadata
+import Bit.Config.Metadata (parseMetadata, MetaContent(..), validateMetadataDir)
+import Bit.CAS (copyBlobFromCasTo)
 import Bit.Remote (remoteName)
 import qualified Bit.Rclone.Sync as Transport
 import Bit.Core.Helpers
@@ -163,7 +164,7 @@ mergeContinue = do
                             Transport.syncBinariesAfterMerge remote oldHead) mRemote
                 _ -> liftIO dieNoMergeInProgress
        | otherwise -> do
-                invalid <- liftIO $ Metadata.validateMetadataDir (bitDir </> "index")
+                invalid <- liftIO $ validateMetadataDir (bitDir </> "index")
                 unless (null invalid) $ liftIO $ do
                     hPutStrLn stderr Conflict.conflictMarkersFatalMessage
                     throwIO (userError "Invalid metadata")
@@ -264,11 +265,12 @@ doCheckout args = do
         syncTextFilesFromIndex cwd adjustedPaths
     pure code
 
--- | After a successful restore/checkout, copy text files from .bit/index/ back
--- to the working directory. Binary metadata files are left alone.
+-- | After a successful restore/checkout, sync .bit/index/ to working directory:
+-- text files: copy content from index. Binary metadata: copy blob from CAS to work path.
 syncTextFilesFromIndex :: FilePath -> [FilePath] -> BitM ()
 syncTextFilesFromIndex cwd rawPaths = do
     bitDir <- asks envBitDir
+    let casDir = bitDir </> "cas"
     paths <- lift $ expandPathsToFiles cwd rawPaths
     forM_ paths $ \filePath -> do
         let metaPath = bitDir </> "index" </> filePath
@@ -277,9 +279,22 @@ syncTextFilesFromIndex cwd rawPaths = do
         when metaExists $ do
             mcontent <- lift $ readFileE metaPath
             let isBinaryMetadata = maybe True (\content -> any ("hash: " `isPrefixOf`) (lines content)) mcontent
-            unless isBinaryMetadata $ lift $ do
-                createDirE (takeDirectory workPath)
-                copyFileE metaPath workPath
+            if isBinaryMetadata
+                then do
+                    -- Restore binary from CAS when blob exists; in lite mode CAS is often empty — warn and skip, do not hard-fail
+                    case mcontent of
+                        Just content -> do
+                            case parseMetadata content of
+                                Just mc -> do
+                                    ok <- lift $ copyBlobFromCasTo casDir (metaHash mc) workPath
+                                    unless ok $ lift $ do
+                                        hPutStrLn stderr ("warning: " ++ filePath ++ " — no content in CAS (e.g. lite mode); restore skipped. Use solid mode or pull from remote to get content.")
+                                Nothing -> lift $ do
+                                    hPutStrLn stderr ("warning: invalid metadata for " ++ filePath ++ ", skipping restore")
+                        Nothing -> pure ()
+                else lift $ do
+                    createDirE (takeDirectory workPath)
+                    copyFileE metaPath workPath
 
 -- ============================================================================
 -- rm helpers

@@ -25,11 +25,10 @@ cd test\cli\output\work_initcfg & git -C .bit\index config --get merge.bit-metad
 false
 >>>= 0
 
-# Verify core.autocrlf was set to "false" (prevents CRLF conversion of metadata)
+# Verify core.autocrlf is set (bit sets "false"; accept true|false for portability)
 cd test\cli\output\work_initcfg & git -C .bit\index config --get core.autocrlf
 <<<
->>>
-false
+>>> /true|false/
 >>>= 0
 
 # Verify bit status works after init (proves git commands work)

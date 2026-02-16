@@ -189,7 +189,9 @@ initializeRepoAt targetDir opts = do
                 configExists <- Platform.doesFileExist configPath
                 unless configExists $ do
                     let defaultConfig = unlines
-                            [ "[text]"
+                            [ "[core]"
+                            , "    mode = lite"
+                            , "[text]"
                             , "    size-limit = 1048576  # 1MB, files larger are always binary"
                             , "    extensions = .txt,.md,.yaml,.yml,.json,.xml,.html,.css,.js,.py,.hs,.rs"
                             ]

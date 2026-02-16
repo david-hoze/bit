@@ -26,7 +26,13 @@ cd test\cli\output\work_gdrive_a & echo hello from A> foo.txt & echo x> bar.bin 
 
 cd test\cli\output\work_gdrive_a & bit push -u origin
 <<<
->>> /Metadata push complete\.|Remote is empty|Remote check passed/
+>>> /Metadata push complete\.|Remote is empty|Remote check passed|Push complete\./
+>>>= 0
+
+# --- Allow GDrive a moment so pushed files are visible (eventual consistency) ---
+timeout /t 3 >nul
+<<<
+>>>
 >>>= 0
 
 # --- A: remote repair after push: all files verified, nothing to repair ---
@@ -94,7 +100,7 @@ findstr /C:"hello from A" test\cli\output\work_gdrive_b\.bit\index\foo.txt >nul
 # --- Second round: A adds another file, pushes; B pulls ---
 cd test\cli\output\work_gdrive_a & echo second file> baz.txt & bit add baz.txt & bit commit -m "Add baz" & bit push
 <<<
->>> /Metadata push complete\.|Remote check passed|file changed/
+>>> /Metadata push complete\.|Remote check passed|Push complete\.|file changed/
 >>>= 0
 
 cd test\cli\output\work_gdrive_b & bit fetch & bit pull origin

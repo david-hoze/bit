@@ -241,7 +241,7 @@ renderFetchOutcome _remote (Updated { foOldHash = old, foNewHash = new }) = do
     putStrLn "Fetch complete."
 renderFetchOutcome remote (FetchedFirst newHash) = do
     putStrLn "Scanning remote..."
-    printFetchBanner (remoteName remote) (remoteName remote ++ "/main")
+    printFetchBanner (remoteUrl remote) (remoteName remote ++ "/main")
     putStrLn $ "Fetched: " ++ newHash
     putStrLn "Fetch complete."
 renderFetchOutcome _remote (FetchError err) = do

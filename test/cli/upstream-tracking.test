@@ -111,7 +111,7 @@ cd test\cli\output\upstream-local2 & bit remote add origin ..\upstream-remote
 # Test 5: bit fetch <remote> should work without setting upstream
 cd test\cli\output\upstream-local2 & bit fetch origin 2>&1
 <<<
->>> /From origin/
+>>> /From /
 >>>= 0
 
 # Verify upstream still NOT set

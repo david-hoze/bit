@@ -61,6 +61,11 @@ printMainHelp = putStr $ unlines
     , "  repair                            Verify and repair files from remotes"
     , "  fsck                              Check metadata repository integrity"
     , ""
+    , "Config and CAS:"
+    , "  config <key> [<value>]            Get or set config (e.g. core.mode lite|solid)"
+    , "  config --list                     List all config"
+    , "  cas backfill                      Store current working tree blobs into CAS"
+    , ""
     , "Merge and branching:"
     , "  merge --continue|--abort          Continue or abort merge"
     , "  branch --unset-upstream           Unset upstream tracking"
@@ -273,7 +278,7 @@ commandRegistry =
         , cmdOptions  = []
         , cmdExamples = [ HelpItem "bit remote add origin gdrive:Projects/foo" "Add a cloud remote"
                         , HelpItem "bit remote show" "Show all remotes"
-                        , HelpItem "bit remote repair origin" "Repair files against remote" ]
+                        , HelpItem "bit --remote origin verify" "Verify remote files" ]
         }
     , CommandHelp
         { cmdName     = "remote add"
@@ -383,5 +388,35 @@ commandRegistry =
         , cmdDesc     = ["Remove the upstream tracking configuration for the current branch."]
         , cmdOptions  = []
         , cmdExamples = [HelpItem "bit branch --unset-upstream" "Remove upstream tracking"]
+        }
+    , CommandHelp
+        { cmdName     = "config"
+        , cmdSynopsis = "Get or set repo config"
+        , cmdUsage    = "bit config <key> [<value>]"
+        , cmdDesc     = [ "Read or write .bit/config (git-style INI)."
+                        , "  core.mode   lite (default) or solid; solid stores file content in .bit/cas/ on add." ]
+        , cmdOptions  = [ HelpItem "--list" "List all key=value pairs" ]
+        , cmdExamples = [ HelpItem "bit config core.mode" "Print current mode"
+                        , HelpItem "bit config core.mode solid" "Enable CAS storage on add" ]
+        }
+    , CommandHelp
+        { cmdName     = "cas"
+        , cmdSynopsis = "Content-addressed store"
+        , cmdUsage    = "bit cas backfill"
+        , cmdDesc     = [ "CAS subcommands."
+                        , "  backfill   Walk historical commits and store blobs currently in the working tree into .bit/cas/." ]
+        , cmdOptions  = []
+        , cmdExamples = [HelpItem "bit cas backfill" "Backfill CAS from current files"]
+        }
+    , CommandHelp
+        { cmdName     = "cas backfill"
+        , cmdSynopsis = "Store working tree blobs into CAS"
+        , cmdUsage    = "bit cas backfill"
+        , cmdDesc     = [ "Walk all commits in history and, for each binary blob hash"
+                        , "referenced in metadata, if that blob is not yet in .bit/cas/"
+                        , "and the current working tree has a file with that hash,"
+                        , "copy it into the CAS. Optional after switching to solid mode." ]
+        , cmdOptions  = []
+        , cmdExamples = [HelpItem "bit cas backfill" "Backfill CAS from current files"]
         }
     ]

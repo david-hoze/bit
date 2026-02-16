@@ -1721,13 +1721,15 @@ Interactive per-file conflict resolution:
 
 ### Future (bit-solid)
 
-- **Mode switching**: `bit config core.mode solid` activates CAS writes on `bit add`. Switching is instant and non-destructive in both directions. See "Mode Configuration" in Core Architecture.
-- **CAS structure**: `.bit/cas/<first-2-chars>/<full-hash>` for normal repos, `bit/cas/` for bare repos. Directory structure already created by `bit init`.
-- **`bit cas backfill`**: Walk historical commits, store any blobs currently present in the working tree into CAS. Optional — incomplete CAS is fine.
 - **`bit cas gc`**: Prune unreferenced blobs. Safe default: never auto-delete.
-- **`bit restore` from CAS**: When restoring a file from a historical commit, check CAS for the blob before failing. Works regardless of current mode.
 - Sparse checkout via symlinks to CAS blobs
 - `bit materialize` / `bit checkout --sparse`
+
+---
+
+## Conformance
+
+A **conformance proof** document provides normative traceability and evidence that the implementation satisfies the spec in full (no discounts): see **[SPEC-CONFORMANCE.md](SPEC-CONFORMANCE.md)**. For each requirement it gives (1) a logical proof from code paths and invariants, and (2) empirical evidence via the test suite. Re-verification steps are listed at the end of that document.
 
 ---
 
@@ -1738,7 +1740,10 @@ Interactive per-file conflict resolution:
 - `bit init` — creates `.bit/` (including `.bit/cas/`), initializes Git in `.bit/index/.git`; dispatched before repo discovery so nested init works correctly; supports `BIT_GIT_JUNCTION=1` for git test suite compatibility; returns `ExitCode` and prints git's output verbatim; re-init on existing repos forwards to `git init` without stomping config; respects `--initial-branch`/`-b` (skips branch rename); peels `-c key=val` and `--bare` from before `init` subcommand; resolves `.bit` bitlinks on re-init for `--separate-git-dir` repos
 - `bit init --bare` — passes through to `git init --bare`, then creates `bit/cas/` inside the bare repo; bare repos are standard git bare repos with no `.bit/index/` wrapper; `bit --bare init dir` also dispatched correctly
 - `bit init --separate-git-dir <dir> [workdir]` — places git database and bit metadata at `<dir>`, writes bitlink (`.bit` file with `bitdir:` pointer) and gitlink (`.git` file with `gitdir:` pointer) in the working directory; all operations transparently follow bitlinks; re-init resolves bitlinks to find the real `.bit` directory
-- `bit add` — scans files, computes MD5 hashes, writes metadata, stages in Git
+- `bit add` — scans files, computes MD5 hashes, writes metadata, stages in Git; in solid mode (`bit config core.mode solid`) also writes blobs to `.bit/cas/`
+- `bit config` — get/set/list `.bit/config`; `core.mode` lite|solid (default lite) gates CAS writes on add
+- `bit cas backfill` — walk historical commits, store blobs currently in working tree into CAS
+- CAS — `.bit/cas/<prefix>/<hash>` (prefix = first 2 hex chars of content hash; blob filename is plain hex, no colon); restore/checkout copy binary blobs from CAS when present; verification (proof of possession) consults CAS as well as working tree
 - `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `reset`, `rm`, `mv`, `branch`, `merge` — delegate to Git
 - `bit remote add/show` — named remotes with device-aware resolution
 - `bit push` — Cloud: diff-based file sync via rclone, then push metadata bundle. Filesystem: fetch+merge at remote, then sync files
@@ -1794,6 +1799,7 @@ Interactive per-file conflict resolution:
 | `Bit/Config/Paths.hs` | Path constants |
 | `Bit/Config/File.hs` | Config file parsing (strict ByteString) |
 | `Bit/Config/Metadata.hs` | Canonical metadata parser/serializer |
+| `Bit/CAS.hs` | Content-addressed store: `casBlobPath`, `writeBlobToCas`, `hasBlobInCas`, `copyBlobFromCasTo`; blob path uses first 2 hex chars + plain hex filename |
 | `Bit/Types.hs` | Core types: Hash, FileEntry, BitEnv (with `envPrefix` for subdirectory support), BitM |
 | `Bit/Path.hs` | `RemotePath` newtype — compile-time enforcement that remote filesystem paths go through `Bit.IO.Platform` |
 | `Bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |

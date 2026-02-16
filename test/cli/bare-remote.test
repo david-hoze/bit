@@ -1,0 +1,128 @@
+# =============================================================================
+# Bare and full remote layout tests (spec: cloud layout, remote add --bare, remote show)
+#
+# Tests:
+# - bit remote add <name> <cloud-url> creates layout: full by default
+# - bit remote add <name> <cloud-url> --bare creates layout: bare and prints "(bare layout)."
+# - bit remote show <name> for cloud shows spec format: Remote, Type, Target, Layout
+# - bit remote add <name> <path> --bare warns and adds as filesystem (full)
+# =============================================================================
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_bare_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+mkdir test\cli\output\work_bare_remote
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_bare_remote & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# Cloud remote without --bare: default full layout
+# ======================================================================
+
+cd test\cli\output\work_bare_remote & bit remote add origin gdrive:Projects/foo
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\output\work_bare_remote & type .bit\remotes\origin
+<<<
+>>> /layout: full/
+>>>= 0
+
+cd test\cli\output\work_bare_remote & bit remote show origin
+<<<
+>>> /  Remote: origin/
+>>>= 0
+
+cd test\cli\output\work_bare_remote & bit remote show origin
+<<<
+>>> /  Layout: full/
+>>>= 0
+
+# ======================================================================
+# Cloud remote with --bare: layout bare, message includes "(bare layout)."
+# ======================================================================
+
+cd test\cli\output\work_bare_remote & bit remote add backup gdrive:Backup/foo --bare
+<<<
+>>> /Remote.*added.*bare layout/
+>>>= 0
+
+cd test\cli\output\work_bare_remote & type .bit\remotes\backup
+<<<
+>>> /layout: bare/
+>>>= 0
+
+cd test\cli\output\work_bare_remote & bit remote show backup
+<<<
+>>> /  Remote: backup/
+>>>= 0
+
+cd test\cli\output\work_bare_remote & bit remote show backup
+<<<
+>>> /  Type: cloud/
+>>>= 0
+
+cd test\cli\output\work_bare_remote & bit remote show backup
+<<<
+>>> /  Target: gdrive:Backup\/foo/
+>>>= 0
+
+cd test\cli\output\work_bare_remote & bit remote show backup
+<<<
+>>> /  Layout: bare/
+>>>= 0
+
+# ======================================================================
+# Usage: remote add requires exactly name and url; --bare is optional
+# ======================================================================
+
+cd test\cli\output\work_bare_remote & bit remote add 2>&1
+<<<
+>>> /usage: bit remote add/
+>>>= 1
+
+cd test\cli\output\work_bare_remote & bit remote add onlyname 2>&1
+<<<
+>>> /usage: bit remote add/
+>>>= 1
+
+# ======================================================================
+# Filesystem remote with --bare: warning, still added as full
+# ======================================================================
+
+mkdir test\cli\output\bare_fs_remote 2>nul
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_bare_remote & bit remote add fs ..\bare_fs_remote --bare
+<<<
+>>> /Remote.*added/
+>>>2 /warning:.*--bare.*only valid for cloud/
+>>>= 0
+
+cd test\cli\output\work_bare_remote & bit remote show fs
+<<<
+>>> /fs.*bare_fs_remote.*filesystem/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_bare_remote 2>nul & rmdir /s /q test\cli\output\bare_fs_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

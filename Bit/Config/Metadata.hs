@@ -70,7 +70,8 @@ parseMetadata content = do
           _ -> s
       | otherwise = s
     trim = dropWhileEnd isSpaceChar . dropWhile isSpaceChar
-    isSpaceChar c = c == ' ' || c == '\t'
+    -- Accept \r \n so Windows line endings and trailing newlines don't break parsing.
+    isSpaceChar c = c == ' ' || c == '\t' || c == '\r' || c == '\n'
     readMaybeInt s = case reads s of
       [(n, "")] -> Just n
       [(n, r)] | all isSpaceChar r -> Just n

@@ -39,6 +39,15 @@ module Bit.Core
     , remoteAdd
     , remoteShow
 
+      -- Config and CAS
+    , configGet
+    , configSet
+    , configList
+    , configGetWithRoot
+    , configSetWithRoot
+    , configListWithRoot
+    , casBackfill
+
       -- Merge management
     , mergeContinue
     , mergeAbort
@@ -77,5 +86,6 @@ import Bit.Core.Push (push)
 import Bit.Core.Pull (pull)
 import Bit.Core.Fetch (fetch)
 import Bit.Core.RemoteManagement (remoteAdd, remoteShow)
-import Bit.Core.Verify (VerifyTarget(..), RepairMode(..), verify, repair, fsck)
+import Bit.Core.Config (configGet, configSet, configList, configGetWithRoot, configSetWithRoot, configListWithRoot)
+import Bit.Core.Verify (VerifyTarget(..), RepairMode(..), verify, repair, fsck, casBackfill)
 

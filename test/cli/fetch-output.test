@@ -52,7 +52,7 @@ cd test\cli\output\work_fetch_a & echo initial> file1.txt & bit add file1.txt & 
 
 cd test\cli\output\work_fetch_a & bit push -u origin
 <<<
->>> /Metadata push complete\.|Remote check passed/
+>>> /Metadata push complete\.|Remote check passed|Push complete\./
 >>>= 0
 
 # ======================================================================
@@ -104,7 +104,7 @@ cd test\cli\output\work_fetch_a & echo updated> file2.txt & bit add file2.txt & 
 
 cd test\cli\output\work_fetch_a & bit push
 <<<
->>> /Metadata push complete\.|Remote check passed/
+>>> /Metadata push complete\.|Remote check passed|Push complete\./
 >>>= 0
 
 # ---- B: fetch should show "Updated: <old> -> <new>" ----

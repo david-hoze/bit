@@ -27,7 +27,8 @@ import System.Directory
       getFileSize,
       createDirectoryIfMissing,
       copyFileWithMetadata,
-      getModificationTime )
+      getModificationTime,
+      makeAbsolute )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, hFlush, stderr, stdin)
 import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf)
 import Data.Either (isRight)
@@ -40,6 +41,8 @@ import Data.Char (toLower)
 import qualified Bit.Config.File as ConfigFile
 import Bit.Utils (atomicWriteFileStr, toPosix, formatBytes)
 import Bit.Config.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
+import Bit.Core.Config (getCoreModeWithRoot, BitMode(..))
+import Bit.CAS (writeBlobToCas)
 import qualified Data.Set as Set
 import qualified Crypto.Hash.MD5 as MD5
 import Data.ByteString.Base16 (encode)
@@ -567,6 +570,7 @@ writeMetadataFiles root entries = do
       Just bitRoot -> do
         let metaRoot = bitRoot </> "index"
         createDirectoryIfMissing True metaRoot
+        casDirAbs <- makeAbsolute (bitRoot </> "cas")
 
         -- Separate directories from files
         let (dirs, files) = partitionEntries entries
@@ -595,6 +599,7 @@ writeMetadataFiles root entries = do
             else pure Nothing
 
         -- Third pass: write files in parallel (bounded concurrency)
+        mode <- getCoreModeWithRoot bitRoot
         caps <- getNumCapabilities
         let concurrency = max 4 (caps * 4)
 
@@ -615,6 +620,10 @@ writeMetadataFiles root entries = do
                             -- For binary files, write metadata (hash + size). Spec: raw hash value; atomic write.
                             atomicWriteFileStr metaPath $
                               serializeMetadata (MetaContent fHash fSize)
+                            -- In solid mode, store blob in CAS (use absolute path so it resolves correctly)
+                            when (mode == ModeSolid) $ do
+                              let actualPath = root </> unPath (path entry)
+                              writeBlobToCas actualPath casDirAbs fHash
                         atomicModifyIORef' counter (\n -> (n + 1, ()))
                       else do
                         atomicModifyIORef' skipped (\n -> (n + 1, ()))

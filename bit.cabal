@@ -46,7 +46,9 @@ executable bit
                       Bit.Config.Paths,
                       Bit.Config.File,
                       Bit.Config.Metadata,
-                      Bit.Rclone.Run
+                      Bit.Rclone.Run,
+                      Bit.CAS,
+                      Bit.Core.Config
     build-depends:    base16-bytestring ^>=1.0.2.0,
                       base,
                       async,
@@ -77,7 +79,18 @@ executable generate-literate
     build-depends:       base, directory, filepath, process, bytestring, text
     default-language:    Haskell2010
 
+-- cli runs ALL .test files (including gdrive tests that need rclone).
+-- It shares output directories with cli-fast, so they MUST NOT run in
+-- parallel.  Gate behind a manual flag so 'cabal test all' only runs
+-- cli-fast + unit suites.  Run explicitly: cabal test cli -f full-cli
+flag full-cli
+    description: Build the full CLI test suite (requires gdrive + rclone)
+    manual:      True
+    default:     False
+
 test-suite cli
+    if !flag(full-cli)
+        buildable: False
     type:                exitcode-stdio-1.0
     main-is:             RunCliTests.hs
     hs-source-dirs:      test

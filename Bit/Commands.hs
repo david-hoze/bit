@@ -172,6 +172,7 @@ isKnownCommand name = name `elem`
     [ "init", "add", "commit", "diff", "status", "log", "ls-files"
     , "rm", "mv", "reset", "restore", "checkout", "branch", "merge"
     , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
+    , "config", "cas"
     , "help"
     ]
 
@@ -418,6 +419,9 @@ commandKey ("merge":sub:_)
     | sub `elem` ["--continue", "--abort"] = "merge " ++ sub
 commandKey ("branch":sub:_)
     | sub `elem` ["--unset-upstream"] = "branch " ++ sub
+commandKey ("config":_) = "config"
+commandKey ("cas":sub:_)
+    | sub == "backfill" = "cas backfill"
 commandKey (cmd:_) = cmd
 commandKey [] = ""
 
@@ -534,15 +538,12 @@ runCommand args = do
                                    in if rel == "." then "" else rel
             _                   -> ""
 
-    -- Resolve the actual .bit directory (follows bitlinks for --separate-git-dir)
-    bitDir <- if bitExists then resolveBitDir root else pure (root </> ".bit")
-    let indexPath = bitDir </> "index"
-
-    -- Set the global index path for git commands
+    -- Preliminary .bit/index for setIndexPath and tryAlias (relative; git -C uses it)
+    bitDirPrelim <- if bitExists then resolveBitDir root else pure (root </> ".bit")
+    let indexPath = bitDirPrelim </> "index"
     when bitExists $ Git.setIndexPath indexPath
 
-    -- For unknown commands, try alias expansion before the repo check.
-    -- This allows global aliases to work even without a .bit directory.
+    -- For unknown commands, try alias expansion before repo check
     let mIndexPath = if bitExists then Just indexPath else Nothing
     case cmd of
         (name:rest) | not (isKnownCommand name) ->
@@ -554,9 +555,13 @@ runCommand args = do
         hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
         exitWith (ExitFailure 1)
 
-    -- Change to repo root so all .bit/ paths resolve correctly
+    -- Change to repo root so .bit/ paths resolve correctly and bitDir can be absolute
     when bitExists $
         Dir.setCurrentDirectory root
+
+    -- Re-resolve .bit so it is absolute (needed for CAS/metadata paths when root was relative)
+    bitDir <- if bitExists then (resolveBitDir =<< Dir.getCurrentDirectory) else pure (root </> ".bit")
+    when bitExists $ Git.setIndexPath (bitDir </> "index")
 
     -- Ensure index/<prefix> subdirectory exists for git -C
     when (bitExists && not (null prefix)) $
@@ -605,10 +610,17 @@ runCommand args = do
     case cmd of
         -- ── No env needed ────────────────────────────────────
         -- (init is dispatched earlier, before repo discovery)
-        ["remote", "add", name, url]    -> Bit.remoteAdd name url
+        ("remote":"add":rest)           -> case filter (/= "--bare") rest of
+            [name, url] -> Bit.remoteAdd name url ("--bare" `elem` rest)
+            _ -> do hPutStrLn stderr "usage: bit remote add <name> <url> [--bare]"; exitWith (ExitFailure 1)
         ["fsck"]                        -> Bit.fsck cwd
         ["merge", "--abort"]            -> Bit.mergeAbort
         ["branch", "--unset-upstream"]  -> Bit.unsetUpstream
+        ["config"]                      -> do hPutStrLn stderr "usage: bit config <key> [<value>]"; exitWith (ExitFailure 1)
+        ["config", "--list"]            -> Bit.configListWithRoot bitDir >> exitWith ExitSuccess
+        ["config", key]                 -> Bit.configGetWithRoot bitDir key >> exitWith ExitSuccess
+        ["config", key, value]          -> Bit.configSetWithRoot bitDir key value >> exitWith ExitSuccess
+        ["cas", "backfill"]             -> Bit.casBackfill cwd >> exitWith ExitSuccess
 
         -- ── Lightweight env (no scan) ────────────────────────
         ("log":rest)                    -> Bit.log prefix rest >>= exitWith

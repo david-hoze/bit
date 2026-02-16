@@ -33,6 +33,9 @@ cliFastTests =
   , "upstream-tracking.test"
   , "remote-show.test"
   , "remote-flag.test"
+  , "bare-remote.test"
+  , "layout-mode-matrix.test"
+  , "e2e-insane.test"
   ]
 
 main :: IO ()

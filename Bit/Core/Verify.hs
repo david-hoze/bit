@@ -10,10 +10,11 @@ module Bit.Core.Verify
     , verify
     , repair
     , fsck
+    , casBackfill
     ) where
 
 import System.FilePath ((</>), takeDirectory)
-import Control.Monad (when, unless, forM_, forM)
+import Control.Monad (when, unless, forM_, forM, filterM)
 import Data.Foldable (traverse_)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (asks)
@@ -23,14 +24,17 @@ import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import System.IO (stderr, stdin, hPutStr, hPutStrLn, hFlush, hIsTerminalDevice)
 import System.Exit (ExitCode(..), exitWith)
 import Data.List (intercalate, partition)
+import Data.Char (isSpace)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified System.Directory as Dir
 
-import Bit.Types (BitM, BitEnv(..), Path(..), Hash(..), HashAlgo(..), hashToText)
-import Bit.IO.Concurrency (Concurrency)
+import Bit.Types (BitM, BitEnv(..), Path(..), Hash(..), HashAlgo(..), hashToText, FileEntry(..), EntryKind(..))
+import Bit.IO.Concurrency (Concurrency(..))
 import qualified Bit.Scan.Verify as Verify
+import qualified Bit.Scan.Local as Scan
+import Bit.CAS (hasBlobInCas, writeBlobToCas)
 import qualified Bit.Scan.Fsck as Fsck
 import Bit.Config.Paths (bundleForRemote, bitIndexPath)
 import Bit.Progress.Report (reportProgress, clearProgress)
@@ -556,3 +560,38 @@ printVerifyResultWithSkipped result skipped = do
 
 fsck :: FilePath -> IO ()
 fsck = Fsck.doFsck
+
+-- | Walk historical commits, store any blobs currently present in the working tree into CAS.
+casBackfill :: FilePath -> IO ()
+casBackfill cwd = do
+  indexDir <- Git.getIndexPath
+  let bitDir = takeDirectory indexDir
+      casDir = bitDir </> "cas"
+  (code, revListOut, _) <- Git.runGitAt indexDir ["rev-list", "HEAD"]
+  commits <- case code of
+    ExitSuccess -> pure (filter (not . null) (lines revListOut))
+    _ -> pure []
+  -- Collect all binary hashes from all commits
+  -- TODO: For large repos, stream per-commit and merge into a Set to avoid loading all metadata at once.
+  allEntries <- forM commits $ \rev ->
+    Verify.loadMetadata (Verify.FromCommit (filter (not . isSpace) rev)) Sequential
+  let allHashes = Set.fromList [h | entries <- allEntries, Verify.BinaryEntry _ h _ <- entries]
+  -- Filter to hashes not already in CAS
+  toBackfill <- filterM (\h -> fmap not (hasBlobInCas casDir h)) (Set.toList allHashes)
+  -- Scan working tree to get hash -> path (first path per hash)
+  -- TODO: For large repos, read hashes from .bit/index metadata and only hash files in toBackfill instead of full scan.
+  entries <- Scan.scanWorkingDir cwd Sequential
+  let hashToPath = Map.fromList
+        [ (h, cwd </> unPath (path e))
+        | e <- entries
+        , File h _ _ <- [kind e]
+        ]
+  -- For each missing hash, if in working tree write to CAS
+  written <- forM toBackfill $ \h -> do
+    case Map.lookup h hashToPath of
+      Just workPath -> do
+        writeBlobToCas workPath casDir h
+        pure True
+      Nothing -> pure False
+  let n = length (filter id written)
+  when (n > 0) $ putStrLn $ "Stored " ++ show n ++ " blob(s) in CAS."

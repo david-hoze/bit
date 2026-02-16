@@ -91,13 +91,13 @@ extractSection sectionName linesOfText =
         findIndex' (\l -> T.strip l == T.pack sectionHeader) linesOfText
       -- Find end of section (next [section] or EOF)
       endIdx = maybe (length linesOfText) (+ startIdx) $
-        findIndex' (\l -> T.stripStart l `T.isPrefixOf` T.pack "[") (drop startIdx linesOfText)
+        findIndex' (\l -> T.pack "[" `T.isPrefixOf` T.stripStart l) (drop startIdx linesOfText)
   in map T.strip $ take (endIdx - startIdx) (drop startIdx linesOfText)
 
 -- | Parse size-limit from section lines
 parseSizeLimit :: [T.Text] -> Maybe Integer
 parseSizeLimit linesOfText =
-  let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- linesOfText, T.stripStart l `T.isPrefixOf` T.pack prefix]
+  let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- linesOfText, T.pack prefix `T.isPrefixOf` T.stripStart l]
       sizeLines = findLine "size-limit"
   in listToMaybe sizeLines >>= \sizeStr ->
       let cleaned = takeWhile (/= '#') sizeStr
@@ -109,7 +109,7 @@ parseSizeLimit linesOfText =
 -- | Parse extensions from section lines
 parseExtensions :: [T.Text] -> Maybe [String]
 parseExtensions linesOfText =
-  let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- linesOfText, T.stripStart l `T.isPrefixOf` T.pack prefix]
+  let findLine prefix = [T.unpack (T.drop (T.length (T.pack prefix)) (T.strip l)) | l <- linesOfText, T.pack prefix `T.isPrefixOf` T.stripStart l]
       extLines = findLine "extensions"
   in listToMaybe extLines >>= \extStr ->
       let cleaned = takeWhile (/= '#') extStr

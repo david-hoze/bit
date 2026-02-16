@@ -29,8 +29,10 @@ module Bit.Device.Identity
   , writeDeviceFile
   , readRemoteFile
   , readRemoteType
+  , readRemoteLayout
   , writeRemoteFile
   , listDeviceNames
+  , RemoteLayout(..)
   , findDeviceByUuid
     -- Resolution
   , resolveRemoteTarget
@@ -478,6 +480,10 @@ readRemoteFile repoRoot remoteName = do
         pure $ Just $ maybe (TargetCloud (device ++ ":" ++ relPath))
           (const $ TargetDevice device relPath) mDev
 
+-- | Cloud remote storage layout: full (readable paths + CAS) or bare (CAS only).
+data RemoteLayout = LayoutFull | LayoutBare
+  deriving (Show, Eq)
+
 -- | Read the remote type from .bit/remotes/<name>.
 -- New format: "type: filesystem|device|cloud". Old format: inferred from "target:" line.
 readRemoteType :: FilePath -> String -> IO (Maybe RemoteType)
@@ -505,14 +511,39 @@ readRemoteType repoRoot name = do
             _ -> pure (Just RemoteCloud)
           Nothing -> pure Nothing
 
-writeRemoteFile :: FilePath -> String -> RemoteType -> Maybe String -> IO ()
-writeRemoteFile repoRoot name remoteType mTarget = do
+-- | Read cloud remote layout from .bit/remotes/<name>. Only meaningful for RemoteCloud.
+-- Defaults to LayoutFull when missing or not cloud.
+readRemoteLayout :: FilePath -> String -> IO RemoteLayout
+readRemoteLayout repoRoot name = do
+  mType <- readRemoteType repoRoot name
+  case mType of
+    Just RemoteCloud -> do
+      bitRoot <- resolveBitRoot repoRoot
+      let path = bitRoot </> "remotes" </> name
+      exists <- Dir.doesFileExist path
+      if not exists then pure LayoutFull
+      else do
+        bs <- BS.readFile path
+        let content = either (const "") T.unpack (decodeUtf8' bs)
+            ls = lines content
+            getVal prefix = listToMaybe [ trim (drop (length prefix) l) | l <- ls, prefix `isPrefixOf` l ]
+        case getVal "layout: " of
+          Just "bare" -> pure LayoutBare
+          _          -> pure LayoutFull
+    _ -> pure LayoutFull
+
+writeRemoteFile :: FilePath -> String -> RemoteType -> Maybe String -> Maybe RemoteLayout -> IO ()
+writeRemoteFile repoRoot name remoteType mTarget mLayout = do
   bitRoot <- resolveBitRoot repoRoot
   Dir.createDirectoryIfMissing True (bitRoot </> "remotes")
   let path = bitRoot </> "remotes" </> name
   let content = case remoteType of
         RemoteFilesystem -> "type: filesystem"
-        RemoteCloud      -> "type: cloud\ntarget: " ++ fromMaybe "" mTarget
+        RemoteCloud      ->
+          let layoutLine = case mLayout of
+                Just LayoutBare -> "\nlayout: bare"
+                _               -> "\nlayout: full"
+          in "type: cloud\ntarget: " ++ fromMaybe "" mTarget ++ layoutLine
         RemoteDevice     -> "type: device\ntarget: " ++ fromMaybe "" mTarget
   -- Use atomic write for crash safety and Windows compatibility
   atomicWriteFile path (encodeUtf8 (T.pack content))
