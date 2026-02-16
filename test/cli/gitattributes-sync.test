@@ -1,0 +1,114 @@
+# =============================================================================
+# Gitattributes Sync - .gitattributes synced from working tree to .bit/index/
+#
+# Tests that:
+# 1. User's .gitattributes is copied to .bit/index/.gitattributes on scan
+# 2. Modified .gitattributes is re-synced on next scan
+# 3. Removing .gitattributes removes the copy from .bit/index/
+# 4. Attributes from .gitattributes are visible to git commands
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_gitattr 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_gitattr & cd test\cli\output\work_gitattr & bit init -q
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: .gitattributes sync on scan
+# ======================================================================
+
+# ---- Create .gitattributes with a custom pattern ----
+cd test\cli\output\work_gitattr & echo *.bin binary> .gitattributes
+<<<
+>>>= 0
+
+# ---- Create a file and add it (triggers scan) ----
+cd test\cli\output\work_gitattr & echo hello> file.txt & bit add file.txt
+<<<
+>>>= 0
+
+# ---- Verify .gitattributes was synced to .bit/index/ ----
+cd test\cli\output\work_gitattr & type .bit\index\.gitattributes
+<<<
+>>> /\*\.bin binary/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: Modified .gitattributes re-synced
+# ======================================================================
+
+# ---- Modify .gitattributes to add another pattern ----
+cd test\cli\output\work_gitattr & (echo *.bin binary & echo *.dat -diff) > .gitattributes
+<<<
+>>>= 0
+
+# ---- Run bit status (triggers scan which re-syncs) ----
+cd test\cli\output\work_gitattr & bit status
+<<<
+>>>= 0
+
+# ---- Verify updated content was synced ----
+cd test\cli\output\work_gitattr & type .bit\index\.gitattributes
+<<<
+>>> /\*\.dat -diff/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: Removing .gitattributes removes index copy
+# ======================================================================
+
+# ---- Delete user's .gitattributes ----
+cd test\cli\output\work_gitattr & del .gitattributes
+<<<
+>>>= 0
+
+# ---- Run bit status (triggers scan) ----
+cd test\cli\output\work_gitattr & bit status
+<<<
+>>>= 0
+
+# ---- Verify .bit/index/.gitattributes was removed (should not exist) ----
+if exist "test\cli\output\work_gitattr\.bit\index\.gitattributes" (exit 1) else (exit 0)
+<<<
+>>>= 0
+
+# ======================================================================
+# SECTION 4: Attributes visible to git commands
+# ======================================================================
+
+# ---- Recreate .gitattributes with text=auto ----
+cd test\cli\output\work_gitattr & echo * text=auto> .gitattributes
+<<<
+>>>= 0
+
+# ---- Add a file (triggers sync) ----
+cd test\cli\output\work_gitattr & echo content> new.txt & bit add new.txt
+<<<
+>>>= 0
+
+# ---- Verify git check-attr sees the attribute through bit ----
+cd test\cli\output\work_gitattr & bit check-attr text new.txt
+<<<
+>>> /new\.txt.*text.*auto/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_gitattr 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

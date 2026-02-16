@@ -1,0 +1,111 @@
+# =============================================================================
+# Passthrough Flags - --git-dir and --work-tree bypass bit interception
+#
+# Tests that:
+# 1. --git-dir=<path> causes bit to pass through to git directly
+# 2. --work-tree=<path> causes bit to pass through to git directly
+# 3. Both --git-dir <path> (space-separated) form works
+# 4. Flags after subcommand (e.g. rev-parse --git-dir) do NOT bypass
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_ptflags 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_ptflags & cd test\cli\output\work_ptflags & bit init -q
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Create a bare git repo for --git-dir tests ----
+cd test\cli\output\work_ptflags & git init --bare bare.git
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: --git-dir= (equals form) bypass
+# ======================================================================
+
+# ---- Set a config in the bare repo ----
+cd test\cli\output\work_ptflags & git config -f bare.git\config test.flagkey flagvalue
+<<<
+>>>= 0
+
+# ---- --git-dir=bare.git should bypass bit and read from bare.git ----
+cd test\cli\output\work_ptflags & bit --git-dir=bare.git config test.flagkey
+<<<
+>>>
+flagvalue
+>>>= 0
+
+# ---- --git-dir=bare.git rev-parse should return bare.git ----
+cd test\cli\output\work_ptflags & bit --git-dir=bare.git rev-parse --git-dir
+<<<
+>>> /bare\.git/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: --git-dir <path> (space form) bypass
+# ======================================================================
+
+# ---- --git-dir bare.git (space-separated) should also bypass ----
+cd test\cli\output\work_ptflags & bit --git-dir bare.git config test.flagkey
+<<<
+>>>
+flagvalue
+>>>= 0
+
+# ======================================================================
+# SECTION 3: --work-tree= bypass
+# ======================================================================
+
+# ---- --work-tree=. should bypass bit ----
+cd test\cli\output\work_ptflags & bit --git-dir=bare.git --work-tree=. rev-parse --show-toplevel
+<<<
+>>> /work_ptflags/
+>>>= 0
+
+# ---- --work-tree <path> (space form) should also bypass ----
+cd test\cli\output\work_ptflags & bit --work-tree . --git-dir=bare.git rev-parse --show-toplevel
+<<<
+>>> /work_ptflags/
+>>>= 0
+
+# ======================================================================
+# SECTION 4: Flags AFTER subcommand should NOT bypass
+# ======================================================================
+
+# ---- rev-parse --git-dir (flag after subcommand) should use bit's repo, not bare.git ----
+cd test\cli\output\work_ptflags & bit rev-parse --git-dir
+<<<
+>>> /\.git/
+>>>= 0
+
+# ======================================================================
+# SECTION 5: --git-dir with -c flag interleaved
+# ======================================================================
+
+# ---- -c key=val before --git-dir should still bypass ----
+cd test\cli\output\work_ptflags & bit -c color.ui=false --git-dir=bare.git config test.flagkey
+<<<
+>>>
+flagvalue
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_ptflags 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

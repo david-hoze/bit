@@ -1,4 +1,5 @@
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Bit.Git.Run
     ( add
@@ -65,7 +66,8 @@ module Bit.Git.Run
 
 import Data.Maybe (mapMaybe, listToMaybe)
 
-import System.Process (readProcessWithExitCode)
+import System.Process (readProcessWithExitCode, createProcess, proc, waitForProcess,
+                       StdStream(..), std_in, std_out, std_err)
 import System.Exit (ExitCode(..))
 import Bit.Config.Paths
 import System.FilePath ((</>))
@@ -73,7 +75,11 @@ import Data.Char (isSpace)
 import Control.Monad (when, guard)
 import Prelude hiding (init)
 import Data.List (isPrefixOf)
-import System.IO (hPutStr, hPutStrLn, stderr)
+import System.IO (hPutStr, hPutStrLn, hGetContents, hSetBinaryMode, hClose,
+                   hWaitForInput, stderr, stdin, hIsTerminalDevice)
+import Control.Concurrent (forkIO)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (evaluate, catch, IOException)
 import System.Environment (lookupEnv)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.IO.Unsafe (unsafePerformIO)
@@ -602,15 +608,26 @@ runGitAt indexPath args = spawnGit (["-C", indexPath] ++ args)
 -- | Run git in the current directory without -C override.
 -- Used when CWD itself is a git directory (e.g. user cd'd into .git)
 -- and git's own repo discovery should be trusted as-is.
+-- Inherits stdin from the parent process so shell redirections (e.g.
+-- @git check-attr --stdin \<file@) work correctly.
 runGitHere :: [String] -> IO ExitCode
 runGitHere args = do
+  bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
   noColor <- lookupEnv "BIT_NO_COLOR"
   let colorFlag = case noColor of
         Just "1" -> "never"
         Just "true" -> "never"
         _ -> "auto"
   let fullArgs = ["-c", "color.ui=" ++ colorFlag] ++ args
-  (code, out, err) <- spawnGit fullArgs
+  (_, Just outh, Just errh, ph) <- createProcess (proc bin fullArgs)
+    { std_in = Inherit, std_out = CreatePipe, std_err = CreatePipe }
+  outVar <- newEmptyMVar
+  errVar <- newEmptyMVar
+  _ <- forkIO $ hGetContents outh >>= \s -> evaluate (length s) >> putMVar outVar s
+  _ <- forkIO $ hGetContents errh >>= \s -> evaluate (length s) >> putMVar errVar s
+  out <- takeMVar outVar
+  err <- takeMVar errVar
+  code <- waitForProcess ph
   putStr (rewriteGitHints out)
   hPutStr stderr (rewriteGitHints err)
   case code of
@@ -620,10 +637,45 @@ runGitHere args = do
   pure code
 
 -- | Run git without -C .bit/index (no repo context).
--- For commands that don't need a repo: --exec-path, --version, etc.
+-- Used for passthrough where bit should be transparent.
+-- When stdin is a pipe or file (shell redirect like @\<file@), the content
+-- is forwarded to git in binary mode so commands like @git hash-object --stdin@
+-- receive the exact bytes without \\n → \\r\\n text conversion.
 runGitGlobal :: [String] -> IO ExitCode
 runGitGlobal args = do
-  (code, out, err) <- spawnGit args
-  putStr out
-  hPutStr stderr err
-  pure code
+  bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
+  isTTY <- hIsTerminalDevice stdin
+  -- Check if stdin has data available (non-blocking with short timeout).
+  -- This avoids blocking on open-but-empty pipes (e.g. background tasks).
+  hasInput <- if isTTY then pure False
+              else hWaitForInput stdin 10
+                   `catch` \(_ :: IOException) -> pure False
+  if hasInput
+    then do
+      -- Forward stdin in binary mode to preserve exact bytes
+      (Just inh, Just outh, Just errh, ph) <- createProcess (proc bin args)
+        { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
+      hSetBinaryMode stdin True
+      hSetBinaryMode inh True
+      -- Fork output readers (avoids deadlock from full pipe buffers)
+      outVar <- newEmptyMVar
+      errVar <- newEmptyMVar
+      _ <- forkIO $ hGetContents outh >>= \s -> evaluate (length s) >> putMVar outVar s
+      _ <- forkIO $ hGetContents errh >>= \s -> evaluate (length s) >> putMVar errVar s
+      -- Forward stdin content
+      input <- hGetContents stdin
+      hPutStr inh input
+      hClose inh
+      -- Collect results
+      out <- takeMVar outVar
+      err <- takeMVar errVar
+      code <- waitForProcess ph
+      putStr out
+      hPutStr stderr err
+      pure code
+    else do
+      -- No stdin to forward: standard approach
+      (code, out, err) <- readProcessWithExitCode bin args ""
+      putStr out
+      hPutStr stderr err
+      pure code

@@ -37,6 +37,10 @@ run = do
     case mGitDir of
         Just d | not (null d) -> Git.runGitGlobal args >>= exitWith
         _ -> pure ()
+    -- When --git-dir or --work-tree appears as a leading global flag,
+    -- pass through to git directly (same logic as GIT_DIR env var).
+    when (hasExplicitGitDir args) $
+        Git.runGitGlobal args >>= exitWith
     case args of
         []               -> Git.runGitGlobal [] >>= exitWith
         ["help"]         -> printMainHelp >> exitSuccess
@@ -125,6 +129,25 @@ isGitGlobalFlag (flag:_) = flag `elem`
     ["--exec-path", "--version", "--html-path", "--man-path", "--info-path"]
 isGitGlobalFlag _ = False
 
+-- | Check if --git-dir or --work-tree appears as a leading global flag.
+-- Scans only flags before the first subcommand (non-flag argument), skipping
+-- -c key=val and -C dir pairs. This avoids false positives on e.g.
+-- "git rev-parse --git-dir" where --git-dir appears after the subcommand.
+hasExplicitGitDir :: [String] -> Bool
+hasExplicitGitDir = go
+  where
+    go [] = False
+    go (x:rest)
+        | "--git-dir=" `isPrefixOf` x   = True
+        | "--work-tree=" `isPrefixOf` x  = True
+        | x == "--git-dir"  = not (null rest)
+        | x == "--work-tree" = not (null rest)
+        | x == "-c" = go (drop 1 rest)
+        | x == "-C" = go (drop 1 rest)
+        | x == "--bare" = go rest
+        | "-" `isPrefixOf` x = go rest
+        | otherwise = False  -- reached subcommand, stop scanning
+
 -- | Handle @git -C \<dir\> ...@ passthrough.
 -- If the target directory contains a .bit/ repo, redirect into its index;
 -- otherwise pass through to git unchanged.
@@ -156,8 +179,8 @@ isKnownCommand name = name `elem`
 -- When a .bit/index path is available, queries local+global config;
 -- otherwise queries global config only.
 -- If no alias is found, passes the command through to git directly.
-tryAlias :: Maybe FilePath -> String -> [String] -> IO ()
-tryAlias mIndexPath name rest = do
+tryAlias :: Maybe FilePath -> FilePath -> FilePath -> String -> [String] -> IO ()
+tryAlias mIndexPath origCwd root name rest = do
     let gitArgs = case mIndexPath of
             Just p  -> ["-C", p, "config", "--get", "alias." ++ name]
             Nothing -> ["config", "--get", "alias." ++ name]
@@ -176,17 +199,37 @@ tryAlias mIndexPath name rest = do
   where
     passthrough args = case mIndexPath of
         Just p  -> do
+            -- cd to repo root so .git (junction or gitlink) is found at CWD.
+            -- CWD may still be origCwd (user's subdirectory) at this point.
+            Dir.setCurrentDirectory root
             hasGitDir <- Dir.doesDirectoryExist ".git"
             hasGitFile <- Dir.doesFileExist ".git"
+            -- NOTE: No IO calls between the doesDirectoryExist/doesFileExist
+            -- checks above and the if/else below. On Windows, calling
+            -- getCurrentDirectory (or any file IO) before the hasGitDir check
+            -- causes subtle side effects on junction resolution that break
+            -- subsequent git operations. The CWD restore must happen INSIDE
+            -- each branch.
             if hasGitDir
-                then Git.runGitGlobal args >>= exitWith
+                then do
+                    -- Restore user's CWD so relative paths in args resolve correctly.
+                    -- When CWD changes, also pass --work-tree=<root> because git
+                    -- follows the .git junction to .bit/index/.git and thinks the
+                    -- work tree is .bit/index/, making relative paths like ../f fail.
+                    when (root /= origCwd) $ do
+                        Dir.setCurrentDirectory origCwd
+                    Git.runGitGlobal
+                        (if root /= origCwd
+                            then "--work-tree" : root : args
+                            else args)
+                        >>= exitWith
                 else if hasGitFile
                     then do
-                        -- Read gitlink target and pass --git-dir to bypass
-                        -- junction resolution (real_pathdup). Without this,
-                        -- git resolves junctions when reading gitlink files,
-                        -- returning .bit/index/.git instead of the gitlink target.
+                        -- Read gitlink target BEFORE restoring CWD (gitlink is at repo root)
                         mTarget <- readGitlink ".git"
+                        -- Now restore CWD for relative path resolution
+                        when (root /= origCwd) $
+                            Dir.setCurrentDirectory origCwd
                         case mTarget of
                             Just target ->
                                 Git.runGitGlobal ("--git-dir" : target : args)
@@ -314,6 +357,26 @@ syncBitignoreToIndex cwd bitDir = do
     trim :: String -> String
     trim = dropWhile (== ' ') . dropWhileEnd (== ' ')
 
+-- | Sync user's .gitattributes to .bit/index/.gitattributes.
+-- If the user has no .gitattributes, remove the stale copy from .bit/index/.
+-- This runs AFTER writeMetadataFiles (which copies text files from the
+-- working tree) to handle the cleanup case where the user deletes their
+-- .gitattributes — the scan wouldn't include it and listMetadataPaths
+-- skips .gitattributes, so without this the stale copy would persist.
+syncGitattributesToIndex :: FilePath -> FilePath -> IO ()
+syncGitattributesToIndex cwd bitDir = do
+    let userSrc = cwd </> ".gitattributes"
+        dest    = bitDir </> "index" </> ".gitattributes"
+    userExists <- Dir.doesFileExist userSrc
+    if userExists
+        then do
+            bs <- BS.readFile userSrc
+            let content = either (const "") T.unpack (decodeUtf8' bs)
+            atomicWriteFileStr dest content
+        else do
+            destExists <- Dir.doesFileExist dest
+            when destExists $ Dir.removeFile dest
+
 -- | Resolve the .bit directory from a repo root.
 -- For normal repos, .bit is a directory. For separated repos, .bit is a file
 -- (bitlink) containing "bitdir: <path>" pointing to the real bit directory.
@@ -389,13 +452,13 @@ findBitRoot start = do
                             then pure Nothing
                             else go ceilings parent
     getCeilingDirs = do
-        mVal <- lookupEnv "BIT_CEILING_DIRECTORIES"
-        case mVal of
-            Nothing -> pure []
-            Just val -> do
-                let sep = if System.Info.os `elem` ["mingw32", "win32"] then ';' else ':'
-                let raw = splitOn sep val
-                mapM Dir.canonicalizePath (filter (not . null) raw)
+        mBit <- lookupEnv "BIT_CEILING_DIRECTORIES"
+        mGit <- lookupEnv "GIT_CEILING_DIRECTORIES"
+        let sep = if System.Info.os `elem` ["mingw32", "win32"] then ';' else ':'
+            parse Nothing = []
+            parse (Just val) = filter (not . null) (splitOn sep val)
+            raw = parse mBit ++ parse mGit
+        mapM Dir.canonicalizePath raw
     splitOn _ [] = []
     splitOn c s  = let (w, rest) = break (== c) s
                    in w : case rest of { [] -> []; (_:t) -> splitOn c t }
@@ -456,7 +519,7 @@ runCommand args = do
     -- reject known bit commands that require a work tree
     case mRoot of
         Just (BareRoot _) -> case cmd of
-            (name:rest) | not (isKnownCommand name) -> tryAlias Nothing name rest
+            (name:rest) | not (isKnownCommand name) -> tryAlias Nothing origCwd origCwd name rest
             _ -> do
                 hPutStrLn stderr "fatal: this operation must be run in a work tree"
                 exitWith (ExitFailure 128)
@@ -482,7 +545,8 @@ runCommand args = do
     -- This allows global aliases to work even without a .bit directory.
     let mIndexPath = if bitExists then Just indexPath else Nothing
     case cmd of
-        (name:rest) | not (isKnownCommand name) -> tryAlias mIndexPath name rest
+        (name:rest) | not (isKnownCommand name) ->
+            tryAlias mIndexPath origCwd root name rest
         _ -> pure ()
 
     -- Repo existence check (init and unknown commands already handled above)
@@ -515,6 +579,7 @@ runCommand args = do
             syncBitignoreToIndex cwd bitDir
             localFiles <- Scan.scanWorkingDir cwd concurrency
             Scan.writeMetadataFiles cwd localFiles
+            syncGitattributesToIndex cwd bitDir
 
     -- Helper functions for running commands
     let runScanned action = do { scanAndWrite; env <- baseEnv; runBitM env action }

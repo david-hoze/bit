@@ -432,7 +432,8 @@ scanWorkingDir root concurrencyMode = do
 
         let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress filesToHash
 
-        fileEntries <- if total > 50
+        isTTY <- hIsTerminalDevice stderr
+        fileEntries <- if total > 50 && isTTY
             then do
                 reporterThread <- forkIO (progressLoop counter total)
                 finally hashingAction $ do

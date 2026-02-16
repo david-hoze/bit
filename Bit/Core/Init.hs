@@ -195,19 +195,16 @@ initializeRepoAt targetDir opts = do
                             ]
                     atomicWriteFileStr configPath defaultConfig
 
-                -- 5b. Merge driver: prevent Git from writing conflict markers
+                -- 5b. Merge driver: prevent Git from writing conflict markers.
+                -- The driver is configured in git config; it gets activated by
+                -- info/attributes inside .bit/index/.git/ (written before merge ops).
                 void $ Git.runGitAt targetBitIndexPath ["config", "merge.bit-metadata.name", "bit metadata"]
                 void $ Git.runGitAt targetBitIndexPath ["config", "merge.bit-metadata.driver", "false"]
-                -- For gitlink case, resolve real git dir for info/attributes
-                isGitDir <- Platform.doesDirectoryExist targetBitGitDir
-                let getInfoDir
-                      | isGitDir = pure (targetBitGitDir </> "info")
-                      | otherwise = do
-                          (_, gitDir, _) <- Git.runGitAt targetBitIndexPath ["rev-parse", "--git-dir"]
-                          pure (filter (/= '\n') gitDir </> "info")
-                infoDir <- getInfoDir
-                Platform.createDirectoryIfMissing True infoDir
-                atomicWriteFileStr (infoDir </> "attributes") "* merge=bit-metadata -text\n"
+
+                -- 5c. Disable CRLF conversion. Metadata files are written with LF
+                -- by atomicWriteFileStr; without this, git on Windows applies
+                -- autocrlf and reports them as permanently modified.
+                void $ Git.runGitAt targetBitIndexPath ["config", "core.autocrlf", "false"]
 
                 -- 7. For --separate-git-dir: write bitlink and gitlink files in working dir
                 case mAbsSgdir of

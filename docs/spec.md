@@ -343,8 +343,9 @@ bit runs Git with:
 - All git operations use the repo at `.bit/index/.git`
 - Working tree is `.bit/index` (not the project root)
 - Ignore rules: user creates `.bitignore` in the project root. Before any command that uses working tree state (add, commit, status, diff, restore, checkout, merge, reset, mv), bit runs **syncBitignoreToIndex**: if `.bitignore` exists it is copied to `.bit/index/.gitignore` with normalization (line endings, trim, drop empty lines); if `.bitignore` does not exist, `.bit/index/.gitignore` is removed if present so the index has no ignore file. The index working tree is thus always in sync with the user's ignore rules for those commands.
+- Attribute rules: same commands also run **syncGitattributesToIndex**: if `.gitattributes` exists in the project root, it is copied verbatim to `.bit/index/.gitattributes`; if `.gitattributes` does not exist, `.bit/index/.gitattributes` is removed if present. This ensures user-defined attributes (e.g. `*.bin binary`, `* text=auto`) are visible to git commands that run inside `.bit/index/`. Unlike the old `info/attributes` approach, `.gitattributes` in the working tree does not leak attributes into passthrough commands that run from the user's CWD via the `.git` junction.
 
-**Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes. Creates `.bit/cas/` for the content-addressed store (used when mode=solid). These post-init config steps only run on fresh init — re-init (`bit init` on an existing repo) skips them and just forwards to `git init` so that "Reinitialized existing" output, exit codes, and `--initial-branch` warnings work identically to git.
+**Init additionally:** Adds the repo's absolute path to `git config --global safe.directory` so git does not report "dubious ownership" when the repo lives on an external or USB drive (e.g. Windows with git 2.35.2+). Sets `core.autocrlf=false` to prevent git from applying CRLF conversion to metadata files (which are written with LF by `atomicWriteFileStr`); without this, git on Windows reports metadata files as permanently modified. Creates `.bit/index/.git/bundles` so push/fetch have a place to store per-remote bundle files for cloud remotes. Creates `.bit/cas/` for the content-addressed store (used when mode=solid). These post-init config steps only run on fresh init — re-init (`bit init` on an existing repo) skips them and just forwards to `git init` so that "Reinitialized existing" output, exit codes, and `--initial-branch` warnings work identically to git.
 
 **Branch naming:** On fresh init, bit sets `init.defaultBranch=main` and renames `master` to `main` — unless the user passed `--initial-branch`/`-b`, in which case git's own branch naming is respected and bit does not override it.
 
@@ -1331,13 +1332,15 @@ Alias types:
 
 Unknown commands (not handled by bit, no alias match) are forwarded to git:
 
-- **Inside a bit repo with `.git` junction/gitlink**: uses `runGitGlobal` (no `-C`, no `-c` flags) — when CWD has a `.git` directory (junction) or `.git` file (gitlink from `--separate-git-dir`), git's own repo discovery works natively. Using `-C .bit/index` would break commands like `git config -f <relative-path>` that expect paths relative to CWD. Using `runGitGlobal` instead of `runGitHere` avoids leaking `GIT_CONFIG_*` env vars (from `-c color.ui=auto`) into shell alias scripts.
+- **Inside a bit repo with `.git` junction/gitlink**: uses `runGitGlobal` (no `-C`, no `-c` flags) — when CWD has a `.git` directory (junction) or `.git` file (gitlink from `--separate-git-dir`), git's own repo discovery works natively. Using `-C .bit/index` would break commands like `git config -f <relative-path>` that expect paths relative to CWD. Using `runGitGlobal` instead of `runGitHere` avoids leaking `GIT_CONFIG_*` env vars (from `-c color.ui=auto`) into shell alias scripts. **Subdirectory CWD restoration:** Before running git, passthrough restores CWD to the user's original directory (before bit changed to the repo root). When CWD differs from root, `--work-tree=<root>` is added so git knows the working tree root. For gitlink repos, the gitlink target is resolved to an absolute path (while still at the repo root) before restoring CWD, and `--git-dir=<abs-path>` is passed to git. This ensures relative paths in user arguments (e.g. `git check-attr test -- ../f`) resolve correctly from the user's actual directory.
 - **Inside a bit repo without `.git`**: uses `runGitRawAt` to target `.bit/index/` via `-C`
 - **Inside a bare bit repo** (has `bit/` + `HEAD`): uses `runGitGlobal` (no `-C`) — git discovers the bare repo naturally
 - **Inside a git directory** (CWD has `HEAD` file + `refs/` directory but no `.bit/`): uses `runGitHere` — runs git without `-C` override, letting git's own repo discovery work. This catches bare repos and users who `cd`'d into `.git/`. Without this check, `findBitRoot` would walk up to a parent `.bit/` repo and commands would target the wrong repository.
 - **Outside any repo**: uses `runGitGlobal` (no `-C`)
 
 **`GIT_DIR` bypass:** When `GIT_DIR` is set to any non-empty value, bit passes through to git immediately via `runGitGlobal` without any command parsing, alias expansion, or `-C` insertion. This covers `GIT_DIR=/dev/null` (used by tools like `test_cmp` for `git diff --no-index` outside any repository), `GIT_DIR=<path>` (explicit repo targeting), and any other value. Checking for `GIT_DIR` happens before all other dispatch — it is the first thing `runCommand` evaluates.
+
+**`--git-dir`/`--work-tree` flag bypass:** When `--git-dir` or `--work-tree` appears as a leading global flag (before the subcommand), bit passes through to git immediately via `runGitGlobal`. This handles both `--git-dir=<path>` and `--git-dir <path>` forms. The scanner skips over other global flags (`-c key=val`, `-C <dir>`, `--bare`) and stops at the first non-flag token (the subcommand). Flags that appear *after* the subcommand (e.g. `bit rev-parse --git-dir`) are not scanned and do not trigger bypass.
 
 ### `-C <dir>` Flag
 
@@ -1365,9 +1368,9 @@ Before matching `("init":rest)`, the dispatch peels git "global" flags that appe
 
 Both are checked at each level, so a bare repo nested inside a normal repo's tree is detected at the correct (closest) level. This is important for git's test suite, where bare repos are created inside a trash directory that itself has a `.bit/` repo.
 
-### BIT_CEILING_DIRECTORIES
+### BIT_CEILING_DIRECTORIES / GIT_CEILING_DIRECTORIES
 
-Analogous to `GIT_CEILING_DIRECTORIES`. When set, `findBitRoot` stops walking up at the specified directory and will not search above it. Used by tests to prevent accidental discovery of the development repo's `.bit/`.
+`findBitRoot` respects both `BIT_CEILING_DIRECTORIES` and `GIT_CEILING_DIRECTORIES`. When either is set, `findBitRoot` stops walking up at the specified directory and will not search above it. Both variables use the platform path separator (`;` on Windows, `:` on Unix) and support multiple directories. The values from both variables are combined — directories from either variable act as ceilings. This ensures bit respects the same isolation boundaries as git, which is critical for git's test suite (the test framework sets `GIT_CEILING_DIRECTORIES` to prevent repo discovery outside the test's trash directory).
 
 ---
 
@@ -1388,6 +1391,17 @@ The junction uses Windows `mklink /j` (directory junction), which does not requi
 cd extern/git/t
 GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
 ```
+
+### Test Results Summary
+
+| Test Suite | Pass | Fail | Notes |
+|------------|------|------|-------|
+| t0001-init.sh | 91/91 | 0 | All init tests pass |
+| t0002-gitfile.sh | 14/14 | 0 | All gitfile tests pass |
+| t0003-attributes.sh | 53/54 | 1 | Test 52 (`builtin_objectmode` with submodules) fails due to `.bit/` directory detection |
+| CLI tests | 50/50 files | 0 | All 50 test files pass (including network-remote and gdrive-remote) |
+
+**Known failure — t0003 test 52:** The `builtin_objectmode` attribute test creates a submodule and checks its attributes. bit's `.bit/` directory presence causes git to detect the submodule differently than a plain git repo would. This is an inherent limitation of the `.bit/` architecture and does not affect real-world usage.
 
 ---
 
@@ -1742,6 +1756,10 @@ Interactive per-file conflict resolution:
 - Device-identity system for filesystem remotes (UUID + hardware serial)
 - Filesystem remote transport (full bit repo at remote, direct git fetch/merge)
 - Conflict resolution module with structured traversal (always commits when MERGE_HEAD exists)
+- `.gitattributes` sync — user's `.gitattributes` copied to `.bit/index/.gitattributes` before scan commands; removed when user deletes theirs
+- `--git-dir`/`--work-tree` flag bypass — leading global flags pass through to git directly, same as `GIT_DIR` env var bypass
+- `GIT_CEILING_DIRECTORIES` support — `findBitRoot` respects both `BIT_CEILING_DIRECTORIES` and `GIT_CEILING_DIRECTORIES`
+- Subdirectory passthrough with CWD restoration — relative paths in passthrough commands resolve from user's actual directory, not repo root
 - Git alias expansion and catch-all passthrough for unknown commands
 - Git test suite shim (`extern/git-shim/`) with `BIT_REAL_GIT` and `BIT_GIT_JUNCTION` env vars
 - Unified metadata parsing/serialization

@@ -251,10 +251,10 @@ doRestore args = do
 doCheckout :: [String] -> BitM ExitCode
 doCheckout args = do
     prefix <- asks envPrefix
-    let args' = case Data.List.elemIndex "--" args of
-          Just _ -> args
-          Nothing -> let (opts, paths) = Data.List.span (\a -> a == "--" || "-" `isPrefixOf` a) args
-                     in opts ++ ["--"] ++ paths
+    -- Pass args through to git as-is. Git handles branch vs path
+    -- disambiguation naturally; inserting -- would force path interpretation
+    -- and break branch switching (e.g. "checkout <branch>").
+    let args' = args
     code <- lift $ Git.runGitRawIn prefix ("checkout" : args')
     when (code == ExitSuccess) $ do
         cwd <- asks envCwd
