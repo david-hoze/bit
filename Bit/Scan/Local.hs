@@ -34,7 +34,7 @@ import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf)
 import Data.Either (isRight)
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
-import Control.Monad (void, when, forM_)
+import Control.Monad (void, when, forM_, foldM)
 import Data.Foldable (traverse_)
 import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
@@ -334,10 +334,16 @@ collectScannedPaths root = go root
         else if isDir
           then do
             names <- listDirectory path
-            -- Filter .git/.bit at every level, not just root (avoids scanning
-            -- nested .git dirs like newdir/.git which the rel-path prefix check misses)
-            let filtered = filter (\n -> n /= ".git" && n /= ".bit") names
-            childPaths <- concat <$> mapM (go . (path </>)) filtered
+            -- Filter .bit at every level. For .git, only exclude directories
+            -- (git internals); allow .git files through (gitlink pointers in submodules).
+            let noBit = filter (/= ".bit") names
+            gitFiltered <- foldM (\acc name ->
+                if name /= ".git" then pure (acc ++ [name])
+                else do
+                    gitIsDir <- doesDirectoryExist (path </> name)
+                    pure (if gitIsDir then acc else acc ++ [name])
+                ) [] noBit
+            childPaths <- concat <$> mapM (go . (path </>)) gitFiltered
             pure (ScannedDir rel : childPaths)
         else pure [ScannedFile rel]
 
@@ -706,7 +712,9 @@ listMetadataPaths indexRoot = go indexRoot ""
       if isDir
         then do
           names <- listDirectory full
-          let skip name = name == "." || name == ".." || name == ".gitattributes" || name == ".git"
+          let staticSkip name = name == "." || name == ".." || name == ".gitattributes"
+          gitIsDir <- doesDirectoryExist (full </> ".git")
+          let skip name = staticSkip name || (name == ".git" && gitIsDir)
           let children = [ (full </> name, if null rel then name else rel </> name) | name <- names, not (skip name) ]
           concat <$> mapM (\(p, r) -> go p r) children
         else do

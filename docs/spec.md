@@ -1199,7 +1199,7 @@ HLint errors appear in IDE and CI, preventing lazy IO from being reintroduced.
 
 The file scanner (`Bit/Scan.hs`) uses bounded parallelism for both scanning and writing:
 
-**Directory exclusion** (`collectScannedPaths`): The recursive walk filters `.git` and `.bit` directories by **name** at every level — not just at the root. This prevents scanning into nested `.git/` directories (e.g. `subdir/.git/`) which would pollute the cache and cause `createDirectoryIfMissing` crashes on Windows. Top-level `.bitignore` and `.gitignore` files are also excluded from the walk.
+**Directory exclusion** (`collectScannedPaths`): The recursive walk filters `.bit` directories by **name** at every level. For `.git`, only *directories* are excluded (git internals); `.git` *files* (gitlink pointers in submodules) are allowed through so the scanner copies them to `.bit/index/`, enabling git to detect submodules and create `160000` entries. The root-level `.git` directory/junction is caught by a separate prefix check. Top-level `.bitignore` and `.gitignore` files are also excluded from the walk.
 
 **Scanning**:
 - `QSem` limits concurrent file reads to **ioConcurrency** (4× cores, min 4)
@@ -1314,6 +1314,105 @@ bit commands work from any subdirectory of a bit repository, matching git's beha
 
 ---
 
+## Submodule and Gitlink Support
+
+bit treats submodules (and bare gitlink entries) as ordinary content that gets
+copied between the working directory and `.bit/index/`, with no special-case
+routing. The key design principle: **the scanner copies everything, including
+the `.git` gitlink file inside submodule directories.**
+
+### Background: How Git Stores Submodules
+
+Git represents a submodule as a tree entry with mode `160000` (a "gitlink")
+pointing to a commit hash. The submodule's actual `.git` data lives under the
+parent repo's `.git/modules/<path>/`, and the submodule's working tree has a
+`.git` file (not directory) containing a `gitdir:` pointer back to it:
+
+```
+extern/lib/.git  →  "gitdir: ../../.git/modules/extern/lib"
+```
+
+When `git add extern/lib` is run, git detects the `.git` presence inside
+`extern/lib/`, recognizes it as a nested repo, and creates the `160000` entry.
+
+### Design: Full Copy, No Rewiring
+
+The scanner copies the **entire** submodule directory — all source files plus
+the `.git` gitlink file — between the working directory and `.bit/index/`.
+This means `.bit/index/extern/lib/.git` exists and contains the `gitdir:`
+pointer. The relative path in the gitlink resolves correctly from
+`.bit/index/extern/lib/` to `.bit/index/.git/modules/extern/lib/`.
+
+**Scanner change** (implemented in `collectScannedPaths` and `listMetadataPaths`):
+The per-directory filter distinguishes `.git` directories (git internals — excluded)
+from `.git` files (gitlink pointers — included). A top-level `.git` directory is
+still excluded by the root prefix check, but a `.git` file inside a subdirectory
+(a gitlink) is copied through. This allows git to detect submodules in `.bit/index/`
+and create `160000` entries.
+
+**No special routing in passthrough**: Because the full submodule working tree
+exists at `.bit/index/extern/lib/`, and the `.git` gitlink file is present,
+all git operations work natively:
+
+- `bit add extern/lib` from repo root → `git -C .bit/index add extern/lib`
+  → git sees `.bit/index/extern/lib/.git`, creates `160000` entry. **Works.**
+
+- `cd extern/lib && bit add file.c` → prefix mechanism sets
+  `-C .bit/index/extern/lib` → git's own repo discovery hits the `.git`
+  gitlink file → stages `file.c` inside the submodule's repo. **Works.**
+
+- `bit add extern/lib` from repo root (to update the parent's gitlink after
+  committing inside the submodule) → `git -C .bit/index add extern/lib`
+  → git reads the updated commit hash from the submodule. **Works.**
+
+### Submodule Commands
+
+`git submodule` is not a known bit command, so it falls through to
+passthrough. `git -C .bit/index submodule add <url> <path>` runs natively:
+git clones into `.bit/index/<path>/`, sets up `.git/modules/<path>/`, and
+creates the gitlink file. The next scan-and-write cycle copies the new files
+(including the `.git` gitlink file) to the working directory.
+
+Similarly, `git submodule update --init` populates `.bit/index/<path>/` and
+the scan copies the result to the working directory.
+
+### Working Directory `.git` Gitlink
+
+The `.git` gitlink file is also copied to the working directory
+(e.g., `extern/lib/.git`). Its `gitdir:` relative path will not resolve
+correctly from the working directory, but this is harmless: bit always uses
+`-C .bit/index/...` for git operations, never operating on the working
+directory copy directly. The file exists in the working directory solely so
+the scanner can copy it back to `.bit/index/` on the next scan cycle.
+
+### What Bit Does NOT Do
+
+- **No `EntryKind` change**: Submodule directories do not need a new
+  `Submodule` variant in `EntryKind`. The `.git` gitlink file is treated as
+  a regular text file by the scanner. Git handles the `160000` semantics.
+
+- **No submodule detection logic**: Bit does not parse `.gitmodules`, check
+  for `160000` entries, or run `rev-parse --show-toplevel` to detect
+  submodules. Git does all of this natively when it encounters the `.git`
+  gitlink file during `git add`.
+
+- **No rewiring**: The gitlink's `gitdir:` path is never modified. The
+  submodule's `core.worktree` is never changed. Everything resolves from
+  `.bit/index/` where the real working tree lives.
+
+### Summary
+
+| Operation | What happens |
+|-----------|-------------|
+| `git submodule add <url> <path>` | Passthrough to `.bit/index`; git clones and wires up submodule |
+| Scanner (working dir → index) | Copies all files including `.git` gitlink file |
+| Scanner (index → working dir) | Copies all files including `.git` gitlink file |
+| `bit add <submodule-dir>` | `git -C .bit/index add <dir>` — git sees gitlink, creates `160000` entry |
+| `cd <submodule> && bit add file` | Prefix mechanism → `git -C .bit/index/<submodule> add file` — works natively |
+| rclone sync | Submodule files are regular text/binary files; `.git` gitlink is a small text file |
+
+---
+
 ## Alias Expansion and Passthrough
 
 ### Alias Expansion
@@ -1398,10 +1497,8 @@ GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
 |------------|------|------|-------|
 | t0001-init.sh | 91/91 | 0 | All init tests pass |
 | t0002-gitfile.sh | 14/14 | 0 | All gitfile tests pass |
-| t0003-attributes.sh | 53/54 | 1 | Test 52 (`builtin_objectmode` with submodules) fails due to `.bit/` directory detection |
-| CLI tests | 54/54 files (952 tests) | 0 | All 54 test files pass (including network-remote and gdrive-remote) |
-
-**Known failure — t0003 test 52:** The `builtin_objectmode` attribute test creates a submodule and checks its attributes. bit's `.bit/` directory presence causes git to detect the submodule differently than a plain git repo would. This is an inherent limitation of the `.bit/` architecture and does not affect real-world usage.
+| t0003-attributes.sh | 54/54 | 0 | All attribute tests pass (including test 52: submodule `builtin_objectmode`) |
+| CLI tests | 55/55 files (967 tests) | 0 | All 55 test files pass (including network-remote and gdrive-remote) |
 
 ---
 

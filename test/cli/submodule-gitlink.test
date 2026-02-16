@@ -1,0 +1,118 @@
+# =============================================================================
+# Submodule Gitlink - Verify scanner handles .git files (gitlinks) correctly
+#
+# The scanner must distinguish .git files (gitlink pointers in submodules)
+# from .git directories (git internals). Gitlink files must be copied to
+# .bit/index/ so that git can detect submodules and create 160000 entries.
+# .git directories must still be excluded to prevent scanning git internals.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_submodule 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_submodule
+<<<
+>>>= 0
+
+cd test\cli\output\work_submodule & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: Create a submodule-like directory with .git gitlink file
+# ======================================================================
+
+# ---- Create subdirectory, init git, rename .git dir to .real, write gitlink file ----
+bash -c "cd test/cli/output/work_submodule && mkdir sub && cd sub && git init && mv .git .real && echo 'gitdir: .real' > .git && echo content > file.txt && git add file.txt && git commit -m first"
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Create a regular file in the parent repo ----
+cd test\cli\output\work_submodule & echo toplevel> top.txt
+<<<
+>>>= 0
+
+# ======================================================================
+# SECTION 2: Scanner copies .git gitlink file to index
+# ======================================================================
+
+# ---- bit add copies the submodule directory (including .git gitlink) ----
+cd test\cli\output\work_submodule & bit add .
+<<<
+>>>= 0
+
+# ---- The .git gitlink file should exist in .bit/index/sub/.git ----
+if exist "test\cli\output\work_submodule\.bit\index\sub\.git" (echo gitlink exists) else (echo missing)
+<<<
+>>>
+gitlink exists
+>>>= 0
+
+# ---- The gitlink file should contain a gitdir: pointer ----
+findstr /C:"gitdir:" test\cli\output\work_submodule\.bit\index\sub\.git >nul && echo has gitdir pointer
+<<<
+>>>
+has gitdir pointer
+>>>= 0
+
+# ======================================================================
+# SECTION 3: git detects submodule and creates 160000 entry
+# ======================================================================
+
+# ---- Verify git sees mode 160000 for the submodule ----
+cd test\cli\output\work_submodule & bit ls-files --stage sub
+<<<
+>>> /160000/
+>>>= 0
+
+# ---- Commit the submodule entry ----
+cd test\cli\output\work_submodule & bit commit -m "Add submodule"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ======================================================================
+# SECTION 4: .git DIRECTORIES are still excluded (regression check)
+# ======================================================================
+
+# ---- Create another subdir with a .git DIRECTORY (not a gitlink) ----
+cd test\cli\output\work_submodule & mkdir nested & cd nested & git init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_submodule & echo nested-file> nested\data.txt
+<<<
+>>>= 0
+
+# ---- bit add should work and not scan into nested/.git/ directory ----
+cd test\cli\output\work_submodule & bit add nested\data.txt
+<<<
+>>>= 0
+
+# ---- No .git directory should appear in index for the nested dir ----
+if exist "test\cli\output\work_submodule\.bit\index\nested\.git" (echo LEAKED) else (echo excluded)
+<<<
+>>>
+excluded
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_submodule 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
