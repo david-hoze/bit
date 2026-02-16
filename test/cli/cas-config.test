@@ -37,17 +37,16 @@ cd test\cli\output\work_casconfig & bit config core.mode
 lite
 >>>= 0
 
-# config with no key prints usage and exits 1
-cd test\cli\output\work_casconfig & bit config
+# config with no key passes through to git (which returns its own error)
+cd test\cli\output\work_casconfig & bit config 2>&1
 <<<
->>>2 /usage: bit config/
->>>= 1
+>>> /error.*action|usage/
+>>>= 129
 
-# unknown config key is rejected (spec: prevents typos)
+# unknown config key passes through to git (git accepts any key)
 cd test\cli\output\work_casconfig & bit config core.typo value
 <<<
->>>2 /unknown config key/
->>>= 1
+>>>= 0
 
 # Add and commit a binary file in lite mode (no CAS write)
 cd test\cli\output\work_casconfig & echo.> bin.bin & bit add bin.bin & bit commit -m "Add bin"

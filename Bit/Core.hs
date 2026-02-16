@@ -46,6 +46,7 @@ module Bit.Core
     , configGetWithRoot
     , configSetWithRoot
     , configListWithRoot
+    , knownConfigKeys
     , casBackfill
 
       -- Merge management
@@ -86,6 +87,6 @@ import Bit.Core.Push (push)
 import Bit.Core.Pull (pull)
 import Bit.Core.Fetch (fetch)
 import Bit.Core.RemoteManagement (remoteAdd, remoteShow)
-import Bit.Core.Config (configGet, configSet, configList, configGetWithRoot, configSetWithRoot, configListWithRoot)
+import Bit.Core.Config (configGet, configSet, configList, configGetWithRoot, configSetWithRoot, configListWithRoot, knownConfigKeys)
 import Bit.Core.Verify (VerifyTarget(..), RepairMode(..), verify, repair, fsck, casBackfill)
 

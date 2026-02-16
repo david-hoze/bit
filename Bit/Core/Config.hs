@@ -12,6 +12,7 @@ module Bit.Core.Config
   , configGetWithRoot
   , configSetWithRoot
   , configListWithRoot
+  , knownConfigKeys
   ) where
 
 import qualified Data.ByteString as BS

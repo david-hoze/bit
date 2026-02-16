@@ -172,7 +172,7 @@ isKnownCommand name = name `elem`
     [ "init", "add", "commit", "diff", "status", "log", "ls-files"
     , "rm", "mv", "reset", "restore", "checkout", "branch", "merge"
     , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
-    , "config", "cas"
+    , "cas"
     , "help"
     ]
 
@@ -419,7 +419,6 @@ commandKey ("merge":sub:_)
     | sub `elem` ["--continue", "--abort"] = "merge " ++ sub
 commandKey ("branch":sub:_)
     | sub `elem` ["--unset-upstream"] = "branch " ++ sub
-commandKey ("config":_) = "config"
 commandKey ("cas":sub:_)
     | sub == "backfill" = "cas backfill"
 commandKey (cmd:_) = cmd
@@ -543,6 +542,24 @@ runCommand args = do
     let indexPath = bitDirPrelim </> "index"
     when bitExists $ Git.setIndexPath indexPath
 
+    -- Bit-specific config: intercept known bit config keys before alias/passthrough.
+    -- All other config forms (--global, --unset-all, -f, alias.*, etc.) fall through
+    -- to the unknown-command path and reach git via passthrough.
+    case cmd of
+        ["config", "--list"] | bitExists -> do
+            Dir.setCurrentDirectory root
+            bd <- resolveBitDir =<< Dir.getCurrentDirectory
+            Bit.configListWithRoot bd >> exitWith ExitSuccess
+        ["config", key] | bitExists && key `elem` Bit.knownConfigKeys -> do
+            Dir.setCurrentDirectory root
+            bd <- resolveBitDir =<< Dir.getCurrentDirectory
+            Bit.configGetWithRoot bd key >> exitWith ExitSuccess
+        ["config", key, value] | bitExists && key `elem` Bit.knownConfigKeys -> do
+            Dir.setCurrentDirectory root
+            bd <- resolveBitDir =<< Dir.getCurrentDirectory
+            Bit.configSetWithRoot bd key value >> exitWith ExitSuccess
+        _ -> pure ()
+
     -- For unknown commands, try alias expansion before repo check
     let mIndexPath = if bitExists then Just indexPath else Nothing
     case cmd of
@@ -616,10 +633,7 @@ runCommand args = do
         ["fsck"]                        -> Bit.fsck cwd
         ["merge", "--abort"]            -> Bit.mergeAbort
         ["branch", "--unset-upstream"]  -> Bit.unsetUpstream
-        ["config"]                      -> do hPutStrLn stderr "usage: bit config <key> [<value>]"; exitWith (ExitFailure 1)
-        ["config", "--list"]            -> Bit.configListWithRoot bitDir >> exitWith ExitSuccess
-        ["config", key]                 -> Bit.configGetWithRoot bitDir key >> exitWith ExitSuccess
-        ["config", key, value]          -> Bit.configSetWithRoot bitDir key value >> exitWith ExitSuccess
+        -- config is handled before repo check (bit-specific keys) or via passthrough (git keys)
         ["cas", "backfill"]             -> Bit.casBackfill cwd >> exitWith ExitSuccess
 
         -- ── Lightweight env (no scan) ────────────────────────

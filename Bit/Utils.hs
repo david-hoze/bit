@@ -54,9 +54,13 @@ toPosix = map (\c -> if c == '\\' then '/' else c)
 isBitPath :: FilePath -> Bool
 isBitPath p = p == ".bit" || ".bit" `isPrefixOf` p || "/.bit" `isInfixOf` p || "\\.bit" `isInfixOf` p
 
--- | Remove .bit paths from a list of file entries (e.g. remote file list).
+-- | True if the path is under cas/ (content-addressed store, remote infrastructure).
+isCASPath :: FilePath -> Bool
+isCASPath p = p == "cas" || "cas/" `isPrefixOf` p || "cas\\" `isPrefixOf` p
+
+-- | Remove infrastructure paths (.bit/ and cas/) from a list of file entries.
 filterOutBitPaths :: [FileEntry] -> [FileEntry]
-filterOutBitPaths = filter (\e -> not (isBitPath (unPath e.path)))
+filterOutBitPaths = filter (\e -> let path = unPath e.path in not (isBitPath path) && not (isCASPath path))
 
 -- | Format bytes in human-readable form (B, KB, MB, GB, TB).
 -- Uses 1 decimal place for KB and above, 1024 base.

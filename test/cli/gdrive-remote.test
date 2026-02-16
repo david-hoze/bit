@@ -30,7 +30,7 @@ cd test\cli\output\work_gdrive_a & bit push -u origin
 >>>= 0
 
 # --- Allow GDrive a moment so pushed files are visible (eventual consistency) ---
-timeout /t 3 >nul
+sleep 3
 <<<
 >>>
 >>>= 0
