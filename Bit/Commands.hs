@@ -6,6 +6,7 @@ module Bit.Commands (run) where
 import qualified Bit.Core as Bit
 import Bit.Types (BitEnv(..), ForceMode(..), runBitM)
 import qualified Bit.Scan.Local as Scan  -- Only for the pre-scan in runCommand
+import qualified Bit.Core.Submodule as Submodule
 import Bit.Remote (getDefaultRemote, getUpstreamRemote, resolveRemote)
 import qualified Bit.Device.Identity as Device
 import Bit.Utils (atomicWriteFileStr)
@@ -172,7 +173,7 @@ isKnownCommand name = name `elem`
     [ "init", "add", "commit", "diff", "status", "log", "ls-files"
     , "rm", "mv", "reset", "restore", "checkout", "branch", "merge"
     , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
-    , "cas"
+    , "cas", "submodule"
     , "help"
     ]
 
@@ -650,7 +651,11 @@ runCommand args = do
         -- ── Full scanned env (needs working directory state) ─
         ("add":rest)                    -> do
             scanAndWrite
-            Bit.add prefix rest >>= exitWith
+            Submodule.detectAndHandleSubrepo cwd bitDir prefix rest
+            code <- Bit.add prefix rest
+            when (code == ExitSuccess) $
+                Submodule.syncGitlinksBack cwd bitDir rest
+            exitWith code
         ("commit":rest)                 -> do
             scanAndWrite
             Bit.commit prefix rest >>= exitWith
@@ -690,6 +695,9 @@ runCommand args = do
         ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull optsManualMerge
         ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull optsManualMerge
         
+        -- submodule (delegates to git -C .bit/index submodule, syncs working dir)
+        ("submodule":rest)              -> Submodule.submodule cwd bitDir rest >>= exitWith
+
         -- fetch (falls back to "origin" like git fetch)
         ["fetch"]                       -> runScanned Bit.fetch
         ["fetch", name]                 -> runScannedWithRemote name Bit.fetch

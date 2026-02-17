@@ -1,10 +1,13 @@
 # =============================================================================
-# Submodule Gitlink - Verify scanner handles .git files (gitlinks) correctly
+# Submodule Gitlink - Verify scanner and bit add handle subrepos correctly
 #
-# The scanner must distinguish .git files (gitlink pointers in submodules)
-# from .git directories (git internals). Gitlink files must be copied to
-# .bit/index/ so that git can detect submodules and create 160000 entries.
-# .git directories must still be excluded to prevent scanning git internals.
+# The scanner treats directories containing .git/ or .bit/ as opaque
+# boundaries and does not descend into them. To register a subrepo with
+# the parent, use `bit add <path>` which moves the .git/ directory to
+# .bit/index/ and lets git create the 160000 entry.
+# .git DIRECTORIES inside subdirectories make the entire subdirectory an
+# opaque boundary for the scanner. .git files (gitlinks) in already-
+# registered submodules are still allowed through.
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
@@ -43,31 +46,21 @@ cd test\cli\output\work_submodule & echo toplevel> top.txt
 >>>= 0
 
 # ======================================================================
-# SECTION 2: Scanner copies .git gitlink file to index
+# SECTION 2: bit add registers the subrepo with 160000 entry
 # ======================================================================
 
-# ---- bit add copies the submodule directory (including .git gitlink) ----
-cd test\cli\output\work_submodule & bit add .
+# ---- bit add top.txt first (scanner handles regular files) ----
+cd test\cli\output\work_submodule & bit add top.txt
 <<<
 >>>= 0
 
-# ---- The .git gitlink file should exist in .bit/index/sub/.git ----
-if exist "test\cli\output\work_submodule\.bit\index\sub\.git" (echo gitlink exists) else (echo missing)
+# ---- bit add sub registers the subrepo (moves .real to index, git sees it) ----
+# Note: sub has .git file (gitlink) not directory, and .real/ directory.
+# The scanner treats sub/ as having a gitlink, not a .git/ directory, so
+# sub/ is NOT a subrepo boundary. The gitlink file is allowed through.
+cd test\cli\output\work_submodule & bit add sub
 <<<
->>>
-gitlink exists
 >>>= 0
-
-# ---- The gitlink file should contain a gitdir: pointer ----
-findstr /C:"gitdir:" test\cli\output\work_submodule\.bit\index\sub\.git >nul && echo has gitdir pointer
-<<<
->>>
-has gitdir pointer
->>>= 0
-
-# ======================================================================
-# SECTION 3: git detects submodule and creates 160000 entry
-# ======================================================================
 
 # ---- Verify git sees mode 160000 for the submodule ----
 cd test\cli\output\work_submodule & bit ls-files --stage sub
@@ -82,29 +75,24 @@ cd test\cli\output\work_submodule & bit commit -m "Add submodule"
 >>>= 0
 
 # ======================================================================
-# SECTION 4: .git DIRECTORIES are still excluded (regression check)
+# SECTION 3: .git DIRECTORIES make dirs opaque (regression check)
 # ======================================================================
 
 # ---- Create another subdir with a .git DIRECTORY (not a gitlink) ----
-cd test\cli\output\work_submodule & mkdir nested & cd nested & git init
+bash -c "cd test/cli/output/work_submodule && mkdir nested && cd nested && git init && echo nested-file > data.txt && git add . && git commit -m first"
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_submodule & echo nested-file> nested\data.txt
+# ---- bit add nested registers as subrepo (moves .git/ to index) ----
+cd test\cli\output\work_submodule & bit add nested
 <<<
 >>>= 0
 
-# ---- bit add should work and not scan into nested/.git/ directory ----
-cd test\cli\output\work_submodule & bit add nested\data.txt
+# ---- nested/ should have a 160000 entry (subrepo) ----
+cd test\cli\output\work_submodule & bit ls-files --stage nested
 <<<
->>>= 0
-
-# ---- No .git directory should appear in index for the nested dir ----
-if exist "test\cli\output\work_submodule\.bit\index\nested\.git" (echo LEAKED) else (echo excluded)
-<<<
->>>
-excluded
+>>> /160000/
 >>>= 0
 
 # ======================================================================

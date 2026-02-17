@@ -1314,12 +1314,18 @@ bit commands work from any subdirectory of a bit repository, matching git's beha
 
 ---
 
-## Submodule and Gitlink Support
+## Submodule Support
 
-bit treats submodules (and bare gitlink entries) as ordinary content that gets
-copied between the working directory and `.bit/index/`, with no special-case
-routing. The key design principle: **the scanner copies everything, including
-the `.git` gitlink file inside submodule directories.**
+bit supports two kinds of submodules: **git subrepos** (directories with a
+`.git/` directory) and **bit subrepos** (directories with a `.bit/` directory).
+Submodule operations are organized into two flows based on direction:
+
+- **WorkingDir → Index** (`bit add <path>`): The user has a local subrepo.
+  Move the child's git directory into the parent's `.bit/index/`, let git
+  create the `160000` entry, rewrite the gitlink for the working directory.
+- **Index → WorkingDir** (`bit submodule` commands): A git operation has
+  populated `.bit/index/`. Replace the working directory with the index copy,
+  rewriting the gitlink.
 
 ### Background: How Git Stores Submodules
 
@@ -1334,82 +1340,228 @@ extern/lib/.git  →  "gitdir: ../../.git/modules/extern/lib"
 
 When `git add extern/lib` is run, git detects the `.git` presence inside
 `extern/lib/`, recognizes it as a nested repo, and creates the `160000` entry.
+`git submodule add` automates the process of cloning, wiring up the modules
+directory, creating the gitlink, and registering in `.gitmodules`.
 
-### Design: Full Copy, No Rewiring
+### Two Flows
 
-The scanner copies the **entire** submodule directory — all source files plus
-the `.git` gitlink file — between the working directory and `.bit/index/`.
-This means `.bit/index/extern/lib/.git` exists and contains the `gitdir:`
-pointer. The relative path in the gitlink resolves correctly from
-`.bit/index/extern/lib/` to `.bit/index/.git/modules/extern/lib/`.
+Submodule operations fall into two directions. Each direction has its own
+mechanism; they do not share code paths.
 
-**Scanner change** (implemented in `collectScannedPaths` and `listMetadataPaths`):
-The per-directory filter distinguishes `.git` directories (git internals — excluded)
-from `.git` files (gitlink pointers — included). A top-level `.git` directory is
-still excluded by the root prefix check, but a `.git` file inside a subdirectory
-(a gitlink) is copied through. This allows git to detect submodules in `.bit/index/`
-and create `160000` entries.
+#### Flow 1: Working Directory → Index (`bit add <path>`)
 
-**No special routing in passthrough**: Because the full submodule working tree
-exists at `.bit/index/extern/lib/`, and the `.git` gitlink file is present,
-all git operations work natively:
+The user has a local subrepo in the working directory and wants to register it
+with the parent. The working directory already has the correct content — the
+index needs to catch up.
 
-- `bit add extern/lib` from repo root → `git -C .bit/index add extern/lib`
-  → git sees `.bit/index/extern/lib/.git`, creates `160000` entry. **Works.**
+**Git subrepo** (`a/sub/.git/` is a directory):
 
-- `cd extern/lib && bit add file.c` → prefix mechanism sets
-  `-C .bit/index/extern/lib` → git's own repo discovery hits the `.git`
-  gitlink file → stages `file.c` inside the submodule's repo. **Works.**
+1. **Detect**: `a/sub/.git` is a directory
+2. **Move**: `a/sub/.git/` → `.bit/index/a/sub/.git/`
+3. **Git add**: `git -C .bit/index add a/sub` — git sees `.git/`, detects the
+   nested repo, creates the `160000` entry, moves `.git/` into
+   `.bit/index/.git/modules/a/sub/`, and writes a gitlink file at
+   `.bit/index/a/sub/.git`
+4. **Rewrite gitlink only**: Copy `.bit/index/a/sub/.git` (the gitlink file)
+   to `a/sub/.git` with the path rewrite applied. The working directory
+   already has the correct content; only the gitlink needs updating.
 
-- `bit add extern/lib` from repo root (to update the parent's gitlink after
-  committing inside the submodule) → `git -C .bit/index add extern/lib`
-  → git reads the updated commit hash from the submodule. **Works.**
+> **TODO**: Check if there is any scenario in local adding of a git subrepo
+> where we do need to use `syncSubmoduleToWorkingDirectory`.
 
-### Submodule Commands
+**Bit subrepo** (`a/sub/.bit/` exists):
 
-`git submodule` is not a known bit command, so it falls through to
-passthrough. `git -C .bit/index submodule add <url> <path>` runs natively:
-git clones into `.bit/index/<path>/`, sets up `.git/modules/<path>/`, and
-creates the gitlink file. The next scan-and-write cycle copies the new files
-(including the `.git` gitlink file) to the working directory.
+1. **Detect**: `a/sub/.bit/` exists
+2. **Move**: `a/sub/.bit/index/.git/` → `.bit/index/a/sub/.bit/index/.git/`
+3. **Git add**: `git -C .bit/index add a/sub/.bit/index` — git sees `.git/`,
+   creates the `160000` entry, moves `.git/` into
+   `.bit/index/.git/modules/a/sub/.bit/index/`, writes a gitlink
+4. **Rewrite gitlink only**: Copy `.bit/index/a/sub/.bit/index/.git` (the
+   gitlink file) to `a/sub/.bit/index/.git` with the path rewrite applied.
+   The working directory already has the correct content.
 
-Similarly, `git submodule update --init` populates `.bit/index/<path>/` and
-the scan copies the result to the working directory.
+> **TODO**: Check if there is any scenario in local adding of a bit subrepo
+> where we do need to use `syncSubmoduleToWorkingDirectory`.
 
-### Working Directory `.git` Gitlink
+Note: for bit subrepos, the submodule path registered in `.gitmodules` is
+`a/sub/.bit/index`, not `a/sub/`. The child's working directory files
+(`a/sub/*.mp4` etc.), CAS (`a/sub/.bit/cas/`), and config
+(`a/sub/.bit/config`) are untouched — they remain in the working directory.
+Only the child's git metadata is tracked by the parent.
 
-The `.git` gitlink file is also copied to the working directory
-(e.g., `extern/lib/.git`). Its `gitdir:` relative path will not resolve
-correctly from the working directory, but this is harmless: bit always uses
-`-C .bit/index/...` for git operations, never operating on the working
-directory copy directly. The file exists in the working directory solely so
-the scanner can copy it back to `.bit/index/` on the next scan cycle.
+#### Flow 2: Index → Working Directory (`bit submodule` commands)
+
+The index has been populated by a git operation (clone, update, foreach) and
+the working directory needs to catch up. This is handled by
+`syncSubmoduleToWorkingDirectory`.
+
+**`bit submodule add <url> <path>`:**
+
+1. **Git submodule add**: `git -C .bit/index submodule add <url> <path>` —
+   git clones into `.bit/index/<path>/`, sets up
+   `.bit/index/.git/modules/<path>/`, creates the gitlink file
+2. **Replace**: `syncSubmoduleToWorkingDirectory`
+
+**`bit submodule update [--init]`:**
+
+1. **Git submodule update**: `git -C .bit/index submodule update ...` —
+   git populates `.bit/index/<path>/`
+2. **Replace**: `syncSubmoduleToWorkingDirectory`
+
+**`bit submodule deinit <path>`:**
+
+1. **Git submodule deinit**: `git -C .bit/index submodule deinit ...` —
+   git empties `.bit/index/<path>/`
+2. **Replace**: `syncSubmoduleToWorkingDirectory` (working dir becomes empty)
+
+**`bit submodule foreach <cmd>`:**
+
+1. **Git submodule foreach**: `git -C .bit/index submodule foreach ...` —
+   command runs in each submodule inside `.bit/index/`
+2. **Replace**: `syncSubmoduleToWorkingDirectory`
+
+After any Flow 2 operation, the submodule's source files live in the working
+directory where editors and tools expect them, and the gitlink stays in
+`.bit/index/<path>/.git` so the parent git sees the `160000` entry.
+
+### Scanner Behavior
+
+The scanner **entirely ignores** git and bit subrepos. When the scanner
+encounters a directory containing `.git/` (a git subrepo) or `.bit/` (a bit
+subrepo), it does not descend into it and does not copy any files. These
+directories are opaque boundaries.
+
+This means:
+
+- Flow 1 (`bit add` of a local subrepo) is not a scanner operation. It is
+  handled by the `bit add` command directly: move the `.git` directory, run
+  `git add`, rewrite the gitlink.
+- Flow 2 (`bit submodule` commands) is handled by
+  `syncSubmoduleToWorkingDirectory`. The scanner is not involved.
+- For ongoing work, the user operates inside the subrepo independently
+  (using `bit` or `git` commands within the child). The parent only sees
+  the `160000` commit pointer, updated when the user runs `bit add <path>`
+  or `bit add <path>/.bit/index` from the parent.
+
+### Gitlink Path Rewriting
+
+When a gitlink file is copied from `.bit/index/` to the working directory,
+its `gitdir:` path must be rewritten. Inside `.bit/index/`, the path resolves
+correctly (e.g., `gitdir: ../../.git/modules/a/sub`). In the working
+directory, the same relative path would resolve incorrectly because
+`.bit/index/` is one level deeper.
+
+The rewrite rule: replace the relative `../.git/modules/` prefix with the
+equivalent path that routes through `.bit/index/`. For example:
+
+```
+In .bit/index/:     gitdir: ../../.git/modules/a/sub
+In working dir:     gitdir: ../../.bit/index/.git/modules/a/sub
+```
+
+This is a text substitution on the single-line gitlink file: insert
+`.bit/index/` into the path so it resolves from the working directory through
+to the parent's git modules directory inside `.bit/index/`.
+
+### `bit submodule` Command
+
+`bit submodule` is a known bit command (not passthrough). Subcommands that
+modify the working tree (see Flow 2 above) delegate to
+`git -C .bit/index submodule ...` and then call
+`syncSubmoduleToWorkingDirectory`. Read-only subcommands (`status`, `sync`,
+etc.) delegate to `git -C .bit/index submodule ...` directly with no
+follow-up.
+
+#### `syncSubmoduleToWorkingDirectory`
+
+For each submodule path registered in `.bit/index/.gitmodules`:
+
+1. **Delete** `<submodule-path>/` in the working directory entirely
+2. **Replace** it with the contents of `.bit/index/<submodule-path>/`
+3. Copy the gitlink file with the path rewrite applied
+
+This is a destructive replacement, not a sync or merge. The index copy is
+the source of truth; the working directory copy is overwritten completely.
+
+This single function handles all Flow 2 operations uniformly:
+
+- After `submodule add`: index is populated → working directory is populated
+- After `submodule update --init`: index is populated → working directory is
+  populated
+- After `submodule deinit`: index is empty → working directory becomes empty
+- After `submodule foreach <cmd>`: index reflects command's changes → working
+  directory matches
+
+### Day-to-Day Workflow
+
+**Working inside a submodule** (git subrepo):
+
+```
+cd a/sub/
+# .git is a gitlink → resolves through .bit/index to parent's modules dir
+# edit files, git add, git commit — works normally via the gitlink
+```
+
+**Working inside a submodule** (bit subrepo):
+
+```
+cd a/sub/
+# This is an independent bit repo with its own .bit/
+# bit add, bit commit — works normally within the child
+# Large files managed by child's own CAS and remotes
+```
+
+**Updating the parent after child commits:**
+
+```
+cd /repo-root/
+bit add a/sub          # (git subrepo) updates 160000 pointer
+bit add a/sub/.bit/index  # (bit subrepo) updates 160000 pointer
+bit commit -m "bump submodule"
+```
+
+**Cloning a parent with submodules:**
+
+```
+bit clone <url> project
+cd project/
+bit submodule update --init
+# git populates .bit/index/<path>/, syncSubmoduleToWorkingDirectory
+# copies files to working directory
+# For bit subrepos: user runs bit init or bit clone inside <path>/ to
+# set up the child's .bit/ structure, CAS, and remotes
+```
 
 ### What Bit Does NOT Do
 
+- **No submodule handling in the scanner**: The scanner does not descend into
+  directories that contain `.git/` or `.bit/`. It does not parse
+  `.gitmodules`, check for `160000` entries, or copy submodule content.
+  Subrepo directories are opaque boundaries.
+
+- **No automatic child `bit init`**: When cloning a parent that contains
+  bit subrepo submodules, the user must explicitly initialize the child's
+  `.bit/` structure. The parent only tracks the child's git metadata
+  (`.bit/index/`), not the child's CAS, config, or remotes.
+
 - **No `EntryKind` change**: Submodule directories do not need a new
-  `Submodule` variant in `EntryKind`. The `.git` gitlink file is treated as
-  a regular text file by the scanner. Git handles the `160000` semantics.
+  `Submodule` variant in `EntryKind`. The gitlink file is a small text file
+  handled by git, not by the scanner's classification logic.
 
-- **No submodule detection logic**: Bit does not parse `.gitmodules`, check
-  for `160000` entries, or run `rev-parse --show-toplevel` to detect
-  submodules. Git does all of this natively when it encounters the `.git`
-  gitlink file during `git add`.
-
-- **No rewiring**: The gitlink's `gitdir:` path is never modified. The
-  submodule's `core.worktree` is never changed. Everything resolves from
-  `.bit/index/` where the real working tree lives.
+- **No CAS nesting**: The parent's CAS does not store the child's large files.
+  Each bit repo manages its own CAS and remotes independently.
 
 ### Summary
 
-| Operation | What happens |
-|-----------|-------------|
-| `git submodule add <url> <path>` | Passthrough to `.bit/index`; git clones and wires up submodule |
-| Scanner (working dir → index) | Copies all files including `.git` gitlink file |
-| Scanner (index → working dir) | Copies all files including `.git` gitlink file |
-| `bit add <submodule-dir>` | `git -C .bit/index add <dir>` — git sees gitlink, creates `160000` entry |
-| `cd <submodule> && bit add file` | Prefix mechanism → `git -C .bit/index/<submodule> add file` — works natively |
-| rclone sync | Submodule files are regular text/binary files; `.git` gitlink is a small text file |
+| Operation | Flow | What happens |
+|-----------|------|-------------|
+| `bit add <path>` (git subrepo) | WorkingDir → Index | Move `.git/` → index, `git add`, rewrite gitlink only |
+| `bit add <path>` (bit subrepo) | WorkingDir → Index | Move `.bit/index/.git/` → index, `git add .bit/index`, rewrite gitlink only |
+| `bit submodule add <url> <path>` | Index → WorkingDir | `git -C .bit/index submodule add` → `syncSubmoduleToWorkingDirectory` |
+| `bit submodule update --init` | Index → WorkingDir | `git -C .bit/index submodule update --init` → `syncSubmoduleToWorkingDirectory` |
+| `bit submodule deinit <path>` | Index → WorkingDir | `git -C .bit/index submodule deinit` → `syncSubmoduleToWorkingDirectory` |
+| `bit submodule status` | — | `git -C .bit/index submodule status` (read-only, no sync) |
+| Scanner | — | Ignores subrepo directories entirely (opaque boundaries) |
 
 ---
 
@@ -1498,7 +1650,12 @@ GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
 | t0001-init.sh | 91/91 | 0 | All init tests pass |
 | t0002-gitfile.sh | 14/14 | 0 | All gitfile tests pass |
 | t0003-attributes.sh | 54/54 | 0 | All attribute tests pass (including test 52: submodule `builtin_objectmode`) |
-| CLI tests | 55/55 files (967 tests) | 0 | All 55 test files pass (including network-remote and gdrive-remote) |
+| t0004-unwritable.sh | 9/9 | 0 | 8 skipped (missing POSIXPERM/SANITY — not available on Windows) |
+| t0005-signals.sh | 5/5 | 0 | 3 skipped (missing !MINGW — signal propagation not available on Windows) |
+| t0006-date.sh | 129/129 | 0 | All date parsing tests pass |
+| t0007-git-var.sh | 27/27 | 0 | 2 skipped (missing !AUTOIDENT, POSIXPERM) |
+| t0008-ignores.sh | 396/397 | 1 | Test 389 (trailing whitespace in ignore pattern) — gitignore edge case |
+| CLI tests | 57/57 files (984 tests) | 0 | All 57 test files pass (including network-remote and gdrive-remote) |
 
 ---
 

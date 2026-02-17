@@ -1,0 +1,142 @@
+# =============================================================================
+# Submodule Subrepo - Verify bit handles git subrepos and submodule commands
+#
+# Tests:
+# - Case 1: git subrepo (dir with .git/ dir) via bit add — moves .git/ to
+#   index, git creates 160000 entry
+# - Case 3: bit submodule add — delegates to git, syncs files back with
+#   gitlink path rewriting
+# - bit submodule status — read-only command routing
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_subrepo 2>nul & rmdir /s /q test\cli\output\work_subrepo_src 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir test\cli\output\work_subrepo
+<<<
+>>>= 0
+
+cd test\cli\output\work_subrepo & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Create a file in the parent repo ----
+cd test\cli\output\work_subrepo & echo toplevel> top.txt
+<<<
+>>>= 0
+
+cd test\cli\output\work_subrepo & bit add top.txt
+<<<
+>>>= 0
+
+cd test\cli\output\work_subrepo & bit commit -m "initial"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: Case 1 - git subrepo (directory with .git/ dir)
+# ======================================================================
+
+# ---- Create a subdirectory with its own git repo (subrepo) ----
+bash -c "cd test/cli/output/work_subrepo && mkdir -p sub && cd sub && git init && echo content > file.txt && git add file.txt && git commit -m first"
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Verify sub/.git is a directory before bit add ----
+bash -c "test -d test/cli/output/work_subrepo/sub/.git && echo is_directory || echo not_directory"
+<<<
+>>>
+is_directory
+>>>= 0
+
+# ---- bit add should move .git/ to index and create 160000 entry ----
+cd test\cli\output\work_subrepo & bit add sub
+<<<
+>>>= 0
+
+# ---- After bit add, the .git/ dir was moved to index — no .git in working dir ----
+bash -c "test -e test/cli/output/work_subrepo/sub/.git && echo exists || echo gone"
+<<<
+>>>
+gone
+>>>= 0
+
+# ---- The .git dir should exist in .bit/index/sub/.git (as a directory) ----
+bash -c "test -d test/cli/output/work_subrepo/.bit/index/sub/.git && echo in_index || echo missing"
+<<<
+>>>
+in_index
+>>>= 0
+
+# ---- Verify git sees mode 160000 for the subrepo ----
+cd test\cli\output\work_subrepo & bit ls-files --stage sub
+<<<
+>>> /160000/
+>>>= 0
+
+# ---- Commit the subrepo entry ----
+cd test\cli\output\work_subrepo & bit commit -m "Add subrepo"
+<<<
+>>> /\[main|master|files? changed/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: Case 3 - bit submodule add (creates gitlink with rewriting)
+# ======================================================================
+
+# ---- Create a bare git repo to use as submodule source ----
+bash -c "mkdir -p test/cli/output/work_subrepo_src && cd test/cli/output/work_subrepo_src && git init --bare"
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- Push some content to the bare repo (use absolute path) ----
+bash -c "SRC=$(cd test/cli/output/work_subrepo_src && pwd -W 2>/dev/null || pwd) && cd /tmp && rm -rf _sub_src && git init _sub_src && cd _sub_src && echo hello > readme.txt && git add . && git commit -m init && git remote add origin $SRC && git push origin master 2>&1 || git push origin main 2>&1"
+<<<
+>>>= 0
+
+# ---- Run bit submodule add using absolute path to source ----
+bash -c "SRC=$(cd test/cli/output/work_subrepo_src && pwd -W 2>/dev/null || pwd) && cd test/cli/output/work_subrepo && bit submodule add $SRC mymod 2>&1"
+<<<
+>>> /Cloning|clone/
+>>>= 0
+
+# ---- The submodule files should be synced to working directory ----
+bash -c "test -f test/cli/output/work_subrepo/mymod/readme.txt && echo synced || echo missing"
+<<<
+>>>
+synced
+>>>= 0
+
+# ---- The gitlink in working dir should contain .bit/index in its path ----
+bash -c "test -f test/cli/output/work_subrepo/mymod/.git && grep -c '.bit/index/' test/cli/output/work_subrepo/mymod/.git || echo no_rewrite"
+<<<
+>>> /1/
+>>>= 0
+
+# ---- bit submodule status should show the submodule ----
+bash -c "cd test/cli/output/work_subrepo && bit submodule status 2>&1 | grep -c mymod"
+<<<
+>>> /1/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_subrepo 2>nul & rmdir /s /q test\cli\output\work_subrepo_src 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

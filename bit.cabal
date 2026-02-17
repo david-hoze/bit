@@ -48,7 +48,8 @@ executable bit
                       Bit.Config.Metadata,
                       Bit.Rclone.Run,
                       Bit.CAS,
-                      Bit.Core.Config
+                      Bit.Core.Config,
+                      Bit.Core.Submodule
     build-depends:    base16-bytestring ^>=1.0.2.0,
                       base,
                       async,

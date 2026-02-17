@@ -320,6 +320,8 @@ formatElapsed secs
                     in show mins ++ " min " ++ show remainSecs ++ " s"
 
 -- | Recursively collect all paths under root, excluding .bit, .git, .bitignore, .gitignore.
+-- Directories that contain a .git/ directory or .bit/ directory (subrepos) are
+-- treated as opaque boundaries — the scanner does not descend into them.
 collectScannedPaths :: FilePath -> IO [ScannedEntry]
 collectScannedPaths root = go root
   where
@@ -333,18 +335,29 @@ collectScannedPaths root = go root
         then pure []
         else if isDir
           then do
-            names <- listDirectory path
-            -- Filter .bit at every level. For .git, only exclude directories
-            -- (git internals); allow .git files through (gitlink pointers in submodules).
-            let noBit = filter (/= ".bit") names
-            gitFiltered <- foldM (\acc name ->
-                if name /= ".git" then pure (acc ++ [name])
+            -- Check if this subdirectory is a subrepo (contains .git/ dir or .bit/ dir).
+            -- The root directory is never treated as a subrepo boundary.
+            isSubrepo <- if rel == "."
+                then pure False
                 else do
-                    gitIsDir <- doesDirectoryExist (path </> name)
-                    pure (if gitIsDir then acc else acc ++ [name])
-                ) [] noBit
-            childPaths <- concat <$> mapM (go . (path </>)) gitFiltered
-            pure (ScannedDir rel : childPaths)
+                    hasGitDir <- doesDirectoryExist (path </> ".git")
+                    hasBitDir <- doesDirectoryExist (path </> ".bit")
+                    pure (hasGitDir || hasBitDir)
+            if isSubrepo
+                then pure []  -- Opaque boundary: don't descend
+                else do
+                    names <- listDirectory path
+                    -- Filter .bit at every level. For .git, only exclude directories
+                    -- (git internals); allow .git files through (gitlink pointers in submodules).
+                    let noBit = filter (/= ".bit") names
+                    gitFiltered <- foldM (\acc name ->
+                        if name /= ".git" then pure (acc ++ [name])
+                        else do
+                            gitIsDir <- doesDirectoryExist (path </> name)
+                            pure (if gitIsDir then acc else acc ++ [name])
+                        ) [] noBit
+                    childPaths <- concat <$> mapM (go . (path </>)) gitFiltered
+                    pure (ScannedDir rel : childPaths)
         else pure [ScannedFile rel]
 
 -- | Stat a file and check the hash cache.
@@ -613,8 +626,15 @@ writeMetadataFiles root entries = do
                 let metaPath = metaRoot </> unPath (path entry)
                 case kind entry of
                   File { fHash, fSize, fContentType } -> do
+                    -- Never overwrite a .git gitlink file in the index — the index
+                    -- version (set up by git submodule add) has the correct gitdir:
+                    -- path. The working directory copy has a path that doesn't resolve
+                    -- from .bit/index/.
+                    let isGitlink = takeFileName (unPath (path entry)) == ".git"
+                    gitlinkExists <- if isGitlink then doesFileExist metaPath else pure False
                     -- Check if file is unchanged before writing
-                    needsWrite <- shouldWriteFile root metaPath entry fHash fSize fContentType
+                    needsWrite <- if gitlinkExists then pure False
+                                  else shouldWriteFile root metaPath entry fHash fSize fContentType
                     if needsWrite
                       then do
                         case fContentType of
