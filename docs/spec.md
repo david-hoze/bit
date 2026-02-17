@@ -1657,6 +1657,10 @@ GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
 | t0006-date.sh | 129/129 | 0 | All date parsing tests pass |
 | t0007-git-var.sh | 27/27 | 0 | 2 skipped (missing !AUTOIDENT, POSIXPERM) |
 | t0008-ignores.sh | 397/397 | 0 | All ignore tests pass (junction detection distinguishes `.git` junctions from real dirs) |
+| t0010-racy-git.sh | 10/10 | 0 | All racy git tests pass |
+| t0012-help.sh | 5/179 | 174 | Help tests require git's man pages / html docs (not available via shim) |
+| t0013-sha1dc.sh | 1/1 | 0 | SHA-1 collision detection passes |
+| t0014-alias.sh | — | — | Hangs: bit's alias expansion lacks loop detection for nested aliases |
 | CLI tests | 57/57 files (984 tests) | 0 | All 57 test files pass (including network-remote and gdrive-remote) |
 
 ---
