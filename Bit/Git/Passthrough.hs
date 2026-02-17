@@ -42,6 +42,7 @@ import Control.Monad.Trans.Reader (asks)
 import qualified Data.List
 import Control.Monad.IO.Class (liftIO)
 import Data.List (isPrefixOf, foldl')
+import System.Environment (lookupEnv)
 import qualified Bit.Core.Conflict as Conflict
 import Bit.Config.Metadata (parseMetadata, MetaContent(..), validateMetadataDir)
 import Bit.CAS (copyBlobFromCasTo)
@@ -75,7 +76,18 @@ log :: FilePath -> [String] -> IO ExitCode
 log prefix args = Git.runGitRawIn prefix ("log" : args)
 
 lsFiles :: FilePath -> [String] -> IO ExitCode
-lsFiles prefix args = Git.runGitRawIn prefix ("ls-files" : args)
+lsFiles prefix args = do
+    -- When BIT_GIT_JUNCTION is set (git test suite), the .git junction handles
+    -- repo discovery from the CWD. Use runGitHere so pathspecs and -X file paths
+    -- resolve from the actual working directory, not .bit/index/.
+    junction <- lookupEnv "BIT_GIT_JUNCTION"
+    case junction of
+        Just "1" -> Git.runGitHere ("ls-files" : args)
+        _ -> do
+            -- Resolve -X/--exclude-from file paths to absolute since git runs
+            -- with -C .bit/index and would resolve them from the wrong directory.
+            resolved <- resolveExcludeFilePaths args
+            Git.runGitRawIn prefix ("ls-files" : resolved)
 
 reset :: FilePath -> [String] -> IO ExitCode
 reset prefix args = Git.runGitRawIn prefix ("reset" : args)
@@ -344,6 +356,21 @@ parseRmOutput out =
     , let path = drop 4 line
     , not (null path)
     ]
+
+-- | Resolve file path arguments for flags that take a file path (-X, --exclude-from).
+-- When git runs with -C .bit/index, relative paths resolve from the wrong directory.
+-- This makes them absolute so they resolve correctly regardless of -C.
+resolveExcludeFilePaths :: [String] -> IO [String]
+resolveExcludeFilePaths [] = pure []
+resolveExcludeFilePaths [x] = pure [x]
+resolveExcludeFilePaths (flag:path:rest)
+    | flag `elem` ["-X", "--exclude-from"] = do
+        absPath <- Dir.makeAbsolute path
+        resolved <- resolveExcludeFilePaths rest
+        pure (flag : absPath : resolved)
+    | otherwise = do
+        resolved <- resolveExcludeFilePaths (path:rest)
+        pure (flag : resolved)
 
 -- | Remove empty parent directories up to (but not including) @stopAt@.
 removeEmptyParents :: FilePath -> FilePath -> IO ()
