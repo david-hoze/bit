@@ -338,19 +338,21 @@ collectScannedPaths root = go root
           then do
             -- Check if this subdirectory is a subrepo (contains .git/ dir or .bit/ dir).
             -- The root directory is never treated as a subrepo boundary.
-            -- When BIT_GIT_JUNCTION is set (git test suite), skip this check —
-            -- bit acts as a git replacement and the scanner copies everything
-            -- (including .git gitlink files) so git can detect submodules natively.
+            -- In junction mode (git test suite), detectAndHandleSubrepoJunction
+            -- removes .git junctions before scanning, so no special handling needed
+            -- here. Skip .bit check in junction mode — .bit dirs are bit internal
+            -- state, not subrepo markers, when bit acts as git.
             isSubrepo <- if rel == "."
                 then pure False
                 else do
-                    junctionMode <- lookupEnv "BIT_GIT_JUNCTION"
-                    case junctionMode of
-                        Just "1" -> pure False
-                        _ -> do
-                            hasGitDir <- doesDirectoryExist (path </> ".git")
-                            hasBitDir <- doesDirectoryExist (path </> ".bit")
-                            pure (hasGitDir || hasBitDir)
+                    hasGitDir <- doesDirectoryExist (path </> ".git")
+                    if hasGitDir
+                        then pure True  -- Real .git dir — subrepo boundary
+                        else do
+                            junctionMode <- lookupEnv "BIT_GIT_JUNCTION"
+                            case junctionMode of
+                                Just "1" -> pure False  -- Skip .bit check in junction mode
+                                _ -> doesDirectoryExist (path </> ".bit")
             if isSubrepo
                 then pure []  -- Opaque boundary: don't descend
                 else do

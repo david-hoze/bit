@@ -33,13 +33,42 @@ import Control.Exception (catch, IOException)
 -- the gitlink for the working directory.
 detectAndHandleSubrepo :: FilePath -> FilePath -> FilePath -> [String] -> IO ()
 detectAndHandleSubrepo cwd bitDir _prefix args = do
-    -- When BIT_GIT_JUNCTION is set (git test suite), the junction handles repo
-    -- discovery and git manages submodules natively. Skip subrepo detection to
-    -- avoid interfering with git's own submodule handling.
     junction <- lookupEnv "BIT_GIT_JUNCTION"
     case junction of
-        Just "1" -> pure ()
+        Just "1" -> detectAndHandleSubrepoJunction cwd bitDir args
         _ -> detectAndHandleSubrepo' cwd bitDir args
+
+-- | Junction mode: subrepos created with bit init have a .git junction pointing
+-- to .bit/index/.git/. To register them as submodules, remove the junction and
+-- move the real git dir into the parent's .bit/index/ so git can detect it.
+detectAndHandleSubrepoJunction :: FilePath -> FilePath -> [String] -> IO ()
+detectAndHandleSubrepoJunction cwd bitDir args = do
+    let paths = filter (not . ("-" `isPrefixOf`)) args
+    forM_ paths $ \p -> do
+        let fullPath = if isAbsolute p then p else cwd </> p
+        let isRepoRoot = p == "." || fullPath == cwd
+        when (not isRepoRoot) $ do
+            let gitPath = fullPath </> ".git"
+            -- Check for .git junction (created by bit init in junction mode)
+            isJunction <- Dir.pathIsSymbolicLink gitPath
+                `catch` \(_ :: IOException) -> pure False
+            when isJunction $ do
+                -- The junction points to .bit/index/.git/. Move the real git dir
+                -- into the parent's .bit/index/ and remove the junction.
+                let realGitDir = fullPath </> ".bit" </> "index" </> ".git"
+                let indexTarget = bitDir </> "index" </> p </> ".git"
+                realExists <- Dir.doesDirectoryExist realGitDir
+                targetExists <- Dir.doesDirectoryExist indexTarget
+                when (realExists && not targetExists) $ do
+                    Dir.createDirectoryIfMissing True (takeDirectory indexTarget)
+                    Dir.renameDirectory realGitDir indexTarget
+                -- Remove the junction so scanner can descend into the directory
+                Dir.removeDirectoryLink gitPath
+                    `catch` \(_ :: IOException) -> pure ()
+  where
+    isAbsolute ('/':_) = True
+    isAbsolute (_:':':_) = True
+    isAbsolute _ = False
 
 detectAndHandleSubrepo' :: FilePath -> FilePath -> [String] -> IO ()
 detectAndHandleSubrepo' cwd bitDir args = do

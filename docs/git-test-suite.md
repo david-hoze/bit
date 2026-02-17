@@ -23,6 +23,23 @@ aliases, and forwards unknown commands to the real git.
 | `BIT_REAL_GIT` | shim | Path to the real git binary. `spawnGit` uses this instead of `git` to avoid recursion through the shim. |
 | `BIT_GIT_JUNCTION` | shim | When `=1`, `initializeRepoAt` creates a `.git` directory junction pointing to `.bit/index/.git` after init. Allows git's repo discovery to work naturally. Uses `mklink /j` (no admin rights). |
 
+### Junction mode behavior
+
+Junction mode (`BIT_GIT_JUNCTION=1`) is **only used for git test suite compatibility**.
+When active, several bit subsystems adapt their behavior:
+
+- **Scanner**: Skips `.bit` opaque boundary checks (`.bit` dirs are bit internal state,
+  not subrepo markers). `.git` directories still trigger opaque boundaries as normal.
+- **Subrepo detection** (`detectAndHandleSubrepoJunction`): When `bit add` encounters a
+  subdirectory with a `.git` junction (created by a nested `bit init`), it removes the
+  junction and moves the real git dir from `.bit/index/.git/` into the parent's
+  `.bit/index/` so git can detect the submodule and create a 160000 entry. This uses
+  `pathIsSymbolicLink` to distinguish junctions from real `.git` directories.
+- **ls-files**: When `-o`/`--others` is used, runs without `-C .bit/index` so pathspecs
+  and `-X` file paths resolve from the actual working directory.
+- **Submodule sync**: Skips `syncSubmoduleToWorkingDirectory` since git operates on
+  `.bit/index/` directly via the junction.
+
 ## Prerequisites
 
 | Tool | Notes |
@@ -70,19 +87,18 @@ Implemented:
 - **Global flags** — `--exec-path`, `--version`, `--html-path`, etc.
 - **Known bit commands** — `add`, `commit`, `diff`, `status`, `log`, etc.
 
-### t0001-init.sh results
+### Test results
 
-33 of 91 tests pass. Key passing tests:
-- Tests 1-4: plain init, nested init, aliased init (with and without existing repo)
-- Directory creation tests (23, 25, 27)
-- Re-init tests (40, 86-90)
-
-Main failure categories:
-- `--bare` init (bit stub, not yet implemented)
-- `--template` handling (bit doesn't pass through template flags to the junction)
-- `git -C <dir>` in passthrough (bit prepends its own `-C .bit/index`, breaking
-  relative `-C` from test scripts)
-- ref format / object format tests (git internals bit doesn't expose)
+| Test Suite | Pass | Fail | Notes |
+|------------|------|------|-------|
+| t0001-init.sh | 91/91 | 0 | All init tests pass |
+| t0002-gitfile.sh | 14/14 | 0 | All gitfile tests pass |
+| t0003-attributes.sh | 54/54 | 0 | All attribute tests pass |
+| t0004-unwritable.sh | 9/9 | 0 | 8 skipped (missing POSIXPERM/SANITY) |
+| t0005-signals.sh | 5/5 | 0 | 3 skipped (missing !MINGW) |
+| t0006-date.sh | 129/129 | 0 | All date parsing tests pass |
+| t0007-git-var.sh | 27/27 | 0 | 2 skipped (missing !AUTOIDENT, POSIXPERM) |
+| t0008-ignores.sh | 397/397 | 0 | All ignore tests pass |
 
 ## Naming constraint on Windows
 
