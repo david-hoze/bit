@@ -77,15 +77,16 @@ log prefix args = Git.runGitRawIn prefix ("log" : args)
 
 lsFiles :: FilePath -> [String] -> IO ExitCode
 lsFiles prefix args = do
-    -- When BIT_GIT_JUNCTION is set (git test suite), the .git junction handles
-    -- repo discovery from the CWD. Use runGitHere so pathspecs and -X file paths
-    -- resolve from the actual working directory, not .bit/index/.
+    -- When BIT_GIT_JUNCTION is set (git test suite) and -o/--others is used,
+    -- git needs the actual working tree to enumerate untracked files. The junction
+    -- handles repo discovery, so use runGitHere to let pathspecs and -X paths
+    -- resolve from the real CWD. For all other modes, use the normal -C .bit/index
+    -- path with -X paths resolved to absolute.
     junction <- lookupEnv "BIT_GIT_JUNCTION"
+    let hasOthers = any (`elem` ["-o", "--others"]) args
     case junction of
-        Just "1" -> Git.runGitHere ("ls-files" : args)
+        Just "1" | hasOthers -> Git.runGitHere ("ls-files" : args)
         _ -> do
-            -- Resolve -X/--exclude-from file paths to absolute since git runs
-            -- with -C .bit/index and would resolve them from the wrong directory.
             resolved <- resolveExcludeFilePaths args
             Git.runGitRawIn prefix ("ls-files" : resolved)
 

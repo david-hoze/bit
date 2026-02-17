@@ -13,6 +13,7 @@ import System.Exit (ExitCode(..))
 import qualified System.Directory as Dir
 import qualified Bit.Git.Run as Git
 import Data.List (isPrefixOf, isInfixOf)
+import System.Environment (lookupEnv)
 import Control.Monad (when, forM_)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -32,6 +33,16 @@ import Control.Exception (catch, IOException)
 -- the gitlink for the working directory.
 detectAndHandleSubrepo :: FilePath -> FilePath -> FilePath -> [String] -> IO ()
 detectAndHandleSubrepo cwd bitDir _prefix args = do
+    -- When BIT_GIT_JUNCTION is set (git test suite), the junction handles repo
+    -- discovery and git manages submodules natively. Skip subrepo detection to
+    -- avoid interfering with git's own submodule handling.
+    junction <- lookupEnv "BIT_GIT_JUNCTION"
+    case junction of
+        Just "1" -> pure ()
+        _ -> detectAndHandleSubrepo' cwd bitDir args
+
+detectAndHandleSubrepo' :: FilePath -> FilePath -> [String] -> IO ()
+detectAndHandleSubrepo' cwd bitDir args = do
     let paths = filter (not . ("-" `isPrefixOf`)) args
     forM_ paths $ \p -> do
         let fullPath = if isAbsolute p then p else cwd </> p
@@ -113,8 +124,11 @@ submodule cwd bitDir args = do
     let indexPath = bitDir </> "index"
     code <- Git.runGitRawAt indexPath
         ("-c" : "protocol.file.allow=always" : "submodule" : args)
-    -- After mutating subcommands, destructively replace working directory
-    when (code == ExitSuccess && isMutatingSubcommand args) $
+    -- After mutating subcommands, destructively replace working directory.
+    -- Skip in junction mode — git operates on .bit/index/ directly via the
+    -- junction, so there's no separate working directory to sync.
+    junction <- lookupEnv "BIT_GIT_JUNCTION"
+    when (code == ExitSuccess && isMutatingSubcommand args && junction /= Just "1") $
         syncSubmoduleToWorkingDirectory cwd bitDir
     pure code
   where

@@ -1654,7 +1654,7 @@ GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
 | t0005-signals.sh | 5/5 | 0 | 3 skipped (missing !MINGW — signal propagation not available on Windows) |
 | t0006-date.sh | 129/129 | 0 | All date parsing tests pass |
 | t0007-git-var.sh | 27/27 | 0 | 2 skipped (missing !AUTOIDENT, POSIXPERM) |
-| t0008-ignores.sh | 397/397 | 0 | All ignore tests pass |
+| t0008-ignores.sh | 379/397 | 18 | Tests 346-363: submodule `check-ignore` — junction can't represent `.git` gitlink in `.bit/index/` |
 | CLI tests | 57/57 files (984 tests) | 0 | All 57 test files pass (including network-remote and gdrive-remote) |
 
 ---

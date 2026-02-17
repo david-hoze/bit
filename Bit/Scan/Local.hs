@@ -56,6 +56,7 @@ import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Bit.IO.Concurrency (Concurrency(..), ioConcurrency)
+import System.Environment (lookupEnv)
 
 -- | Resolve the .bit root directory from a working directory root.
 -- Follows bitlink files (e.g. "bitdir: /abs/path") for separated git dirs.
@@ -337,12 +338,19 @@ collectScannedPaths root = go root
           then do
             -- Check if this subdirectory is a subrepo (contains .git/ dir or .bit/ dir).
             -- The root directory is never treated as a subrepo boundary.
+            -- When BIT_GIT_JUNCTION is set (git test suite), skip this check —
+            -- bit acts as a git replacement and the scanner copies everything
+            -- (including .git gitlink files) so git can detect submodules natively.
             isSubrepo <- if rel == "."
                 then pure False
                 else do
-                    hasGitDir <- doesDirectoryExist (path </> ".git")
-                    hasBitDir <- doesDirectoryExist (path </> ".bit")
-                    pure (hasGitDir || hasBitDir)
+                    junctionMode <- lookupEnv "BIT_GIT_JUNCTION"
+                    case junctionMode of
+                        Just "1" -> pure False
+                        _ -> do
+                            hasGitDir <- doesDirectoryExist (path </> ".git")
+                            hasBitDir <- doesDirectoryExist (path </> ".bit")
+                            pure (hasGitDir || hasBitDir)
             if isSubrepo
                 then pure []  -- Opaque boundary: don't descend
                 else do
