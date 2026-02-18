@@ -20,7 +20,7 @@ The binary file versioning landscape is fragmented because every existing tool m
 
 ### It's just Git
 
-`bit` fills those gaps — *without* losing Git's simplicity, syntax, or semantics. While the `bit` cli executable is named `bit`, with  `bit import git-repo` and `bit become-git`, you can use familiar `git` commands, creating a seamless experience with binary files:
+`bit` fills those gaps naturally — *without* losing Git's simplicity, syntax, or semantics. It [integrates](docs/git-compatibility) fully with git, creating a seamless experience with binary files:
 
 ```bash
 bit become-git
