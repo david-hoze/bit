@@ -20,9 +20,7 @@ The binary file versioning landscape is fragmented because every existing tool m
 
 ### It's just Git
 
-`bit` fills those gaps — *without* losing Git's simplicity, syntax, or semantics. Also, `bit` actually uses Git under the hood. bit stores metadata in a real Git repository (`.bit/index/`), which means full compatibility with Git's tooling: branches, merges, rebases, cherry-picks, reflog, bisect — all of it works because the metadata *is* a Git repo. When `bit` needs to passthrough commands to git, it does, and when it has to meddle, it does so at minimum. `bit` philosophy states that you should always prefer using git or rclone primitives, rather than reimplementing features.
-
-While `bit` cli executable is named `bit`, with `bit become-git`, you can use familiar `git` commands, creating a seamless experience with binary files:
+`bit` fills those gaps — *without* losing Git's simplicity, syntax, or semantics. While the `bit` cli executable is named `bit`, with  `bit import git-repo` and `bit become-git`, you can use familiar `git` commands, creating a seamless experience with binary files:
 
 ```bash
 bit become-git
@@ -40,11 +38,13 @@ cd my-git-repo
 git status               # handled by real git — bit stays out of the way
 ```
 
+`bit` actually uses Git under the hood, but only for text. When `bit` needs to passthrough commands to git, it does, and when it has to meddle, it does so at minimum. `bit` philosophy is  "Orchestrate, don't reimplement". `bit` always prefers using git or rclone primitives and machinery whenever possible.
+
 `bit` is designed to pass all the tests in the git test suite, making it fully compatible with git, from submodules to arcane git commands.
 
-Push and pull behave differently for binary files — but they should. `git push` in a bit repo uploads your binaries to the remote via rclone, which is what you'd expect. It does so using the minimal set of operations (detects renames and moves), uploading only the data chunks that changed using FastCDC, thus cutting upload expenses.
+Push and pull behave differently for binary files — but they should. `git push` in a bit repo uploads your binaries to the remote via rclone, which is what you'd expect, `bit pull` downloads them.`bit` does this using the minimal set of operations (renames and move detection), uploading **only** the data chunks that changed using FastCDC, thus cutting upload expenses.
 
-You can use Git native remotes seamlessly. They are considered metadata-only remotes . You can push your metadata to GitHub or GitLab as a standard Git repository, and get full commit history, diffs, branches, PRs, while your actual files live on cheaper storage:
+You can use Git native remotes seamlessly. They are considered metadata-only remotes. You can push your metadata to GitHub or GitLab as a standard Git repository, and get full commit history, diffs, branches, PRs, while your actual files live on cheaper storage:
 
 ```bash
 bit remote add github git@github.com:user/project.git  # metadata only
@@ -56,9 +56,9 @@ Your collaborators can then see the full Git history on GitHub. They can clone t
 
 ### Your files stay out of Git's object store
 
-git-lfs replaces your actual files in Git's working tree with pointer files containing a hash and size. Your working directory has the real file (via smudge/clean filters), but Git itself tracks pointer content. Because LFS lives inside Git's ecosystem, it's easy to end up with binaries in Git's object store: forget to configure `.gitattributes` before committing, add LFS to an existing repo, or have a teammate clone without LFS installed. Once a binary blob is in Git history, removing it means rewriting history — that's a Git problem, not an LFS problem, but LFS makes it easy to get there.
+git-lfs replaces your actual files in Git's working tree with pointer files containing a hash and size. Your working directory has the real file (via smudge/clean filters), but Git itself tracks pointer content. Because LFS lives inside Git's ecosystem, it's easy to end up with binaries in Git's object store: forget to configure `.gitattributes` before committing, add LFS to an existing repo, or have a teammate clone without LFS installed. Once a binary blob is in Git history, removing it means rewriting history — that's not an LFS problem, but the architecture makes it easy to get there.
 
-bit keeps a *separate* Git working tree (`.bit/index/`) for metadata only. Your actual files live in your normal working directory, in a different directory from Git's. Git never sees your files — not as blobs, not as pointers, not at all. There's no configuration to forget, no filter to misconfigure, no way for a binary to accidentally become a Git object. The separation is structural, not policy-based.
+bit keeps a *separate* Git working tree (`.bit/index/`) for metadata only. Your actual files live in your normal working directory, in a different directory from Git's. Git never sees your files — not as blobs, not as pointers, not at all. It just sees a small text metadata representation of them. There's no configuration to forget, no filter to misconfigure, no way for a binary to accidentally become a Git object. The separation is structural, not policy-based.
 
 ```
 lectures/
