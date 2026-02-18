@@ -62,6 +62,7 @@ resolveRemote cwd name = do
                 Nothing -> resolveOldFormat cwd name  -- fallback for pre-git-remote files
         Just Device.RemoteDevice     -> resolveDeviceRemote cwd name
         Just Device.RemoteCloud      -> resolveCloudRemote cwd name
+        Just Device.RemoteGit        -> resolveGitRemote cwd name
         Nothing                      -> resolveOldFormat cwd name
 
 -- | Filesystem remote: URL is in git config, strip .bit/index suffix to get base path.
@@ -95,6 +96,14 @@ resolveCloudRemote cwd name = do
                 Device.Resolved url -> pure (Just (mkRemote name url))
                 Device.NotConnected _ -> pure Nothing
         Nothing -> pure Nothing
+
+-- | Git-native remote: URL is in git config (no .bit/index suffix to strip).
+resolveGitRemote :: FilePath -> String -> IO (Maybe Remote)
+resolveGitRemote _cwd name = do
+    mUrl <- Git.getRemoteUrl name
+    case mUrl of
+        Just url | not (null url) -> pure (Just (mkRemote name url))
+        _ -> pure Nothing
 
 -- | Backward compat: try remote file, then git config.
 resolveOldFormat :: FilePath -> String -> IO (Maybe Remote)

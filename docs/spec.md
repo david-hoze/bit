@@ -650,15 +650,16 @@ This saves bandwidth. For example: renaming a 1GB file becomes `rclone moveto` i
 
 ### Remote Types and Device Resolution
 
-bit supports two kinds of remotes:
+bit supports three kinds of remotes:
 
 - **Cloud remotes**: rclone-based (e.g., `gdrive:Projects/foo`). Identified by URL. Uses bundle + rclone sync.
 - **Filesystem remotes**: Local/network paths (USB drives, network shares, local directories). Creates a **full bit repository** at the remote location.
+- **Git remotes**: Native git endpoints (GitHub, GitLab, Bitbucket, bare git repos). Metadata only — syncs commit history without binary file content. Useful for sharing project structure via existing git hosting.
   - **UNC paths**: Under MINGW / Git Bash, UNC paths must use forward slashes (`//server/share/path`). The shell strips leading backslashes before bit receives the argument. bit normalizes forward-slash UNC paths and displays the canonical backslash form.
   - **Platform layer**: GHC's `System.Directory` prepends `\\?\UNC\` to UNC paths for long-path support; virtual UNC providers (RDP tsclient, WebDAV) reject this prefix. `Bit.IO.Platform` bypasses the prefix for UNC paths by calling Win32 directly, while keeping `System.Directory` (with long-path support) for local paths.
 
 The `Bit.Device.Identity` module handles remote type classification and device resolution:
-- `RemoteType`: `RemoteFilesystem` (fixed paths), `RemoteDevice` (removable/network drives), `RemoteCloud` (rclone-based)
+- `RemoteType`: `RemoteFilesystem` (fixed paths), `RemoteDevice` (removable/network drives), `RemoteCloud` (rclone-based), `RemoteGit` (native git endpoints)
 - `isFilesystemType`: True for both `RemoteFilesystem` and `RemoteDevice` (both use direct git operations)
 - Physical storage: Identified by UUID + hardware serial (survives drive letter changes)
 - Network storage: Identified by UUID only
@@ -671,10 +672,18 @@ The `Bit.Device.Identity` module handles remote type classification and device r
   - `layout: full` (default, backward compatible): Files are stored at human-readable paths mirroring the working tree AND in CAS. Users can browse files in Google Drive / S3 / etc.
   - `layout: bare`: Files are stored only in CAS layout (`cas/<prefix>/<hash>`). The cloud folder is opaque to humans — no browsable file tree, just hashed blobs and a metadata bundle. This is for pure backup where browsability is not needed.
   - Example remote config for bare layout: `type: cloud\ntarget: gdrive:Backup/foo\nlayout: bare`
+  - `layout: metadata`: Only git history is synced — no binary file content is transferred. Used automatically for git remotes (`RemoteGit`) and optionally for cloud/filesystem remotes via `--metadata-only`. Useful when you only need commit history, file lists, and DAG structure (e.g., sharing project metadata via GitHub without uploading large files).
+  - Example remote config for git remote: `type: git\ntarget: git@github.com:user/repo.git\nlayout: metadata`
 - **`bit remote add --bare`**: The `--bare` flag on `bit remote add` sets `layout: bare` in the remote config. It is only valid for cloud remotes — filesystem and device remotes are always full repos. Without `--bare`, cloud remotes default to `layout: full`. Examples:
   ```
   bit remote add origin gdrive:Projects/foo            # layout: full (default)
   bit remote add backup gdrive:Backup/foo --bare       # layout: bare
+  ```
+- **`bit remote add --metadata-only`**: Sets `layout: metadata`. Valid for cloud and filesystem remotes (git remotes are always metadata-only). With `--metadata-only`, push/pull only sync git history — no binary file content is transferred. `--bare` and `--metadata-only` are mutually exclusive.
+  ```
+  bit remote add github git@github.com:user/repo.git   # auto-detected as git, always metadata
+  bit remote add backup gdrive:Backup/foo --metadata-only  # cloud, metadata only
+  bit remote add bare-repo /path/to/bare.git            # auto-detected bare git repo, metadata
   ```
 - **No cloud remote layout conversion.** Switching a remote between `layout: full` and `layout: bare` is not supported. To change layout, create a new remote with the desired layout and push to it. This avoids complex migration logic and keeps the remote lifecycle simple.
 - **Device add fallback:** When adding a removable or network path, bit may prompt for a device name and write `.bit-store` at the volume root. If writing `.bit-store` fails (e.g. permission denied on `C:\`), the remote is added as path-only (RemoteFilesystem) so the user still has a working remote; device identity is not persisted. This silent degradation is worth specifying so users and maintainers know the fallback exists.
@@ -790,6 +799,7 @@ The remote URL depends on the transport:
 |---|---|---|
 | Filesystem | `<remotePath>/.bit/index` | `/mnt/usb/project/.bit/index` |
 | Cloud | `.git/bundles/<name>.bundle` (relative to `.bit/index/`) | `.git/bundles/gdrive.bundle` |
+| Git | Direct URL to git endpoint | `git@github.com:user/repo.git` |
 
 When `bit remote add origin /mnt/usb/project` runs, it calls `Git.addRemote "origin" "/mnt/usb/project/.bit/index"` — after that, `git fetch origin` inside `.bit/index/` talks directly to the remote's index repo.
 
@@ -822,13 +832,15 @@ sync is needed.
 
 **Filesystem seam** (`mkFilesystemSeam`): Takes current working directory and remote; uses native git fetch/pull. The local index registers the remote's `.bit/index` as a named git remote; metadata is pushed via `git pull --ff-only` at the remote side.
 
+**Git seam** (`mkGitSeam`): For `RemoteGit` and metadata-only filesystem remotes pointing at bare git repos. Uses native `git fetch`/`git push` directly against the remote. No bundles, no rclone — git handles everything. File sync is skipped entirely since metadata-only remotes don't transfer binary content.
+
 **Push flow** (both transports):
-1. **Verify local** (proof of possession — full-layout remotes only; checks working tree then CAS; skipped for bare remotes)
+1. **Verify local** (proof of possession — full-layout remotes only; checks working tree then CAS; skipped for bare and metadata-only remotes)
 2. **First-push detection** (filesystem only): If remote `.bit/` doesn't exist, create and initialize it
 3. **Classify remote state** via rclone (`classifyRemoteState`)
 4. **Fetch remote history** via seam (`ptFetchHistory`)
 5. **Ancestry/force checks** (`processExistingRemote`)
-6. **Sync files** — always upload to remote CAS; for full remotes, additionally sync readable paths via git diff + rclone (`syncRemoteFiles`)
+6. **Sync files** — always upload to remote CAS; for full remotes, additionally sync readable paths via git diff + rclone (`syncRemoteFiles`); skipped entirely for metadata-only remotes
 7. **Push metadata** via seam (`ptPushMetadata`)
 8. **Update tracking ref** (`Git.updateRemoteTrackingBranchToHead`) — same for both
 
@@ -851,17 +863,19 @@ data PullSeam = PullSeam
 **Filesystem seam** (`mkFilesystemPullSeam`): Runs `git fetch <remotePath>/.bit/index`
 directly — no bundle, no rclone, git talks repo-to-repo.
 
+**Git seam** (`mkGitPullSeam`): Runs `git fetch <name>` using the git remote URL directly. No bundle download, no rclone. Verification is a no-op since there's no content to verify.
+
 Everything else is shared: merge orchestration, conflict resolution, file sync,
 `--accept-remote`, `--manual-merge`, tracking ref updates.
 
 **Pull flow** (both transports):
 1. **Fetch remote metadata** via seam (`psFetchMetadata`)
-2. **Verify remote** via seam (`psVerifyRemote`) — full-layout remotes only; skipped for bare remotes (CAS is self-verifying); also skipped with `--accept-remote` or `--manual-merge`
+2. **Verify remote** via seam (`psVerifyRemote`) — full-layout remotes only; skipped for bare remotes (CAS is self-verifying), metadata-only remotes (no content), and with `--accept-remote` or `--manual-merge`
 3. **Dispatch by mode**:
    - Normal: `git merge --no-commit --no-ff`, then `applyMergeToWorkingDir`
    - `--accept-remote`: Force-checkout (with `--no-track`), then sync files
    - `--manual-merge`: Detect divergence, create conflict directories
-4. **Sync files**: Text from index, binary via rclone (same `rcloneCopyFiles`); for bare remotes, downloads blobs from `cas/<prefix>/<hash>` and places at working tree paths
+4. **Sync files**: Text from index, binary via rclone (same `rcloneCopyFiles`); for bare remotes, downloads blobs from `cas/<prefix>/<hash>` and places at working tree paths; skipped entirely for metadata-only remotes
 5. **Update tracking ref**: Set `refs/remotes/<name>/main` to the fetched hash
 
 #### Text vs Binary File Sync

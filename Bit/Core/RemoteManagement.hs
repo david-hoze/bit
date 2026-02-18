@@ -37,32 +37,44 @@ import qualified Bit.Core.Fetch as Fetch
 -- Remote Management
 -- ============================================================================
 
-remoteAdd :: String -> String -> Bool -> IO ()
+remoteAdd :: String -> String -> Bool -> Bool -> IO ()
 remoteAdd = addRemote
 
-addRemote :: String -> String -> Bool -> IO ()
-addRemote name pathOrUrl bare = do
+addRemote :: String -> String -> Bool -> Bool -> IO ()
+addRemote name pathOrUrl bare metadataOnly = do
     cwd <- Dir.getCurrentDirectory
     pathType <- Device.classifyRemotePath pathOrUrl
     case pathType of
+        Device.GitRemote url -> do
+            when bare $ do
+                hPutStrLn stderr "error: --bare is not valid for git remotes."
+                exitWith (ExitFailure 1)
+            Device.writeRemoteFile cwd name Device.RemoteGit (Just url) (Just Device.LayoutMetadata)
+            void $ Git.addRemote name url
+            putStrLn $ "Remote '" ++ name ++ "' added (" ++ url ++ ", metadata only)."
         Device.CloudRemote url -> do
-            let layout = if bare then Device.LayoutBare else Device.LayoutFull
+            let layout | metadataOnly = Device.LayoutMetadata
+                       | bare         = Device.LayoutBare
+                       | otherwise    = Device.LayoutFull
             Device.writeRemoteFile cwd name Device.RemoteCloud (Just url) (Just layout)
             -- Register bundle path as named git remote (bundle may not exist yet)
             let bundleGitPath = fromGitRelPath (bundleGitRelPath (bundleForRemote name))
             void $ Git.addRemote name bundleGitPath
-            putStrLn $ "Remote '" ++ name ++ "' added (" ++ url ++ ")" ++ (if bare then " (bare layout)." else ".")
+            let suffix | metadataOnly = " (metadata only)."
+                       | bare         = " (bare layout)."
+                       | otherwise    = "."
+            putStrLn $ "Remote '" ++ name ++ "' added (" ++ url ++ ")" ++ suffix
         Device.FilesystemPath filePath -> do
             when bare $ do
                 hPutStrLn stderr "warning: --bare is only valid for cloud remotes; ignoring."
-            addRemoteFilesystem cwd name filePath
+            addRemoteFilesystem cwd name filePath metadataOnly
 
 promptDeviceName :: FilePath -> FilePath -> Maybe String -> IO String
 promptDeviceName cwd _volRoot mLabel =
     DevicePrompt.acquireDeviceNameAuto mLabel $ \name -> (name `elem`) <$> Device.listDeviceNames cwd
 
-addRemoteFilesystem :: FilePath -> String -> FilePath -> IO ()
-addRemoteFilesystem cwd name filePath = do
+addRemoteFilesystem :: FilePath -> String -> FilePath -> Bool -> IO ()
+addRemoteFilesystem cwd name filePath metadataOnly = do
     absPath <- Dir.makeAbsolute filePath
     exists <- Platform.doesDirectoryExist absPath
     unless exists $ do
@@ -72,11 +84,29 @@ addRemoteFilesystem cwd name filePath = do
             ('/':'/':_) -> uncHint
             _ -> pure ()
         exitWith (ExitFailure 1)
-    volRoot <- Device.getVolumeRoot absPath
-    isFixed <- Device.isFixedDrive volRoot
-    if isFixed
-        then addRemoteFixed cwd name absPath
-        else addRemoteDevice cwd name absPath volRoot
+
+    -- Check for bare git repo without .bit (auto-detect metadata-only)
+    hasBitDir <- Dir.doesDirectoryExist (absPath </> ".bit")
+    hasHead <- Dir.doesFileExist (absPath </> "HEAD")
+    hasGitSubdir <- Dir.doesDirectoryExist (absPath </> ".git")
+    let isBareGitRepo = (hasHead || hasGitSubdir) && not hasBitDir
+        isMetadata = metadataOnly || isBareGitRepo
+
+    if isMetadata
+        then do
+            Device.writeRemoteFile cwd name Device.RemoteFilesystem (Just absPath) (Just Device.LayoutMetadata)
+            -- Point git remote directly at the path (not .bit/index)
+            void $ Git.addRemote name absPath
+            let autoMsg = if isBareGitRepo && not metadataOnly
+                    then " (detected bare git repo, metadata only)."
+                    else " (metadata only)."
+            putStrLn $ "Remote '" ++ name ++ "' added (" ++ absPath ++ ")" ++ autoMsg
+        else do
+            volRoot <- Device.getVolumeRoot absPath
+            isFixed <- Device.isFixedDrive volRoot
+            if isFixed
+                then addRemoteFixed cwd name absPath
+                else addRemoteDevice cwd name absPath volRoot
   where
     uncHint = hPutStrLn stderr "hint: For UNC paths under Git Bash / MINGW, use forward slashes: //server/share/path"
 
@@ -173,13 +203,19 @@ remoteShow mRemoteName = do
                 Nothing -> liftIO $ putStrLn "No remotes configured. Use 'bit remote add <name> <url>' to add one."
                 Just remote -> do
                     let isFs = maybe False Device.isFilesystemType mType
-                    -- Spec format for single-remote show: cloud = Remote/Type/Target/Layout; filesystem = one-line then status
-                    if mType == Just Device.RemoteCloud
+                    -- Spec format for single-remote show: cloud/git = Remote/Type/Target/Layout; filesystem = one-line then status
+                    if mType `elem` [Just Device.RemoteCloud, Just Device.RemoteGit]
                         then liftIO $ do
                             layout <- Device.readRemoteLayout cwd name
-                            let layoutStr = case layout of Device.LayoutBare -> "bare"; _ -> "full"
+                            let typeStr = case mType of
+                                    Just Device.RemoteGit -> "git"
+                                    _                     -> "cloud"
+                            let layoutStr = case layout of
+                                    Device.LayoutBare     -> "bare"
+                                    Device.LayoutMetadata -> "metadata"
+                                    _                     -> "full"
                             putStrLn $ "  Remote: " ++ name
-                            putStrLn "  Type: cloud"
+                            putStrLn $ "  Type: " ++ typeStr
                             putStrLn $ "  Target: " ++ remoteUrl remote
                             putStrLn $ "  Layout: " ++ layoutStr
                             putStrLn ""
@@ -187,8 +223,9 @@ remoteShow mRemoteName = do
                             display <- formatRemoteDisplayByType cwd name mType remote
                             putStrLn display
                             putStrLn ""
-                    -- Show status: ref-based for filesystem/device, bundle-based for cloud
-                    if isFs
+                    -- Show status: ref-based for filesystem/device/git, bundle-based for cloud
+                    let isGit = mType == Just Device.RemoteGit
+                    if isFs || isGit
                         then liftIO $ showRefBasedRemoteStatus name (remoteUrl remote)
                         else do
                             let fetchedPath = fromCwdPath (bundleCwdPath (bundleForRemote name))
@@ -233,7 +270,13 @@ formatRemoteDisplay cwd name = maybe (pure (name ++ " → (no target)")) $ \case
 -- | Format remote display line using RemoteType instead of RemoteTarget.
 formatRemoteDisplayByType :: FilePath -> String -> Maybe Device.RemoteType -> Remote -> IO String
 formatRemoteDisplayByType cwd name mType remote = case mType of
-    Just Device.RemoteFilesystem -> pure (name ++ " → " ++ remoteUrl remote ++ " (filesystem)")
+    Just Device.RemoteGit ->
+        pure (name ++ " → " ++ remoteUrl remote ++ " (git, metadata only)")
+    Just Device.RemoteFilesystem -> do
+        layout <- Device.readRemoteLayout cwd name
+        case layout of
+            Device.LayoutMetadata -> pure (name ++ " → " ++ remoteUrl remote ++ " (filesystem, metadata only)")
+            _ -> pure (name ++ " → " ++ remoteUrl remote ++ " (filesystem)")
     Just Device.RemoteDevice -> do
         -- Read the target to get device info
         mTarget <- Device.readRemoteFile cwd name
@@ -245,7 +288,10 @@ formatRemoteDisplayByType cwd name mType remote = case mType of
             _ -> pure (name ++ " → " ++ displayRemote remote ++ " (device)")
     Just Device.RemoteCloud -> do
         layout <- Device.readRemoteLayout cwd name
-        let layoutStr = case layout of Device.LayoutBare -> "bare"; _ -> "full"
+        let layoutStr = case layout of
+                Device.LayoutBare     -> "bare"
+                Device.LayoutMetadata -> "metadata only"
+                _                     -> "full"
         pure (name ++ " → " ++ remoteUrl remote ++ " (cloud, Layout: " ++ layoutStr ++ ")")
     Nothing -> pure (name ++ " → " ++ displayRemote remote)
 

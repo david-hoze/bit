@@ -160,9 +160,10 @@ bit add .
 # Commit
 bit commit -m "Add raw footage"
 
-# Set up a remote (any rclone-supported backend, or a local/USB path)
+# Set up a remote (any rclone-supported backend, local/USB path, or git host)
 bit remote add origin gdrive:Projects/footage
 # or: bit remote add backup E:\Backup
+# or: bit remote add github git@github.com:user/repo.git  # metadata only
 
 # Push files to remote
 bit push
@@ -282,13 +283,13 @@ scan → diff → plan → execute
 
 `diff` computes what changed. `plan` maps each change to a concrete rclone operation. No heuristics, no state machines — just data in, actions out.
 
-For the full design, see [docs/spec.md](docs/spec.md).
+For the full design, see [docs/spec.md](docs/spec.md). For metadata-only remotes (GitHub, GitLab, bare repos), see the [tutorial](docs/tutorial-metadata-remotes.md).
 
 ---
 
 ## Status
 
-bit-lite is under active development. The core workflow — init, add, commit, push, pull, merge, verify, fsck — works today. Cloud remotes (via rclone) and filesystem remotes (USB drives, NAS, local directories) are both supported.
+bit-lite is under active development. The core workflow — init, add, commit, push, pull, merge, verify, fsck — works today. Cloud remotes (via rclone), filesystem remotes (USB drives, NAS, local directories), and metadata-only git remotes (GitHub, GitLab, bare repos) are all supported.
 
 bit-solid (content-addressed storage, binary history, Git integration) is in the design phase.
 

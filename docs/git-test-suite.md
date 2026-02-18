@@ -92,7 +92,7 @@ Implemented:
 
 | Test Suite | Pass | Fail | Notes |
 |------------|------|------|-------|
-| t0001-init.sh | 90/91 | 1 | Test 91 needs `test-tool path-utils absolute_path` (stub limitation) |
+| t0001-init.sh | 89/91 | 2 | Test 41 (Windows file lock flake), Test 91 (`test-tool path-utils absolute_path` stub limitation) |
 | t0002-gitfile.sh | 14/14 | 0 | All gitfile tests pass |
 | t0003-attributes.sh | 54/54 | 0 | All attribute tests pass |
 | t0004-unwritable.sh | 9/9 | 0 | 8 skipped (missing POSIXPERM/SANITY) |

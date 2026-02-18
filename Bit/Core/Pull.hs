@@ -105,6 +105,20 @@ mkCloudPullSeam remote = PullSeam
     }
   where name = remoteName remote
 
+-- | Git-native pull seam for metadata-only remotes (GitHub, GitLab, bare repos).
+-- Fetches via git, no remote verification needed (no content to verify).
+mkGitPullSeam :: Remote -> PullSeam
+mkGitPullSeam remote = PullSeam
+    { psFetchMetadata = do
+        let name = remoteName remote
+        (fetchCode, _, fetchErr) <- Git.runGitWithOutput ["fetch", name]
+        when (fetchCode /= ExitSuccess) $
+            hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
+        printFetchBanner name (name ++ "/main")
+        pure (fetchCode == ExitSuccess)
+    , psVerifyRemote = \_ -> pure ()  -- No content to verify
+    }
+
 -- | Filesystem pull seam: git-fetches from local .bit/index, verifies locally.
 mkFilesystemPullSeam :: Remote -> PullSeam
 mkFilesystemPullSeam remote = PullSeam
@@ -153,14 +167,21 @@ pull :: PullOptions -> BitM ()
 pull opts = withRemote $ \remote -> do
     cwd <- asks envCwd
     isFs <- isFilesystemRemote remote
-    layout <- if isFs then pure Device.LayoutFull else liftIO (Device.readRemoteLayout cwd (remoteName remote))
-    let seam = if isFs then mkFilesystemPullSeam remote else mkCloudPullSeam remote
+    mType <- liftIO $ Device.readRemoteType cwd (remoteName remote)
+    layout <- liftIO $ Device.readRemoteLayout cwd (remoteName remote)
+    let seam = case (mType, layout) of
+            (Just Device.RemoteGit, _)       -> mkGitPullSeam remote
+            (_, Device.LayoutMetadata)        -> case mType of
+                Just Device.RemoteCloud       -> mkCloudPullSeam remote
+                _                             -> mkGitPullSeam remote
+            _ | isFs                          -> mkFilesystemPullSeam remote
+            _                                 -> mkCloudPullSeam remote
 
     fetchOk <- liftIO $ psFetchMetadata seam
     when fetchOk $ do
-        -- Skip verify for bare cloud remotes (no readable tree to verify).
+        -- Skip verify for bare/metadata-only remotes (no readable tree to verify).
         unless (pullMode opts `elem` [PullAcceptRemote, PullManualMerge]) $
-            when (isFs || layout == Device.LayoutFull) $
+            when (layout == Device.LayoutFull || (isFs && layout /= Device.LayoutMetadata)) $
                 liftIO $ psVerifyRemote seam cwd
 
         case pullMode opts of
@@ -186,9 +207,10 @@ pullAcceptRemoteImpl remote layout = do
     checkoutCode <- lift $ Git.checkoutRemoteAsMain name
     case checkoutCode of
         ExitSuccess -> do
-            -- Sync actual files based on what changed
-            maybe (lift $ syncAllFilesFromHEAD remoteRoot cwd layout mRemote)
-                  (\oh -> lift $ applyMergeToWorkingDir remoteRoot cwd oh layout mRemote) oldHead
+            -- Sync actual files based on what changed (skip for metadata-only)
+            when (layout /= Device.LayoutMetadata) $
+                maybe (lift $ syncAllFilesFromHEAD remoteRoot cwd layout mRemote)
+                      (\oh -> lift $ applyMergeToWorkingDir remoteRoot cwd oh layout mRemote) oldHead
 
             -- Update tracking ref
             maybeRemoteHash <- lift $ Git.getRemoteTrackingHash name
@@ -293,8 +315,9 @@ pullNormalImpl remote layout = do
                     checkoutCode <- lift $ Git.checkoutRemoteAsMain name
                     case checkoutCode of
                         ExitSuccess -> lift $ do
-                            syncAllFilesFromHEAD remoteRoot cwd layout mRemote
-                            tell "Syncing binaries... done."
+                            when (layout /= Device.LayoutMetadata) $ do
+                                syncAllFilesFromHEAD remoteRoot cwd layout mRemote
+                                tell "Syncing binaries... done."
                             void $ Git.updateRemoteTrackingBranchToHash name remoteHash
                         _ -> lift $ tellErr "Error: Failed to checkout remote branch."
 
@@ -317,9 +340,10 @@ pullNormalImpl remote layout = do
                             -- git commit still succeeds because MERGE_HEAD is present, and skipping
                             -- the commit would leave MERGE_HEAD dangling (breaking the next push).
                             lift $ void $ gitRaw ["commit", "-m", "Merge remote"]
-                            lift $ do
-                                applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
-                                tell "Syncing binaries... done."
+                            when (layout /= Device.LayoutMetadata) $
+                                lift $ do
+                                    applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
+                                    tell "Syncing binaries... done."
                             lift $ void $ Git.updateRemoteTrackingBranchToHash name remoteHash
                         _ -> do
                             lift $ do
@@ -345,8 +369,9 @@ pullNormalImpl remote layout = do
                             when (null conflictsNow) $ lift $ do
                                 void $ gitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
                                 tell $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
-                                applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
-                                tell "Syncing binaries... done."
+                                when (layout /= Device.LayoutMetadata) $ do
+                                    applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
+                                    tell "Syncing binaries... done."
                                 void $ Git.updateRemoteTrackingBranchToHash name remoteHash
 
 -- ============================================================================

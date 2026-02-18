@@ -310,19 +310,25 @@ runRemoteCommand remoteName args = do
                         hPutStrLn stderr "Remote workspaces are only supported for cloud remotes."
                         hPutStrLn stderr "For filesystem remotes, navigate to the directory and run bit commands there."
                         exitWith (ExitFailure 1)
+                rejectMetadataOnly = do
+                    layout <- Device.readRemoteLayout cwd remoteName
+                    when (layout == Device.LayoutMetadata) $ do
+                        hPutStrLn stderr "error: Remote workspace commands are not supported for metadata-only remotes."
+                        hPutStrLn stderr "Metadata-only remotes sync history only, not file content."
+                        exitWith (ExitFailure 1)
             case cmd of
                 ["init"] ->
-                    rejectFilesystem >> RemoteWorkspace.initRemote remote remoteName
+                    rejectFilesystem >> rejectMetadataOnly >> RemoteWorkspace.initRemote remote remoteName
                 ("add":paths) ->
-                    rejectFilesystem >> RemoteWorkspace.addRemote remote paths >>= exitWith
+                    rejectFilesystem >> rejectMetadataOnly >> RemoteWorkspace.addRemote remote paths >>= exitWith
                 ("commit":commitArgs) ->
-                    rejectFilesystem >> RemoteWorkspace.commitRemote remote commitArgs >>= exitWith
+                    rejectFilesystem >> rejectMetadataOnly >> RemoteWorkspace.commitRemote remote commitArgs >>= exitWith
                 ("status":rest) ->
-                    rejectFilesystem >> RemoteWorkspace.statusRemote remote rest >>= exitWith
+                    rejectFilesystem >> rejectMetadataOnly >> RemoteWorkspace.statusRemote remote rest >>= exitWith
                 ("log":rest) ->
-                    rejectFilesystem >> RemoteWorkspace.logRemote remote rest >>= exitWith
+                    rejectFilesystem >> rejectMetadataOnly >> RemoteWorkspace.logRemote remote rest >>= exitWith
                 ("ls-files":rest) ->
-                    rejectFilesystem >> RemoteWorkspace.lsFilesRemote remote rest >>= exitWith
+                    rejectFilesystem >> rejectMetadataOnly >> RemoteWorkspace.lsFilesRemote remote rest >>= exitWith
                 ["verify"] ->
                     runVerifyCmd Bit.PromptRepair
                 ["repair"] ->
@@ -637,9 +643,16 @@ runCommand args = do
     case cmd of
         -- ── No env needed ────────────────────────────────────
         -- (init is dispatched earlier, before repo discovery)
-        ("remote":"add":rest)           -> case filter (/= "--bare") rest of
-            [name, url] -> Bit.remoteAdd name url ("--bare" `elem` rest)
-            _ -> do hPutStrLn stderr "usage: bit remote add <name> <url> [--bare]"; exitWith (ExitFailure 1)
+        ("remote":"add":rest)           -> do
+            let filtered = filter (`notElem` ["--bare", "--metadata-only"]) rest
+                bare = "--bare" `elem` rest
+                metaOnly = "--metadata-only" `elem` rest
+            when (bare && metaOnly) $ do
+                hPutStrLn stderr "error: --bare and --metadata-only are mutually exclusive."
+                exitWith (ExitFailure 1)
+            case filtered of
+                [name, url] -> Bit.remoteAdd name url bare metaOnly
+                _ -> do hPutStrLn stderr "usage: bit remote add <name> <url> [--bare|--metadata-only]"; exitWith (ExitFailure 1)
         ["fsck"]                        -> Bit.fsck cwd
         ["merge", "--abort"]            -> Bit.mergeAbort
         ["branch", "--unset-upstream"]  -> Bit.unsetUpstream

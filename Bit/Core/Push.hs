@@ -77,6 +77,24 @@ mkFilesystemSeam cwd remote = PushSeam
     , ptPushMetadata = filesystemPushMetadata cwd remote
     }
 
+-- | Build a git-native push seam for metadata-only remotes (GitHub, GitLab, bare repos).
+-- Uses git fetch/push directly against the remote URL.
+mkGitSeam :: Remote -> PushSeam
+mkGitSeam remote = PushSeam
+    { ptFetchHistory = do
+        let name = remoteName remote
+        (fetchCode, _, _) <- Git.runGitWithOutput ["fetch", name]
+        if fetchCode == ExitSuccess
+            then Git.getRemoteTrackingHash name
+            else pure Nothing
+    , ptPushMetadata = do
+        let name = remoteName remote
+        (code, _, err) <- Git.runGitWithOutput ["push", name, "main"]
+        when (code /= ExitSuccess) $ do
+            hPutStrLn stderr $ "error: git push failed: " ++ err
+            exitWith code
+    }
+
 -- ============================================================================
 -- Cloud seam implementations
 -- ============================================================================
@@ -155,10 +173,13 @@ push :: BitM ()
 push = withRemote $ \remote -> do
     cwd <- asks envCwd
 
-    -- 1. Proof of possession — full remotes only; bare remotes skip (CAS is self-verifying)
+    -- Read layout for all remote types
+    mType <- liftIO $ Device.readRemoteType cwd (remoteName remote)
     isFs <- isFilesystemRemote remote
-    layout <- if isFs then pure Device.LayoutFull else liftIO $ Device.readRemoteLayout cwd (remoteName remote)
-    when (isFs || layout == Device.LayoutFull) $ do
+    layout <- liftIO $ Device.readRemoteLayout cwd (remoteName remote)
+
+    -- 1. Proof of possession — skip for bare and metadata-only remotes
+    when (layout == Device.LayoutFull || (isFs && layout /= Device.LayoutMetadata)) $ do
         liftIO $ putStrLn "Verifying local files..."
         result <- liftIO $ Verify.verifyLocal cwd Nothing (Parallel 0)
         if null result.vrIssues
@@ -171,41 +192,52 @@ push = withRemote $ \remote -> do
                 exitWith (ExitFailure 1)
 
     -- 2. Detect transport mode and build seam
-    let seam = if isFs
-            then mkFilesystemSeam cwd remote
-            else mkCloudSeam remote
+    let seam = case (mType, layout) of
+            (Just Device.RemoteGit, _)       -> mkGitSeam remote
+            (_, Device.LayoutMetadata)        -> case mType of
+                Just Device.RemoteCloud       -> mkCloudSeam remote
+                _                             -> mkGitSeam remote
+            _ | isFs                          -> mkFilesystemSeam cwd remote
+            _                                 -> mkCloudSeam remote
 
-    -- 3. Classify remote state (works for both via rclone)
-    liftIO $ putStrLn $ "Inspecting remote: " ++ displayRemote remote
-    state <- liftIO $ classifyRemoteState remote
-
-    -- 4. Handle states
-    case state of
-        StateEmpty -> do
-            liftIO $ putStrLn "Remote is empty. Initializing..."
-            -- Filesystem: create and initialize remote repo structure
-            when isFs $ liftIO $ do
-                let remotePath = remoteUrl remote
-                Platform.createDirectoryIfMissing True remotePath
-                void $ initializeRemoteRepoAt (RemotePath remotePath)
-            executePush seam remote Nothing layout
-
-        StateValidBit -> do
-            liftIO $ putStrLn "Remote is a bit repo. Checking history..."
-            -- Capture pre-fetch tracking hash BEFORE ptFetchHistory.
-            -- ptFetchHistory updates the tracking ref as a side effect of git fetch.
-            -- ForceWithLease needs the pre-fetch hash to detect concurrent pushes.
+    -- 3. For git/metadata-only remotes, skip classifyRemoteState (uses rclone listing).
+    -- Instead, try fetch directly and dispatch based on result.
+    if layout == Device.LayoutMetadata
+        then do
+            liftIO $ putStrLn $ "Pushing metadata to: " ++ displayRemote remote
             preHash <- liftIO $ Git.getRemoteTrackingHash (remoteName remote)
             mRemoteHash <- liftIO $ ptFetchHistory seam
             case mRemoteHash of
                 Just _ -> processExistingRemote remote seam preHash mRemoteHash layout
-                -- No remote commits yet (initialized but empty) — treat as first push
                 Nothing -> executePush seam remote Nothing layout
+        else do
+            -- Classify remote state (works for both cloud and filesystem via rclone)
+            liftIO $ putStrLn $ "Inspecting remote: " ++ displayRemote remote
+            state <- liftIO $ classifyRemoteState remote
 
-        StateNonBitOccupied samples -> handleNonBit seam remote samples layout
+            -- 4. Handle states
+            case state of
+                StateEmpty -> do
+                    liftIO $ putStrLn "Remote is empty. Initializing..."
+                    -- Filesystem: create and initialize remote repo structure
+                    when isFs $ liftIO $ do
+                        let remotePath = remoteUrl remote
+                        Platform.createDirectoryIfMissing True remotePath
+                        void $ initializeRemoteRepoAt (RemotePath remotePath)
+                    executePush seam remote Nothing layout
 
-        StateNetworkError err ->
-            liftIO $ hPutStrLn stderr $ "Aborting: Network error -> " ++ err
+                StateValidBit -> do
+                    liftIO $ putStrLn "Remote is a bit repo. Checking history..."
+                    preHash <- liftIO $ Git.getRemoteTrackingHash (remoteName remote)
+                    mRemoteHash <- liftIO $ ptFetchHistory seam
+                    case mRemoteHash of
+                        Just _ -> processExistingRemote remote seam preHash mRemoteHash layout
+                        Nothing -> executePush seam remote Nothing layout
+
+                StateNonBitOccupied samples -> handleNonBit seam remote samples layout
+
+                StateNetworkError err ->
+                    liftIO $ hPutStrLn stderr $ "Aborting: Network error -> " ++ err
 
 -- ============================================================================
 -- Push state handlers
@@ -281,7 +313,8 @@ handleNonBit seam remote samples layout = do
 -- mRemoteHash: the remote's HEAD hash (Nothing for first push / empty remote).
 executePush :: PushSeam -> Remote -> Maybe String -> Device.RemoteLayout -> BitM ()
 executePush seam remote mRemoteHash layout = do
-    syncRemoteFiles mRemoteHash layout
+    unless (layout == Device.LayoutMetadata) $
+        syncRemoteFiles mRemoteHash layout
     -- Skip metadata push when remote is already at our HEAD (avoids slow
     -- no-op git pull over network paths like \\tsclient\...)
     localHead <- liftIO getLocalHeadE

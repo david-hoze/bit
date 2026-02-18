@@ -44,6 +44,7 @@ module Bit.Device.Identity
   ) where
 
 import Data.Char (isSpace)
+import qualified Data.List as List
 import Data.List (dropWhileEnd, isPrefixOf, intercalate)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Control.Monad (when, filterM, join)
@@ -100,6 +101,7 @@ data DeviceInfo = DeviceInfo
 data RemotePathType
   = CloudRemote String       -- Pass to rclone as-is (e.g. "gdrive:Projects/foo")
   | FilesystemPath FilePath  -- Enter device flow
+  | GitRemote String         -- Native git URL (e.g. "git@github.com:user/repo.git")
   deriving (Show, Eq)
 
 -- | Parsed remote target from .rgit/remotes/<name>
@@ -121,30 +123,44 @@ data ResolveResult
   deriving (Show, Eq)
 
 -- | Classification of a remote by transport type.
-data RemoteType = RemoteFilesystem | RemoteDevice | RemoteCloud
+data RemoteType = RemoteFilesystem | RemoteDevice | RemoteCloud | RemoteGit
   deriving (Show, Eq)
 
 -- | True for types that resolve to a local filesystem path.
 isFilesystemType :: RemoteType -> Bool
 isFilesystemType RemoteCloud = False
+isFilesystemType RemoteGit   = False
 isFilesystemType _           = True
 
 -- ---------------------------------------------------------------------------
 -- Classification: cloud vs filesystem
 -- ---------------------------------------------------------------------------
 
--- | Check if path is a cloud rclone remote or a filesystem path.
+-- | Check if path is a git-native URL, cloud rclone remote, or filesystem path.
+-- Git-native URLs: git@host:path, ssh://git@host/path, https://github.com/..., *.git with :// or @
 -- Cloud: "remotename:path" where remotename is in rclone listremotes.
 classifyRemotePath :: String -> IO RemotePathType
-classifyRemotePath path = do
-  rcloneRemotes <- getRcloneRemotes
-  case break (== ':') path of
-    (prefix, _:_rest) | not (null prefix) -> do
-      let prefixNorm = dropWhile (== ':') prefix
-      if prefixNorm `elem` rcloneRemotes
-        then pure (CloudRemote path)
-        else pure (FilesystemPath path)
-    _ -> pure (FilesystemPath path)
+classifyRemotePath path
+  -- git@host:path (SSH shorthand)
+  | "git@" `isPrefixOf` path, any (== ':') (drop 4 path) = pure (GitRemote path)
+  -- ssh://git@host/path
+  | "ssh://git@" `isPrefixOf` path = pure (GitRemote path)
+  -- https:// URLs to known git hosts
+  | "https://github.com/" `isPrefixOf` path = pure (GitRemote path)
+  | "https://gitlab.com/" `isPrefixOf` path = pure (GitRemote path)
+  | "https://bitbucket.org/" `isPrefixOf` path = pure (GitRemote path)
+  -- Any URL ending in .git with :// or @
+  | ".git" `List.isSuffixOf` path, "://" `List.isInfixOf` path = pure (GitRemote path)
+  | ".git" `List.isSuffixOf` path, any (== '@') path = pure (GitRemote path)
+  | otherwise = do
+      rcloneRemotes <- getRcloneRemotes
+      case break (== ':') path of
+        (prefix, _:_rest) | not (null prefix) -> do
+          let prefixNorm = dropWhile (== ':') prefix
+          if prefixNorm `elem` rcloneRemotes
+            then pure (CloudRemote path)
+            else pure (FilesystemPath path)
+        _ -> pure (FilesystemPath path)
 
 -- | Get list of configured rclone remote names (without trailing colon)
 getRcloneRemotes :: IO [String]
@@ -480,8 +496,8 @@ readRemoteFile repoRoot remoteName = do
         pure $ Just $ maybe (TargetCloud (device ++ ":" ++ relPath))
           (const $ TargetDevice device relPath) mDev
 
--- | Cloud remote storage layout: full (readable paths + CAS) or bare (CAS only).
-data RemoteLayout = LayoutFull | LayoutBare
+-- | Remote storage layout: full (readable paths + CAS), bare (CAS only), or metadata (git history only).
+data RemoteLayout = LayoutFull | LayoutBare | LayoutMetadata
   deriving (Show, Eq)
 
 -- | Read the remote type from .bit/remotes/<name>.
@@ -501,6 +517,7 @@ readRemoteType repoRoot name = do
       Just "filesystem" -> pure (Just RemoteFilesystem)
       Just "device"     -> pure (Just RemoteDevice)
       Just "cloud"      -> pure (Just RemoteCloud)
+      Just "git"        -> pure (Just RemoteGit)
       _ -> -- Old format: infer from target line
         case getVal "target: " of
           Just t | "local:" `isPrefixOf` t -> pure (Just RemoteFilesystem)
@@ -511,13 +528,15 @@ readRemoteType repoRoot name = do
             _ -> pure (Just RemoteCloud)
           Nothing -> pure Nothing
 
--- | Read cloud remote layout from .bit/remotes/<name>. Only meaningful for RemoteCloud.
--- Defaults to LayoutFull when missing or not cloud.
+-- | Read remote layout from .bit/remotes/<name>.
+-- RemoteGit always returns LayoutMetadata. Other types read from config file.
+-- Defaults to LayoutFull when missing.
 readRemoteLayout :: FilePath -> String -> IO RemoteLayout
 readRemoteLayout repoRoot name = do
   mType <- readRemoteType repoRoot name
   case mType of
-    Just RemoteCloud -> do
+    Just RemoteGit -> pure LayoutMetadata
+    _ -> do
       bitRoot <- resolveBitRoot repoRoot
       let path = bitRoot </> "remotes" </> name
       exists <- Dir.doesFileExist path
@@ -528,23 +547,30 @@ readRemoteLayout repoRoot name = do
             ls = lines content
             getVal prefix = listToMaybe [ trim (drop (length prefix) l) | l <- ls, prefix `isPrefixOf` l ]
         case getVal "layout: " of
-          Just "bare" -> pure LayoutBare
-          _          -> pure LayoutFull
-    _ -> pure LayoutFull
+          Just "bare"     -> pure LayoutBare
+          Just "metadata" -> pure LayoutMetadata
+          _               -> pure LayoutFull
 
 writeRemoteFile :: FilePath -> String -> RemoteType -> Maybe String -> Maybe RemoteLayout -> IO ()
 writeRemoteFile repoRoot name remoteType mTarget mLayout = do
   bitRoot <- resolveBitRoot repoRoot
   Dir.createDirectoryIfMissing True (bitRoot </> "remotes")
   let path = bitRoot </> "remotes" </> name
+  let layoutStr l = case l of
+        Just LayoutBare     -> "\nlayout: bare"
+        Just LayoutMetadata -> "\nlayout: metadata"
+        _                   -> "\nlayout: full"
   let content = case remoteType of
-        RemoteFilesystem -> "type: filesystem"
-        RemoteCloud      ->
-          let layoutLine = case mLayout of
-                Just LayoutBare -> "\nlayout: bare"
-                _               -> "\nlayout: full"
-          in "type: cloud\ntarget: " ++ fromMaybe "" mTarget ++ layoutLine
-        RemoteDevice     -> "type: device\ntarget: " ++ fromMaybe "" mTarget
+        RemoteFilesystem ->
+          let base = "type: filesystem"
+          in case mLayout of
+            Just LayoutMetadata -> base ++ "\ntarget: " ++ fromMaybe "" mTarget ++ layoutStr mLayout
+            _ -> base
+        RemoteCloud ->
+          "type: cloud\ntarget: " ++ fromMaybe "" mTarget ++ layoutStr mLayout
+        RemoteDevice -> "type: device\ntarget: " ++ fromMaybe "" mTarget
+        RemoteGit ->
+          "type: git\ntarget: " ++ fromMaybe "" mTarget ++ "\nlayout: metadata"
   -- Use atomic write for crash safety and Windows compatibility
   atomicWriteFile path (encodeUtf8 (T.pack content))
 

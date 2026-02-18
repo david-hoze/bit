@@ -1,0 +1,276 @@
+# =============================================================================
+# Metadata-only remote tests
+#
+# Tests:
+# - bit remote add auto-detects git URLs (git@, https://github.com, etc.)
+# - bit remote add --metadata-only for cloud remotes
+# - bit remote add to a bare git repo auto-detects metadata-only
+# - --bare and --metadata-only are mutually exclusive
+# - remote show displays "metadata only" / "metadata" layout
+# - remote file content has correct type/layout
+# - Push/pull via bare git repo (metadata only, no file sync)
+# - Remote workspace commands rejected for metadata-only
+# =============================================================================
+
+# ---- CLEANUP: remove leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_metaremote 2>nul & rmdir /s /q test\cli\output\metaremote_bare 2>nul & rmdir /s /q test\cli\output\work_metaremote_b 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+mkdir test\cli\output\work_metaremote
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_metaremote & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: Git URL auto-detection (remote add)
+# ======================================================================
+
+# ---- SSH shorthand (git@host:path) => GitRemote ----
+cd test\cli\output\work_metaremote & bit remote add gh git@github.com:user/repo.git
+<<<
+>>> /Remote 'gh' added.*metadata only/
+>>>= 0
+
+cd test\cli\output\work_metaremote & type .bit\remotes\gh
+<<<
+>>> /type: git/
+>>>= 0
+
+cd test\cli\output\work_metaremote & type .bit\remotes\gh
+<<<
+>>> /layout: metadata/
+>>>= 0
+
+# ---- HTTPS GitHub URL => GitRemote ----
+cd test\cli\output\work_metaremote & bit remote add ghhttp https://github.com/user/repo.git
+<<<
+>>> /Remote 'ghhttp' added.*metadata only/
+>>>= 0
+
+cd test\cli\output\work_metaremote & type .bit\remotes\ghhttp
+<<<
+>>> /type: git/
+>>>= 0
+
+# ---- HTTPS GitLab URL => GitRemote ----
+cd test\cli\output\work_metaremote & bit remote add gl https://gitlab.com/user/repo
+<<<
+>>> /Remote 'gl' added.*metadata only/
+>>>= 0
+
+cd test\cli\output\work_metaremote & type .bit\remotes\gl
+<<<
+>>> /type: git/
+>>>= 0
+
+# ---- HTTPS Bitbucket URL => GitRemote ----
+cd test\cli\output\work_metaremote & bit remote add bb https://bitbucket.org/user/repo
+<<<
+>>> /Remote 'bb' added.*metadata only/
+>>>= 0
+
+# ---- SSH full URL => GitRemote ----
+cd test\cli\output\work_metaremote & bit remote add sshgit ssh://git@example.com/repo.git
+<<<
+>>> /Remote 'sshgit' added.*metadata only/
+>>>= 0
+
+cd test\cli\output\work_metaremote & type .bit\remotes\sshgit
+<<<
+>>> /type: git/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: --bare and --metadata-only mutual exclusivity
+# ======================================================================
+
+cd test\cli\output\work_metaremote & bit remote add bad gdrive:test --bare --metadata-only 2>&1
+<<<
+>>> /error.*--bare.*--metadata-only.*mutually exclusive/
+>>>= 1
+
+# ---- --bare not valid for git remotes ----
+cd test\cli\output\work_metaremote & bit remote add baregit git@github.com:user/repo.git --bare 2>&1
+<<<
+>>> /error.*--bare.*not valid for git/
+>>>= 1
+
+# ======================================================================
+# SECTION 3: --metadata-only for cloud remotes
+# ======================================================================
+
+cd test\cli\output\work_metaremote & bit remote add cloudmeta gdrive:Projects/meta --metadata-only
+<<<
+>>> /Remote 'cloudmeta' added.*metadata only/
+>>>= 0
+
+cd test\cli\output\work_metaremote & type .bit\remotes\cloudmeta
+<<<
+>>> /type: cloud/
+>>>= 0
+
+cd test\cli\output\work_metaremote & type .bit\remotes\cloudmeta
+<<<
+>>> /layout: metadata/
+>>>= 0
+
+# ======================================================================
+# SECTION 4: remote show display formats
+# ======================================================================
+
+# ---- remote show (list all) — git remote ----
+cd test\cli\output\work_metaremote & bit remote show
+<<<
+>>> /gh.*git.*metadata only/
+>>>= 0
+
+# ---- remote show (list all) — cloud metadata-only remote ----
+cd test\cli\output\work_metaremote & bit remote show
+<<<
+>>> /cloudmeta.*cloud.*Layout: metadata only/
+>>>= 0
+
+# ---- remote show <name> for git remote — spec format ----
+cd test\cli\output\work_metaremote & bit remote show gh
+<<<
+>>> /Type: git/
+>>>= 0
+
+cd test\cli\output\work_metaremote & bit remote show gh
+<<<
+>>> /Layout: metadata/
+>>>= 0
+
+# ======================================================================
+# SECTION 5: Bare git repo auto-detection (filesystem metadata-only)
+# ======================================================================
+
+# Create a bare git repo (no .bit)
+mkdir test\cli\output\metaremote_bare
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\metaremote_bare & git init --bare
+<<<
+>>> /Initialized/
+>>>= 0
+
+# Remove all previous remotes, re-init for clean test
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_metaremote 2>nul & mkdir test\cli\output\work_metaremote
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_metaremote & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Adding bare git repo as remote should auto-detect metadata-only
+cd test\cli\output\work_metaremote & bit remote add origin ..\metaremote_bare
+<<<
+>>> /Remote 'origin' added.*metadata only/
+>>>= 0
+
+cd test\cli\output\work_metaremote & type .bit\remotes\origin
+<<<
+>>> /layout: metadata/
+>>>= 0
+
+# ---- remote show for filesystem metadata-only ----
+cd test\cli\output\work_metaremote & bit remote show
+<<<
+>>> /origin.*metadata only/
+>>>= 0
+
+# ======================================================================
+# SECTION 6: Push/pull via bare git repo (metadata only)
+# ======================================================================
+
+# Create a file and commit
+cd test\cli\output\work_metaremote & echo hello> file.txt & bit add file.txt & bit commit -m "Initial commit"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# Push to bare git remote (metadata only — no file sync, just git push)
+cd test\cli\output\work_metaremote & bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Verify the bare repo received the commit (check main branch explicitly)
+cd test\cli\output\metaremote_bare & git log --oneline main
+<<<
+>>> /Initial commit/
+>>>= 0
+
+# Verify NO file content was copied to the bare repo (it's metadata only)
+# Bare git repos don't have a working tree, so file.txt should NOT exist
+if exist "test\cli\output\metaremote_bare\file.txt" (echo file copied - BAD) else (echo no file - GOOD)
+<<<
+>>>
+no file - GOOD
+>>>= 0
+
+# ---- Clone (pull) from bare git remote into a second repo ----
+mkdir test\cli\output\work_metaremote_b
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_metaremote_b & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_metaremote_b & bit remote add origin ..\metaremote_bare
+<<<
+>>> /Remote 'origin' added.*metadata only/
+>>>= 0
+
+cd test\cli\output\work_metaremote_b & bit pull origin
+<<<
+>>> /Checking out|Pull|first pull/
+>>>= 0
+
+# Verify git log shows the commit
+cd test\cli\output\work_metaremote_b & bit log --oneline
+<<<
+>>> /Initial commit/
+>>>= 0
+
+# Verify file.txt was NOT synced (metadata only — no binary download)
+if exist "test\cli\output\work_metaremote_b\file.txt" (echo file synced - BAD) else (echo no file - GOOD)
+<<<
+>>>
+no file - GOOD
+>>>= 0
+
+# ======================================================================
+# SECTION 7: usage error message includes --metadata-only
+# ======================================================================
+
+cd test\cli\output\work_metaremote & bit remote add 2>&1
+<<<
+>>> /usage.*--bare.*--metadata-only/
+>>>= 1
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_metaremote 2>nul & rmdir /s /q test\cli\output\metaremote_bare 2>nul & rmdir /s /q test\cli\output\work_metaremote_b 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
