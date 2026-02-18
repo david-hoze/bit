@@ -1579,6 +1579,56 @@ bit submodule update --init
 
 ---
 
+## Git Executable Router
+
+### Overview
+
+The git router allows bit to transparently replace `git` on the system. When activated via `bit become-git`, a compiled Haskell executable (`bit-git-router`) is installed as `git` on the user's PATH. It dispatches commands to either real git (for `.git/` repos) or bit (for `.bit/` repos).
+
+### Router Dispatch Logic (`BitGitRouter.hs`)
+
+The router is a standalone executable with no bit module imports (fast startup, minimal dependencies). Its dispatch logic:
+
+1. **`git init`** → always exec real git (preserves standard `git init` behavior). The router peels leading flags (`-c`, `-C`, `--bare`) to find the `init` subcommand.
+2. **Walk up from CWD** looking for `.bit/` directory or `.bit` file (bitlink). If found → exec `bit` with all args; otherwise → exec real git.
+
+Before calling bit, the router sets `BIT_REAL_GIT` to the real git path. This prevents recursion: `spawnGit` in `Bit/Git/Run.hs` checks this variable and uses the real git instead of the router.
+
+### Finding Real Git
+
+Priority order:
+1. `BIT_REAL_GIT` environment variable
+2. Config file `~/.bit-router/real-git` (written by `bit become-git`)
+3. Search PATH excluding the router's own directory
+
+### `bit become-git`
+
+Installs the router:
+1. Finds real git (`where git` / `which -a git`, filtering out `~/.bit-router/`)
+2. Creates `~/.bit-router/` directory
+3. Saves real git path to `~/.bit-router/real-git`
+4. Copies `bit-git-router` executable as `git` (or `git.exe`) into `~/.bit-router/`
+5. Adds `~/.bit-router/` to front of user's PATH:
+   - **Windows**: modifies `HKCU\Environment\Path` registry key, broadcasts `WM_SETTINGCHANGE`
+   - **Unix**: appends `export PATH=...` to `~/.bashrc` and `~/.profile`
+6. Prints instructions to restart shell
+
+### `bit become-bit`
+
+Uninstalls the router:
+1. Removes `~/.bit-router/` from PATH (reverses what `become-git` did)
+2. Removes `~/.bit-router/` directory
+3. Prints confirmation
+
+### `git init` Asymmetry
+
+`git init` always creates a standard git repo, never a bit repo. This is intentional:
+- Users who want bit repos use `bit init`
+- `git init` compatibility ensures existing scripts and tools work unchanged
+- The router detects `init` by peeling global flags, not just checking `args[0]`
+
+---
+
 ## Alias Expansion and Passthrough
 
 ### Alias Expansion

@@ -518,6 +518,8 @@ runCommand args = do
     let (dashCFlags, otherPeeled) = partitionDashC peeledFlags
     case coreCmd of
         ("init":rest) -> runInit dashCFlags (otherPeeled ++ rest)
+        ["become-git"] -> Bit.becomeGit >> exitSuccess
+        ["become-bit"] -> Bit.becomeBit >> exitSuccess
         _ -> pure ()
 
     origCwd <- Dir.getCurrentDirectory

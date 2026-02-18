@@ -222,6 +222,30 @@ bit remote add nas //server/share/project
 # bit normalizes and displays: \\server\share\project
 ```
 
+### Replacing git
+
+Want to use `git` commands everywhere and have them automatically route to bit in bit repos?
+
+```bash
+bit become-git
+# Restart your shell
+
+# Now 'git' routes to bit in .bit/ repos:
+cd my-bit-repo
+git status        # handled by bit
+git add .         # handled by bit
+git commit -m "x" # handled by bit
+
+# In regular git repos, git works normally:
+cd my-git-repo
+git status        # handled by real git
+
+# git init always creates a standard git repo:
+git init new-repo # real git, not bit
+```
+
+To uninstall and restore system git: `bit become-bit`
+
 ---
 
 ## How it compares to Git

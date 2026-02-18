@@ -49,7 +49,8 @@ executable bit
                       Bit.Rclone.Run,
                       Bit.CAS,
                       Bit.Core.Config,
-                      Bit.Core.Submodule
+                      Bit.Core.Submodule,
+                      Bit.Core.BecomeGit
     build-depends:    base16-bytestring ^>=1.0.2.0,
                       base,
                       async,
@@ -70,6 +71,12 @@ executable bit
                       mtl
     if os(windows)
         build-depends: Win32 >= 2.6
+    default-language: Haskell2010
+
+executable bit-git-router
+    main-is:          BitGitRouter.hs
+    ghc-options:      -Wall
+    build-depends:    base, directory, filepath, process
     default-language: Haskell2010
 
 executable generate-literate

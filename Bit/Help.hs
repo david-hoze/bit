@@ -75,6 +75,10 @@ printMainHelp = putStr $ unlines
     , "  @<remote> <cmd>                   Shorthand (needs quoting in PowerShell)"
     , "  Supported: init, add, commit, status, log, ls-files, verify, repair"
     , ""
+    , "Git compatibility:"
+    , "  become-git                        Install git router (route git to bit in .bit repos)"
+    , "  become-bit                        Uninstall git router (restore system git)"
+    , ""
     , "See 'bit help <command>' for more information on a specific command."
     ]
 
@@ -418,5 +422,31 @@ commandRegistry =
                         , "copy it into the CAS. Optional after switching to solid mode." ]
         , cmdOptions  = []
         , cmdExamples = [HelpItem "bit cas backfill" "Backfill CAS from current files"]
+        }
+    , CommandHelp
+        { cmdName     = "become-git"
+        , cmdSynopsis = "Install git router"
+        , cmdUsage    = "bit become-git"
+        , cmdDesc     = [ "Install a git router that transparently routes 'git' commands"
+                        , "to bit when inside a .bit/ repo, and to real git otherwise."
+                        , ""
+                        , "This copies the bit-git-router executable as 'git' into"
+                        , "~/.bit-router/ and adds that directory to the front of PATH."
+                        , ""
+                        , "After installation, you can use 'git add', 'git commit', etc."
+                        , "in bit repos and they'll be handled by bit automatically."
+                        , "'git init' always creates a standard git repo." ]
+        , cmdOptions  = []
+        , cmdExamples = [ HelpItem "bit become-git" "Install the git router"
+                        , HelpItem "git status" "Routes to bit in .bit repos, git in .git repos" ]
+        }
+    , CommandHelp
+        { cmdName     = "become-bit"
+        , cmdSynopsis = "Uninstall git router"
+        , cmdUsage    = "bit become-bit"
+        , cmdDesc     = [ "Uninstall the git router and restore the system git."
+                        , "Removes ~/.bit-router/ directory and cleans up PATH." ]
+        , cmdOptions  = []
+        , cmdExamples = [ HelpItem "bit become-bit" "Restore system git" ]
         }
     ]
