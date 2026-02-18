@@ -13,6 +13,7 @@ module Bit.Core.Config
   , configSetWithRoot
   , configListWithRoot
   , knownConfigKeys
+  , getConfigKey
   ) where
 
 import qualified Data.ByteString as BS
@@ -179,7 +180,7 @@ configGetWithRoot bitRoot key = do
 -- | Known config keys (spec: unknown keys are rejected to prevent typos).
 -- When adding a key here, use the generic write branch below (do not add a special when (key == "x") path).
 knownConfigKeys :: [String]
-knownConfigKeys = ["core.mode"]
+knownConfigKeys = ["core.mode", "cdc.enabled", "cdc.min-size", "cdc.avg-size", "cdc.max-size"]
 
 -- | Set config value using explicit .bit path (avoids CWD ambiguity).
 configSetWithRoot :: FilePath -> String -> String -> IO ()
@@ -189,6 +190,13 @@ configSetWithRoot bitRoot key value = do
   when (key == "core.mode") $
     unless (value `elem` ["lite", "solid"]) $
       fail "core.mode must be 'lite' or 'solid'"
+  when (key == "cdc.enabled") $
+    unless (value `elem` ["true", "false"]) $
+      fail "cdc.enabled must be 'true' or 'false'"
+  when (key `elem` ["cdc.min-size", "cdc.avg-size", "cdc.max-size"]) $
+    case reads value :: [(Int, String)] of
+      [(n, "")] | n > 0 -> pure ()
+      _ -> fail (key ++ " must be a positive integer")
   case break (== '.') key of
     (section, '.':k) | not (null section) && not (null k) -> do
       when (key == "core.mode") $ do
@@ -222,7 +230,7 @@ setOrReplaceSection raw section newKvs =
               after = drop (length content) rest
           in (content, after)
       existingKvs = mapMaybe (\l -> parseKeyValueLine (T.pack l)) (filter (not . null . stripLine) contentLines)
-      mergedKvs = foldr (\(k, val) acc -> (k, val) : filter ((/= k) . fst) acc) newKvs existingKvs
+      mergedKvs = foldr (\(k, val) acc -> (k, val) : filter ((/= k) . fst) acc) existingKvs newKvs
       sectionLines = ("[" ++ section ++ "]") : [ "    " ++ k ++ " = " ++ v | (k, v) <- mergedKvs ]
       rebuilt = before ++ sectionLines ++ afterSection
   in unlines rebuilt

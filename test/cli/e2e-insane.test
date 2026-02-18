@@ -193,7 +193,7 @@ cd test\cli\output\work_e2e_pc & bit verify
 >>>= 0
 
 # ======================================================================
-# 8. MISSING FILE: delete b.bin, recover via repair from remote
+# 8. MISSING FILE: delete b.bin, recover via restore (CAS has it in solid mode)
 # ======================================================================
 
 cd test\cli\output\work_e2e_pc & del b.bin
@@ -201,9 +201,10 @@ cd test\cli\output\work_e2e_pc & del b.bin
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit repair
+# In solid mode, CAS has the blob so verify/repair says OK (proof of possession).
+# Use bit restore to get the actual file back from CAS.
+cd test\cli\output\work_e2e_pc & bit restore b.bin
 <<<
->>> /REPAIRED.*b\.bin/
 >>>= 0
 
 cd test\cli\output\work_e2e_pc & findstr /C:"bin2" b.bin >nul

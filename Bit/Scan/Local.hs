@@ -43,6 +43,9 @@ import Bit.Utils (atomicWriteFileStr, toPosix, formatBytes)
 import Bit.Config.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
 import Bit.Core.Config (getCoreModeWithRoot, BitMode(..))
 import Bit.CAS (writeBlobToCas)
+import Bit.CDC.Config (getCdcConfig)
+import Bit.CDC.Types (ChunkConfig(..))
+import Bit.CDC.Store (writeChunkedBlobToCas)
 import qualified Data.Set as Set
 import qualified Crypto.Hash.MD5 as MD5
 import Data.ByteString.Base16 (encode)
@@ -629,6 +632,7 @@ writeMetadataFiles root entries = do
 
         -- Third pass: write files in parallel (bounded concurrency)
         mode <- getCoreModeWithRoot bitRoot
+        mCdcConfig <- getCdcConfig bitRoot
         caps <- getNumCapabilities
         let concurrency = max 4 (caps * 4)
 
@@ -659,7 +663,10 @@ writeMetadataFiles root entries = do
                             -- In solid mode, store blob in CAS (use absolute path so it resolves correctly)
                             when (mode == ModeSolid) $ do
                               let actualPath = root </> unPath (path entry)
-                              writeBlobToCas actualPath casDirAbs fHash
+                              case mCdcConfig of
+                                Just cfg | fSize >= fromIntegral (ccMinSize cfg) ->
+                                  writeChunkedBlobToCas actualPath casDirAbs cfg fHash
+                                _ -> writeBlobToCas actualPath casDirAbs fHash
                         atomicModifyIORef' counter (\n -> (n + 1, ()))
                       else do
                         atomicModifyIORef' skipped (\n -> (n + 1, ()))

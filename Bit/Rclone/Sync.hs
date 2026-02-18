@@ -28,6 +28,9 @@ import qualified Bit.Rclone.Run as Transport
 import Bit.Config.Paths (bundleForRemote)
 import Bit.Config.Metadata (parseMetadataFile, MetaContent(..))
 import Bit.CAS (casBlobPath)
+import Bit.CDC.Manifest (casManifestPath, writeManifestToCas, parseManifest)
+import Bit.CDC.Types (ChunkRef(..), ChunkManifest(..))
+import Bit.CDC.Reassemble (reassembleFile)
 import Data.List (isPrefixOf)
 import Bit.Utils (toPosix)
 import Bit.Domain.Plan (RcloneAction(..), resolveSwaps)
@@ -47,6 +50,7 @@ import Bit.Core.Helpers
     , isFilesystemRemote
     )
 import qualified Bit.IO.Platform as Platform
+import System.Exit (ExitCode(..))
 
 -- ============================================================================
 -- Internal types
@@ -125,14 +129,44 @@ classifyAndSync remoteRoot cwd layout mRemote filePaths = do
                 putStrLn $ "Downloading " ++ show (length binaryPaths) ++ " file(s) from CAS..."
                 -- TODO: Batch CAS downloads (single rclone copy with multiple src/dst) instead of one per file.
                 indexDir <- Git.getIndexPath
+                let casDir = takeDirectory indexDir </> "cas"
                 forM_ binaryPaths $ \filePath -> do
                     mMeta <- parseMetadataFile (indexDir </> filePath)
                     case mMeta of
                         Just mc -> do
                             let localPath = cwd </> filePath
-                                casRelPath = casBlobPath "cas" (metaHash mc)
-                            createDirectoryIfMissing True (takeDirectory localPath)
-                            void $ Transport.copyFromRemote remote (toPosix casRelPath) localPath
+                                remoteManifestPath = toPosix (casManifestPath "cas" (metaHash mc))
+                                localManifestTmp = casDir </> "tmp_manifest"
+                            -- Try to download manifest first (chunked file)
+                            createDirectoryIfMissing True casDir
+                            manifestCode <- Transport.copyFromRemote remote remoteManifestPath localManifestTmp
+                            case manifestCode of
+                              ExitSuccess -> do
+                                manifestContent <- readFile localManifestTmp
+                                case parseManifest manifestContent of
+                                  Just manifest -> do
+                                    -- Download each chunk to local CAS
+                                    forM_ (cmChunks manifest) $ \cr -> do
+                                      let chunkDst = casBlobPath casDir (crHash cr)
+                                          chunkSrc = toPosix (casBlobPath "cas" (crHash cr))
+                                      createDirectoryIfMissing True (takeDirectory chunkDst)
+                                      void $ Transport.copyFromRemote remote chunkSrc chunkDst
+                                    -- Write manifest locally
+                                    writeManifestToCas casDir (metaHash mc) manifest
+                                    -- Reassemble to working tree
+                                    createDirectoryIfMissing True (takeDirectory localPath)
+                                    void $ reassembleFile casDir manifest localPath
+                                    safeRemoveFile localManifestTmp
+                                  Nothing -> do
+                                    -- Invalid manifest, fall back to whole blob
+                                    safeRemoveFile localManifestTmp
+                                    createDirectoryIfMissing True (takeDirectory localPath)
+                                    void $ Transport.copyFromRemote remote (toPosix (casBlobPath "cas" (metaHash mc))) localPath
+                              _ -> do
+                                -- No manifest on remote — download whole blob
+                                safeRemoveFile localManifestTmp
+                                createDirectoryIfMissing True (takeDirectory localPath)
+                                void $ Transport.copyFromRemote remote (toPosix (casBlobPath "cas" (metaHash mc))) localPath
                         Nothing -> pure ()
             _ -> do
                 progress <- CopyProgress.newSyncProgress (length binaryPaths)
@@ -186,6 +220,12 @@ safeDeleteWorkFile cwd filePath = do
     let fullPath = cwd </> filePath
     exists <- Dir.doesFileExist fullPath
     when exists $ Dir.removeFile fullPath
+
+-- | Remove a file if it exists. No-op if file doesn't exist.
+safeRemoveFile :: FilePath -> IO ()
+safeRemoveFile fp = do
+    exists <- Dir.doesFileExist fp
+    when exists $ Dir.removeFile fp
 
 -- ============================================================================
 -- Helper functions

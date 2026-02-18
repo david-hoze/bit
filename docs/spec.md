@@ -180,6 +180,26 @@ Existing CAS data is preserved.
 
 **CAS garbage collection:** `bit cas gc` (future) can prune blobs that are not referenced by any reachable commit. The safe default is to never delete CAS data automatically.
 
+### Content-Defined Chunking (CDC)
+
+When `cdc.enabled = true`, `bit add` in solid mode splits large binary files into content-determined chunks using the FastCDC algorithm (gear-based rolling hash with two masks). Only files at or above `cdc.min-size` are chunked; smaller files are stored as whole blobs.
+
+**How it works:**
+
+1. **Chunking**: The file is split at content-determined boundaries. A gear hash rolls over each byte; when the fingerprint matches a mask, a boundary is placed. A larger mask (fewer boundaries) is used before the target average size, and a smaller mask (more boundaries) after, biasing chunk sizes toward the configured average.
+
+2. **Storage**: Each chunk is stored as a separate CAS blob keyed by its MD5 hash (`cas/<prefix>/<hash>`). A manifest file (`cas/<prefix>/<hash>.manifest`) maps the original file hash to its ordered list of chunk hashes and lengths.
+
+3. **Push**: When pushing a chunked file, bit uploads each chunk blob and the manifest to the remote CAS, rather than the whole file.
+
+4. **Pull**: When pulling from a bare remote, bit first tries to download the manifest. If found, it downloads each chunk to local CAS, then reassembles the file. If no manifest exists, it falls back to downloading the whole blob.
+
+5. **Verify**: `bit verify` accepts a file as substantiated if either the whole blob or (manifest + all chunks) exist in CAS.
+
+**Deduplication**: When a large file is modified, only the chunks around the changed region get new hashes. Unchanged chunks are already in CAS and don't need re-uploading, reducing transfer size.
+
+**Backward compatibility**: CDC is opt-in. Repos without `cdc.enabled = true` behave exactly as before. A CAS containing a mix of whole-blob and chunked files works correctly — operations check for manifests and fall back to whole blobs.
+
 ### `bit config` Command
 
 `bit config` reads and writes `.bit/config`, which uses git-style INI format with `section.key` keys (matching `git config` conventions). Every key must contain at least one dot.
@@ -203,6 +223,10 @@ bit config --list             # dump all key=value pairs
 | Key | Values | Default | Description |
 |-----|--------|---------|-------------|
 | `core.mode` | `lite`, `solid` | `lite` | Whether `bit add` writes to CAS |
+| `cdc.enabled` | `true`, `false` | unset (disabled) | Enable content-defined chunking for large binaries |
+| `cdc.min-size` | positive integer | `32768` | Minimum chunk size in bytes |
+| `cdc.avg-size` | positive integer | `131072` | Target average chunk size in bytes |
+| `cdc.max-size` | positive integer | `524288` | Maximum chunk size in bytes |
 
 ### The Index Invariant
 

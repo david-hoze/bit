@@ -72,10 +72,10 @@ cd test\cli\output\work_casconfig & echo x> bin2.bin & bit add bin2.bin
 >>>
 >>>= 0
 
-# CAS may contain subdirs (2-char prefix) when solid; dir succeeds either way
+# CAS contains subdirs (2-char prefix) when solid mode is active
 cd test\cli\output\work_casconfig & dir /b .bit\cas
 <<<
->>>
+>>> /[0-9a-f]/
 >>>= 0
 
 # cas backfill: commit has bin.bin (from lite add); working tree still has it -> store in CAS

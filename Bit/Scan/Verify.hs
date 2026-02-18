@@ -41,6 +41,8 @@ import qualified Bit.Remote
 import qualified Bit.Rclone.Run as Transport
 import Bit.Config.Paths (bundleForRemote, bundleCwdPath, fromCwdPath, BundleName)
 import Bit.CAS (hasBlobInCas)
+import Bit.CDC.Manifest (isChunkedInCas, readManifestFromCas)
+import Bit.CDC.Store (hasAllChunksInCas)
 -- System.Process no longer needed: all git calls go through Git.spawnGit
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
@@ -51,6 +53,21 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.IORef (IORef, atomicModifyIORef')
 import qualified Bit.Scan.Local as Scan
+
+-- | Check whether CAS contains content for a given hash, either as a whole blob
+-- or as a complete set of CDC chunks with a manifest.
+hasContentInCas :: FilePath -> Hash 'MD5 -> IO Bool
+hasContentInCas casDir h = do
+  wholeBlob <- hasBlobInCas casDir h
+  if wholeBlob then pure True
+  else do
+    chunked <- isChunkedInCas casDir h
+    if not chunked then pure False
+    else do
+      mManifest <- readManifestFromCas casDir h
+      case mManifest of
+        Nothing -> pure False
+        Just manifest -> hasAllChunksInCas casDir manifest
 
 -- | Result of comparing one file to metadata.
 data VerifyIssue
@@ -277,7 +294,7 @@ findIssuesFromScan root entries = do
           let entry = classifyMetadata (Path p) committedContent
           case entry of
             BinaryEntry _ eh _ -> do
-              inCas <- hasBlobInCas casDir eh
+              inCas <- hasContentInCas casDir eh
               pure [Missing (Path p) | not inCas]
             TextEntry _ -> pure [Missing (Path p)]
         _ -> pure [Missing (Path p)]
@@ -298,7 +315,7 @@ findIssuesFromScan root entries = do
           actual <- classifyMetadataFile (Path relPath) fsPath
           case (committed, actual) of
             (BinaryEntry _ eh es, BinaryEntry _ ah as') -> do
-              inCas <- hasBlobInCas casDir eh
+              inCas <- hasContentInCas casDir eh
               if inCas then pure []
               else pure [HashMismatch (Path relPath)
                           (T.unpack (hashToText eh))
@@ -306,7 +323,7 @@ findIssuesFromScan root entries = do
                           es
                           as']
             (BinaryEntry _ eh es, TextEntry _) -> do
-              inCas <- hasBlobInCas casDir eh
+              inCas <- hasContentInCas casDir eh
               if inCas then pure []
               else do
                 actualHash <- hashFile fsPath

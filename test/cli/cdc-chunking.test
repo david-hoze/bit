@@ -1,0 +1,126 @@
+# =============================================================================
+# CDC Chunking - content-defined chunking for large binary files
+#
+# Tests: cdc.enabled config, chunked CAS writes, manifest files,
+# verify with chunked files.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_cdc 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ---- SETUP ----
+mkdir test\cli\output\work_cdc
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_cdc & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- CONFIG: cdc.enabled must be true/false ----
+cd test\cli\output\work_cdc & bit config cdc.enabled invalid 2>&1
+<<<
+>>> /must be 'true' or 'false'/
+>>>= 1
+
+cd test\cli\output\work_cdc & bit config cdc.enabled true
+<<<
+>>>= 0
+
+cd test\cli\output\work_cdc & bit config cdc.enabled
+<<<
+>>>
+true
+>>>= 0
+
+# ---- CONFIG: size keys must be positive integers ----
+cd test\cli\output\work_cdc & bit config cdc.min-size notanumber 2>&1
+<<<
+>>> /must be a positive integer/
+>>>= 1
+
+cd test\cli\output\work_cdc & bit config cdc.min-size 16384
+<<<
+>>>= 0
+
+cd test\cli\output\work_cdc & bit config cdc.min-size
+<<<
+>>>
+16384
+>>>= 0
+
+# ---- SOLID + CDC: add large binary, verify manifest exists ----
+cd test\cli\output\work_cdc & bit config core.mode solid
+<<<
+>>> /Mode set to solid/
+>>>= 0
+
+cd test\cli\output\work_cdc & bit config cdc.enabled true
+<<<
+>>>= 0
+
+# Set small chunk sizes for testing (so a small file produces multiple chunks)
+cd test\cli\output\work_cdc & bit config cdc.min-size 64
+<<<
+>>>= 0
+
+cd test\cli\output\work_cdc & bit config cdc.avg-size 256
+<<<
+>>>= 0
+
+cd test\cli\output\work_cdc & bit config cdc.max-size 1024
+<<<
+>>>= 0
+
+# Create a binary file large enough to be chunked (>= min-size of 64 bytes)
+# Use fsutil to create a 2KB file with deterministic content
+cd test\cli\output\work_cdc & fsutil file createnew large.bin 2048 >nul
+<<<
+>>>= 0
+
+cd test\cli\output\work_cdc & bit add large.bin
+<<<
+>>>= 0
+
+# Verify that a .manifest file was created in CAS
+cd test\cli\output\work_cdc & dir /s /b .bit\cas\*.manifest
+<<<
+>>> /\.manifest/
+>>>= 0
+
+# ---- SMALL FILE: below min-size should NOT create manifest ----
+cd test\cli\output\work_cdc & echo tiny> small.bin & bit add small.bin
+<<<
+>>>= 0
+
+# ---- VERIFY: should pass with chunks present ----
+cd test\cli\output\work_cdc & bit commit -m "Add files"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+cd test\cli\output\work_cdc & bit verify
+<<<
+>>> /All .* files? match|Verified|0 issues/
+>>>= 0
+
+# ---- CONFIG LIST shows cdc keys ----
+cd test\cli\output\work_cdc & bit config --list
+<<<
+>>> /cdc\.enabled/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_cdc 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

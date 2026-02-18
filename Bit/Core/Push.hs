@@ -49,6 +49,8 @@ import Bit.Core.Fetch (classifyRemoteState, fetchBundle)
 import qualified Bit.Device.Identity as Device
 import Bit.CAS (casBlobPath)
 import Bit.Config.Metadata (parseMetadataFile, MetaContent(..))
+import Bit.CDC.Manifest (readManifestFromCas, casManifestPath)
+import Bit.CDC.Types (ChunkRef(..), ChunkManifest(..))
 
 -- ============================================================================
 -- Push seam: the only difference between cloud and filesystem push
@@ -348,15 +350,33 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
             -- TODO: Batch CAS uploads (single rclone --files-from) instead of one copyToRemote per file.
             unless (null copyPaths) $
                 liftIO $ putStrLn $ "Uploading " ++ show (length copyPaths) ++ " file(s) to CAS..."
+            let casDir = bitDir </> "cas"
             forM_ copyPaths $ \filePath -> do
                 -- TODO: Carry hash from deriveActions to avoid re-reading metadata per file.
                 mMeta <- liftIO $ parseMetadataFile (indexDir </> filePath)
                 case mMeta of
                     Just mc -> do
-                        let localPath = cwd </> filePath
-                            casRelPath = toPosix (casBlobPath "cas" (metaHash mc))
-                        _ <- liftIO $ Transport.copyToRemote localPath remote casRelPath
-                        pure ()
+                        -- Check if file has been chunked (CDC)
+                        mManifest <- liftIO $ readManifestFromCas casDir (metaHash mc)
+                        case mManifest of
+                            Just manifest -> do
+                                -- Upload each chunk blob from local CAS
+                                forM_ (cmChunks manifest) $ \cr -> do
+                                    let chunkSrc = casBlobPath casDir (crHash cr)
+                                        chunkDst = toPosix (casBlobPath "cas" (crHash cr))
+                                    _ <- liftIO $ Transport.copyToRemote chunkSrc remote chunkDst
+                                    pure ()
+                                -- Upload the manifest file
+                                let manifestSrc = casManifestPath casDir (metaHash mc)
+                                    manifestDst = toPosix (casManifestPath "cas" (metaHash mc))
+                                _ <- liftIO $ Transport.copyToRemote manifestSrc remote manifestDst
+                                pure ()
+                            Nothing -> do
+                                -- No chunks — upload whole file as before
+                                let localPath = cwd </> filePath
+                                    casRelPath = toPosix (casBlobPath "cas" (metaHash mc))
+                                _ <- liftIO $ Transport.copyToRemote localPath remote casRelPath
+                                pure ()
                     Nothing -> pure ()
             -- Full layout: also sync readable paths and apply move/delete.
             -- Bare layout: no readable tree, so Move/Delete are intentionally not applied.
