@@ -1,8 +1,8 @@
-# bit
+# `bit`
 
 **Version control for binary files.** Git's super-brain, without its baggage.
 
-bit splits the job in two: **Git** tracks tiny metadata files (hash + size), **rclone** moves actual files. Your working directory stays completely normal — no pointer files, no special filters, no server to run. You get commits, history, diffs, branches, and merges for free, and any storage backend works out of the box.
+`bit` splits the job in two: **Git** tracks tiny metadata files (hash + size), **rclone** moves actual files. Your working directory stays completely normal — no pointer files, no special filters, no server to run. You get commits, history, diffs, branches, and merges for free, and any storage backend works out of the box.
 
 ```bash
 bit init
@@ -14,15 +14,15 @@ bit push
 
 ---
 
-## Why bit?
+## Why `bit`?
 
 The binary file versioning landscape is fragmented because every existing tool makes trade-offs that hurt in practice. bit is designed around the gaps they leave.
 
 ### It's just Git
 
-bit fills the gaps in managing binary file versions — *without* losing Git's simplicity, syntax, or semantics. Also, bit actually uses Git under the hood. bit stores metadata in a real Git repository (`.bit/index/`), which means full compatibility with Git's tooling: branches, merges, rebases, cherry-picks, reflog, bisect — all of it works because the metadata *is* a Git repo. When bit needs to passthrough commands to git, it does, and when it has to meddle, it does so at minimum. bit philosophy states that you should always prefer using git or rclone primitives.
+`bit` fills those gaps — *without* losing Git's simplicity, syntax, or semantics. Also, `bit` actually uses Git under the hood. bit stores metadata in a real Git repository (`.bit/index/`), which means full compatibility with Git's tooling: branches, merges, rebases, cherry-picks, reflog, bisect — all of it works because the metadata *is* a Git repo. When `bit` needs to passthrough commands to git, it does, and when it has to meddle, it does so at minimum. `bit` philosophy states that you should always prefer using git or rclone primitives, rather than reimplementing features.
 
-While bit cli executable is named `bit`, but with `bit become-git`, you can use familiar `git` commands, creating a seamless experience with binary files:
+While `bit` cli executable is named `bit`, with `bit become-git`, you can use familiar `git` commands, creating a seamless experience with binary files:
 
 ```bash
 bit become-git
@@ -40,9 +40,11 @@ cd my-git-repo
 git status               # handled by real git — bit stays out of the way
 ```
 
-Push and pull behave differently for binary files — but they should. `git push` in a bit repo uploads your binaries to the remote via rclone, which is what you'd expect.
+`bit` is designed to pass all the tests in the git test suite, making it fully compatible with git, from submodules to arcane git commands.
 
-Git native remotes are considered metadata-only remotes . You can push your metadata to GitHub or GitLab as a standard Git repository — full commit history, diffs, branches, PRs — while your actual files live on cheaper storage:
+Push and pull behave differently for binary files — but they should. `git push` in a bit repo uploads your binaries to the remote via rclone, which is what you'd expect. It does so using the minimal set of operations (detects renames and moves), uploading only the data chunks that changed using FastCDC, thus cutting upload expenses.
+
+You can use Git native remotes seamlessly. They are considered metadata-only remotes . You can push your metadata to GitHub or GitLab as a standard Git repository, and get full commit history, diffs, branches, PRs, while your actual files live on cheaper storage:
 
 ```bash
 bit remote add github git@github.com:user/project.git  # metadata only
@@ -50,7 +52,7 @@ bit remote add storage gdrive:Projects/footage          # content + metadata
 bit push
 ```
 
-Your collaborators can see the full Git history on GitHub. They can now clone the metadata, and then `bit pull storage` (or `git pull storage` with `bit become-git`) fetches the actual files from wherever you stored them.
+Your collaborators can then see the full Git history on GitHub. They can clone the metadata, and `bit pull storage` (or `git pull storage` with `bit become-git`) fetches the actual files from wherever you stored them.
 
 ### Your files stay out of Git's object store
 
