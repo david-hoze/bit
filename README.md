@@ -1,4 +1,4 @@
-﻿# bit
+# bit
 
 **Version control for binary files.** Git's super-brain, without its baggage.
 
@@ -20,9 +20,9 @@ The binary file versioning landscape is fragmented because every existing tool m
 
 ### It's just Git
 
-bit doesn't replace Git — it *is* Git, under the hood. bit stores metadata in a real Git repository (`.bit/index/`), which means full compatibility with Git's tooling: branches, merges, rebases, cherry-picks, reflog, bisect — all of it works because the metadata *is* a Git repo.
+bit fills the gaps in managing binary file versions — *without* losing Git's simplicity, syntax, or semantics. Also, bit actually uses Git under the hood. bit stores metadata in a real Git repository (`.bit/index/`), which means full compatibility with Git's tooling: branches, merges, rebases, cherry-picks, reflog, bisect — all of it works because the metadata *is* a Git repo. When bit needs to passthrough commands to git, it does, and when it has to meddle, it does so at minimum. bit philosophy states that you should always prefer using git or rclone primitives.
 
-With `bit become-git`, you can use `git` commands directly and they route to bit automatically in bit repos:
+While bit cli executable is named `bit`, but with `bit become-git`, you can use familiar `git` commands, creating a seamless experience with binary files:
 
 ```bash
 bit become-git
@@ -31,14 +31,18 @@ cd my-bit-repo
 git add footage.mp4      # handled by bit — hashes and tracks the file
 git commit -m "new cut"  # handled by bit — commits metadata
 git push                 # handled by bit — syncs binaries via rclone, then pushes metadata
+git diff file.txt        # passes all the handling to git, with full conformance
+git add file.txt         # Normal git adding
+git commit -m "Updated text"
+git push                 # Normal git behavior
 
 cd my-git-repo
 git status               # handled by real git — bit stays out of the way
 ```
 
-Push and pull behave differently for binary files — but they should. `git push` in a bit repo uploads your binaries to the remote via rclone *then* pushes the metadata bundle. That's the correct behavior for large files on dumb storage, and it's transparent.
+Push and pull behave differently for binary files — but they should. `git push` in a bit repo uploads your binaries to the remote via rclone, which is what you'd expect.
 
-Metadata-only remotes take this further. Push your metadata to GitHub or GitLab as a standard Git repository — full commit history, diffs, branches, PRs — while your actual files live on cheaper storage:
+Git native remotes are considered metadata-only remotes . You can push your metadata to GitHub or GitLab as a standard Git repository — full commit history, diffs, branches, PRs — while your actual files live on cheaper storage:
 
 ```bash
 bit remote add github git@github.com:user/project.git  # metadata only
@@ -46,7 +50,7 @@ bit remote add storage gdrive:Projects/footage          # content + metadata
 bit push
 ```
 
-Your collaborators see the full Git history on GitHub. They clone the metadata, then `bit pull` fetches the actual files from wherever you stored them.
+Your collaborators can see the full Git history on GitHub. They can now clone the metadata, and then `bit pull storage` (or `git pull storage` with `bit become-git`) fetches the actual files from wherever you stored them.
 
 ### Your files stay out of Git's object store
 
