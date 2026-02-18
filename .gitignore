@@ -42,6 +42,9 @@ literate-output/
 # Ignore community plugin caches/data that are auto-generated
 .obsidian/plugins/
 .obsidian/cache/
+.obsidian/app.json
+.obsidian/appearance.json
+.obsidian/core-plugins.json
 
 # Optional: Ignore your theme CSS if you don't want to sync it
 # .obsidian/themes/
