@@ -34,3 +34,14 @@ literate-output/
 
 # Ignore Claude local settings
 .claude/settings.local.json
+
+# Ignore the workspace layout (very noisy)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# Ignore community plugin caches/data that are auto-generated
+.obsidian/plugins/
+.obsidian/cache/
+
+# Optional: Ignore your theme CSS if you don't want to sync it
+# .obsidian/themes/
