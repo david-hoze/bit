@@ -1,0 +1,160 @@
+# =============================================================================
+# Git Router — become-git, become-bit, and bit-git-router dispatch
+#
+# Tests the git router feature:
+# - Help entries for become-git / become-bit
+# - bit-git-router dispatches to bit in .bit repos
+# - bit-git-router dispatches to real git in .git repos
+# - bit-git-router sends git init to real git even in .bit repos
+# - become-bit on non-existent directory exits cleanly
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_router 2>nul & rmdir /s /q test\cli\output\work_router_git 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: HELP
+# ======================================================================
+
+# bit help become-git shows usage
+bit help become-git
+<<<
+>>> /usage: bit become-git/
+>>>= 0
+
+# bit help become-bit shows usage
+bit help become-bit
+<<<
+>>> /usage: bit become-bit/
+>>>= 0
+
+# bit help shows the git compatibility section
+bit help
+<<<
+>>> /become-git/
+>>>= 0
+
+# bit become-git -h shows terse help
+bit become-git -h
+<<<
+>>> /usage: bit become-git/
+>>>= 0
+
+# bit become-bit -h shows terse help
+bit become-bit -h
+<<<
+>>> /usage: bit become-bit/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: BECOME-BIT ON CLEAN SYSTEM
+# ======================================================================
+
+# become-bit with no router installed exits cleanly
+bit become-bit
+<<<
+>>> /not installed/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: ROUTER DISPATCH — BIT REPO
+# ======================================================================
+
+# Setup: create a bit repo
+mkdir test\cli\output\work_router
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_router & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Router in a .bit repo routes to bit (bit status output)
+cd test\cli\output\work_router & set "BIT_REAL_GIT=git" & bit-git-router status
+<<<
+>>> /On branch main/
+>>>= 0
+
+# Router passes add/commit through to bit
+cd test\cli\output\work_router & echo hello> file.txt & set "BIT_REAL_GIT=git" & bit-git-router add file.txt
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_router & set "BIT_REAL_GIT=git" & bit-git-router commit -m "test commit"
+<<<
+>>> /main.*test commit/
+>>>= 0
+
+# Router passes log through to bit
+cd test\cli\output\work_router & set "BIT_REAL_GIT=git" & bit-git-router log --oneline
+<<<
+>>> /test commit/
+>>>= 0
+
+# ======================================================================
+# SECTION 4: ROUTER DISPATCH — GIT INIT ALWAYS GOES TO REAL GIT
+# ======================================================================
+
+# Create a git repo via router init (from root dir, not inside bit repo)
+set "BIT_REAL_GIT=git" & bit-git-router init test\cli\output\work_router_git 2>&1
+<<<
+>>> /Initialized/
+>>>= 0
+
+# Verify .git was created (standard git repo)
+if exist "test\cli\output\work_router_git\.git\" (echo git-exists) else (echo no-git)
+<<<
+>>>
+git-exists
+>>>= 0
+
+# Verify .bit was NOT created (should be a plain git repo)
+if exist "test\cli\output\work_router_git\.bit\" (echo bit-exists) else (echo no-bit)
+<<<
+>>>
+no-bit
+>>>= 0
+
+# ======================================================================
+# SECTION 5: ROUTER DISPATCH — GIT REPO (NOT BIT)
+# ======================================================================
+
+# Router in a .git repo (no .bit) routes to real git
+cd test\cli\output\work_router_git & set "BIT_REAL_GIT=git" & bit-git-router status
+<<<
+>>> /On branch/
+>>>= 0
+
+# ======================================================================
+# SECTION 6: ROUTER GIT INIT WITH GLOBAL FLAGS
+# ======================================================================
+
+# git -c key=val init via router still goes to real git (run from .bit repo)
+cd test\cli\output\work_router & set "BIT_REAL_GIT=git" & bit-git-router -c init.defaultBranch=main init subgit 2>&1
+<<<
+>>> /Initialized|Reinitialized/
+>>>= 0
+
+# Verify the subgit dir has .git (real git, not bit)
+if exist "test\cli\output\work_router\subgit\.git\" (echo git-exists) else (echo no-git)
+<<<
+>>>
+git-exists
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_router 2>nul & rmdir /s /q test\cli\output\work_router_git 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
