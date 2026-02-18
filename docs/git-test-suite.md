@@ -56,9 +56,10 @@ extern/git-shim/setup.sh
 
 This creates:
 - `extern/git/GIT-BUILD-OPTIONS` — stub with `PERL_PATH`, `SHELL_PATH`, `X=''`
-- `extern/git/templates/blt/` — empty directory the test harness checks for
+- `extern/git/templates/blt/` — default template files the test harness requires
+- `extern/git/t/helper/test-tool` — bash stub for the test-tool binary (see below)
 
-Both are inside the submodule and gitignored by it, so they won't show up in
+All are inside the submodule and gitignored by it, so they won't show up in
 `git status`.
 
 ## Running a single test
@@ -91,18 +92,34 @@ Implemented:
 
 | Test Suite | Pass | Fail | Notes |
 |------------|------|------|-------|
-| t0001-init.sh | 91/91 | 0 | All init tests pass |
+| t0001-init.sh | 90/91 | 1 | Test 91 needs `test-tool path-utils absolute_path` (stub limitation) |
 | t0002-gitfile.sh | 14/14 | 0 | All gitfile tests pass |
 | t0003-attributes.sh | 54/54 | 0 | All attribute tests pass |
 | t0004-unwritable.sh | 9/9 | 0 | 8 skipped (missing POSIXPERM/SANITY) |
-| t0005-signals.sh | 5/5 | 0 | 3 skipped (missing !MINGW) |
-| t0006-date.sh | 129/129 | 0 | All date parsing tests pass |
-| t0007-git-var.sh | 27/27 | 0 | 2 skipped (missing !AUTOIDENT, POSIXPERM) |
-| t0008-ignores.sh | 397/397 | 0 | All ignore tests pass |
+| t0005-signals.sh | 3/5 | 2 | 2 fail (MINGW signal handling differences) |
+| t0006-date.sh | 0/129 | 129 | All tests need `test-tool date` (stub limitation) |
+| t0007-git-var.sh | 24/27 | 3 | 3 fail (need `test-tool` for shell-path / ident) |
+| t0008-ignores.sh | 397/397 | 0 | All ignore tests pass (junction detection) |
 | t0010-racy-git.sh | 10/10 | 0 | All racy git tests pass |
 | t0012-help.sh | 5/179 | 174 | Help tests require git's man pages / html docs (not available via shim) |
 | t0013-sha1dc.sh | 1/1 | 0 | SHA-1 collision detection passes |
-| t0014-alias.sh | — | — | Hangs: bit's alias expansion lacks loop detection for nested aliases |
+| t0014-alias.sh | 5/5 | 0 | All alias tests pass (loop detection + config passthrough) |
+
+### test-tool stub
+
+The `extern/git` submodule is a **shallow clone** (`--depth 1`) to save disk space.
+Git's `test-tool` binary requires `make` and a full build of libgit.a, which is not
+available. Instead, `setup.sh` (or a manual step) creates a bash stub at
+`extern/git/t/helper/test-tool` that handles the subset of test-tool commands needed
+by the test framework:
+
+- `path-utils file-size` — uses `wc -c`
+- `date is64bit` / `date time_t-is64bit` — always exits 0
+- `env-helper` — reads env vars for boolean test prerequisites
+
+Tests that require the real `test-tool` (e.g. `test-tool date relative`,
+`test-tool path-utils absolute_path`) will fail. These failures are
+**test-tool stub limitations**, not bit regressions.
 
 ## Naming constraint on Windows
 

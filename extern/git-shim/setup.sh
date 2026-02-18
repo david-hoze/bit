@@ -34,6 +34,48 @@ cat > "$GIT_DIR/templates/blt/description" <<'TMPL'
 Unnamed repository; edit this file 'description' to name the repository.
 TMPL
 
+# 3. Create test-tool stub
+# The test harness requires t/helper/test-tool. Building the real one needs
+# make + libgit.a, which we don't have. This stub handles the subset of
+# commands the harness checks during startup (prereqs, file-size).
+# Tests that need the real test-tool (e.g. date relative, path-utils
+# absolute_path) will fail — those are stub limitations, not bit regressions.
+mkdir -p "$GIT_DIR/t/helper"
+cat > "$GIT_DIR/t/helper/test-tool" <<'STUB'
+#!/bin/bash
+case "$1" in
+    path-utils)
+        case "$2" in
+            file-size) wc -c < "$3" | tr -d ' ' ;;
+            *) echo 0 ;;
+        esac
+        ;;
+    date)
+        case "$2" in
+            is64bit|time_t-is64bit) exit 0 ;;
+            *) echo "unknown" ;;
+        esac
+        ;;
+    env-helper)
+        shift
+        val=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --type=*|--default=*) shift ;;
+                --exit-code) shift ;;
+                *) val="${!1}"; shift ;;
+            esac
+        done
+        case "$val" in
+            true|1|yes) exit 0 ;;
+            *) exit 1 ;;
+        esac
+        ;;
+    *) exit 1 ;;
+esac
+STUB
+chmod +x "$GIT_DIR/t/helper/test-tool"
+
 echo "Git test infrastructure ready."
 echo "Run tests with:"
 echo "  cd extern/git/t"

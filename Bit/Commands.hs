@@ -12,7 +12,7 @@ import qualified Bit.Device.Identity as Device
 import Bit.Utils (atomicWriteFileStr)
 import Bit.IO.Concurrency (Concurrency(..))
 import qualified Bit.Device.RemoteWorkspace as RemoteWorkspace
-import System.Environment (getArgs, lookupEnv)
+import System.Environment (getArgs, lookupEnv, setEnv)
 import Bit.Help (printMainHelp, printTerseHelp, printCommandHelp)
 import System.Exit (ExitCode(..), exitWith, exitSuccess)
 import System.FilePath ((</>), makeRelative, takeDirectory)
@@ -181,8 +181,15 @@ isKnownCommand name = name `elem`
 -- When a .bit/index path is available, queries local+global config;
 -- otherwise queries global config only.
 -- If no alias is found, passes the command through to git directly.
+-- Tracks alias depth via BIT_ALIAS_DEPTH env var to detect loops (max 10).
 tryAlias :: Maybe FilePath -> FilePath -> FilePath -> String -> [String] -> IO ()
 tryAlias mIndexPath origCwd root name rest = do
+    -- Check alias depth to detect loops
+    depthStr <- lookupEnv "BIT_ALIAS_DEPTH"
+    let depth = maybe 0 (\s -> case reads s of { [(n,"")] -> n; _ -> 0 }) depthStr :: Int
+    when (depth >= 10) $ do
+        hPutStrLn stderr $ "fatal: alias loop detected: expansion of '" ++ name ++ "' does not terminate"
+        exitWith (ExitFailure 128)
     let gitArgs = case mIndexPath of
             Just p  -> ["-C", p, "config", "--get", "alias." ++ name]
             Nothing -> ["config", "--get", "alias." ++ name]
@@ -196,7 +203,9 @@ tryAlias mIndexPath origCwd root name rest = do
                 -- would make the working tree root be .bit/index, breaking relative paths.
                 (x:_) | "!" `isPrefixOf` x -> Git.runGitGlobal (name : rest) >>= exitWith
                 [] -> passthrough (name : rest)
-                _ -> runCommand (expanded ++ rest) >> exitSuccess
+                _ -> do
+                    setEnv "BIT_ALIAS_DEPTH" (show (depth + 1))
+                    runCommand (expanded ++ rest) >> exitSuccess
         _ -> passthrough (name : rest)
   where
     passthrough args = case mIndexPath of
@@ -634,7 +643,8 @@ runCommand args = do
         ["fsck"]                        -> Bit.fsck cwd
         ["merge", "--abort"]            -> Bit.mergeAbort
         ["branch", "--unset-upstream"]  -> Bit.unsetUpstream
-        -- config is handled before repo check (bit-specific keys) or via passthrough (git keys)
+        -- config: bit-specific keys handled above; everything else passes through to git
+        ("config":rest)                 -> Git.runGitRawAt (bitDir </> "index") ("config" : rest) >>= exitWith
         ["cas", "backfill"]             -> Bit.casBackfill cwd >> exitWith ExitSuccess
 
         -- ── Lightweight env (no scan) ────────────────────────

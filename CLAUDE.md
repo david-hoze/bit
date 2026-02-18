@@ -45,6 +45,50 @@ cabal install        # Install
 cabal test           # Run tests
 ```
 
+### Troubleshooting: `cabal build` says "Up to date" after editing source
+
+`cabal install` builds from an sdist tarball and caches the result in the package store by hash. If the tarball hash matches a previous build, cabal skips recompilation entirely — even if the source files on disk have changed. Symptoms: `cabal build` says "Up to date", `cabal install` goes straight from "Wrote tarball" to "Copying" with no "Building" step.
+
+**Fix**: Use `cabal exec -- ghc` to build directly from source files, bypassing the store:
+
+```bash
+cabal exec -- ghc --make -fforce-recomp -O -o bit-new.exe Bit.hs
+cp bit-new.exe "$(where bit)"
+```
+
+This compiles all modules from the working directory (not the tarball) and produces a fresh binary. Copy it over the installed `bit.exe`.
+
+**Alternative**: Delete the store entries and dist-newstyle, then `cabal install`:
+
+```bash
+rm -rf dist-newstyle
+rm -rf "$(cabal path --store-dir)/ghc-9.6.7/bit-0.1.0.0-"*
+cabal install --overwrite-policy=always
+```
+
+### Troubleshooting: Bash returns exit code 1 with no output
+
+On Windows (MSYS2/PortableGit), bash can enter a state where all commands silently fail with exit code 1. The error is `write error: Bad file descriptor` — bash can't write to stdout because the pipe from the parent process is broken.
+
+**Diagnosis**: Run bash via cmd and capture stderr to a file:
+```cmd
+cmd //c "C:\Users\natanh\tools\PortableGit\usr\bin\bash.exe -c "echo hello" 2>C:\Users\natanh\bash_err.txt & type C:\Users\natanh\bash_err.txt"
+```
+If you see `write error: Bad file descriptor`, this is the issue.
+
+**Workaround**: Use a batch file wrapper that redirects bash output to a file, then `type` the file:
+```bat
+@echo off
+C:\Users\natanh\tools\PortableGit\usr\bin\bash.exe --norc --noprofile -c "%*" 1>C:\Users\natanh\bout.txt 2>C:\Users\natanh\berr.txt
+set EXITCODE=%ERRORLEVEL%
+type C:\Users\natanh\bout.txt
+type C:\Users\natanh\berr.txt 1>&2
+exit /b %EXITCODE%
+```
+Save as `C:\Users\natanh\run.bat` and invoke via `cmd //c "C:\Users\natanh\run.bat <bash command>"`.
+
+**Root cause**: Unknown — may be triggered by disk-full conditions or long-running MSYS2 sessions. Restarting the terminal sometimes fixes it; the batch file workaround always works.
+
 ## Haskell Coding Standards
 
 Consult these docs when modifying `.hs` files:
