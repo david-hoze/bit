@@ -107,19 +107,28 @@ bit diff
 For text files, you see the actual content diff — same as `git diff`:
 
 ```diff
---- a/README.md
-+++ b/README.md
-@@ -1 +1,2 @@
- # My Project
-+This is a demo project.
+diff --git a/README.txt b/README.txt
+index e69de29..cb983c4 100644
+--- a/README.txt
++++ b/README.txt
+@@ -0,0 +1,3 @@
++# My Project
++
+++This is a demo project.
 ```
 
 For binary files, bit shows the hash and size changes:
 
-```
-Binary file changed: demo.mp4
-  hash: md5:a1b2c3... → md5:f8e9a0...
-  size: 15728640 → 16777216
+```diff
+diff --git a/demo.mp4 b/demo.mp4
+index c0e968b..0c2daab 100644
+--- a/215007.pdf
++++ b/215007.pdf
+@@ -1,2 +1,2 @@
+-hash: md5:0bb411bceef41732b8a4181c383048a7
+-size: 4063862
++hash: md5:f83dc78da425281f2848ae561040df06
++size: 4094004
 ```
 
 To see staged changes:
