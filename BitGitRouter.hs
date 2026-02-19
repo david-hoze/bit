@@ -49,18 +49,25 @@ isGitInit (x:rest)
     | otherwise = False
 
 -- | Walk up from CWD looking for a @.bit/@ directory or @.bit@ file (bitlink).
+-- If we hit a @.git/@ directory without a corresponding @.bit/@, this is a
+-- pure git repo — stop walking and return False.
 walkUpForBitDir :: IO Bool
 walkUpForBitDir = getCurrentDirectory >>= go
   where
     go dir = do
-        hasDir  <- doesDirectoryExist (dir </> ".bit")
-        hasFile <- doesFileExist (dir </> ".bit")
-        if hasDir || hasFile
+        hasBitDir  <- doesDirectoryExist (dir </> ".bit")
+        hasBitFile <- doesFileExist (dir </> ".bit")
+        if hasBitDir || hasBitFile
             then pure True
-            else let parent = takeDirectory dir
-                 in if parent == dir
-                    then pure False
-                    else go parent
+            else do
+                hasGitDir  <- doesDirectoryExist (dir </> ".git")
+                hasGitFile <- doesFileExist (dir </> ".git")
+                if hasGitDir || hasGitFile
+                    then pure False  -- pure git repo, don't walk further
+                    else let parent = takeDirectory dir
+                         in if parent == dir
+                            then pure False
+                            else go parent
 
 -- | Find the real git binary.
 -- Priority: 1) BIT_REAL_GIT env var, 2) config file ~/.bit-router/real-git,

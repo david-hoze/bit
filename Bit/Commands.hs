@@ -214,14 +214,19 @@ handleDashC dir rest = do
         else Git.runGitRawAt dir rest >>= exitWith
 
 -- | Commands that bit handles natively (not aliases).
+-- Checks the first word of the command key, so multi-word commands like
+-- "remote add" or "merge --continue" are recognized via their root command.
 isKnownCommand :: String -> Bool
-isKnownCommand name = name `elem`
-    [ "init", "import", "export", "add", "commit", "diff", "status", "log", "ls-files"
-    , "rm", "mv", "reset", "restore", "checkout", "branch", "merge"
-    , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
-    , "cas", "submodule"
-    , "help"
-    ]
+isKnownCommand name = root `elem` knownRoots
+  where
+    root = takeWhile (/= ' ') name
+    knownRoots =
+        [ "init", "import", "export", "add", "commit", "diff", "status", "log", "ls-files"
+        , "rm", "mv", "reset", "restore", "checkout", "branch", "merge"
+        , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
+        , "cas", "submodule"
+        , "help", "become-git", "become-bit"
+        ]
 
 -- | Try to expand a git alias and re-dispatch, or pass through to git.
 -- When a .bit/index path is available, queries local+global config;

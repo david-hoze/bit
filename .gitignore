@@ -29,6 +29,11 @@ test.txt
 Thumbs.db
 Desktop.ini
 
+# Dev binaries (parallel worker builds)
+dev-bin/
+bit-dev.exe
+bit-git-router-dev.exe
+
 # Artifacts
 literate-output/
 

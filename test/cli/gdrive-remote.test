@@ -9,55 +9,55 @@ timeout /t 1 >nul & rmdir /s /q test\cli\output\work_gdrive_a 2>nul & rmdir /s /
 >>>= 0
 
 # --- Repo A: init (use main branch for fetch/pull), add remote, add file, commit, push ---
-cd test\cli\output\work_gdrive_a & bit init
+cd test\cli\output\work_gdrive_a && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_gdrive_a & bit remote add origin gdrive-test:bit-test
+cd test\cli\output\work_gdrive_a && bit remote add origin gdrive-test:bit-test
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_gdrive_a & echo hello from A> foo.txt & echo x> bar.bin & bit add foo.txt bar.bin & bit commit -m "Add foo and bar"
+cd test\cli\output\work_gdrive_a && echo hello from A> foo.txt & echo x> bar.bin & bit add foo.txt bar.bin & bit commit -m "Add foo and bar"
 <<<
 >>> /\[master|main|file changed/
 >>>= 0
 
-cd test\cli\output\work_gdrive_a & bit push -u origin
+cd test\cli\output\work_gdrive_a && bit push -u origin
 <<<
 >>> /Metadata push complete\.|Remote is empty|Remote check passed|Push complete\./
 >>>= 0
 
 # --- Allow GDrive a moment so pushed files are visible (eventual consistency) ---
-sleep 3
+ping -n 4 127.0.0.1 >nul
 <<<
 >>>
 >>>= 0
 
 # --- A: remote repair after push: all files verified, nothing to repair ---
-cd test\cli\output\work_gdrive_a & bit --remote origin repair
+cd test\cli\output\work_gdrive_a && bit --remote origin repair
 <<<
 >>> /\[OK\] All.*files match|Nothing to repair/
 >>>= 0
 
 # --- Repo B: init, add remote, fetch, pull ---
-cd test\cli\output\work_gdrive_b & bit init
+cd test\cli\output\work_gdrive_b && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_gdrive_b & bit remote add origin gdrive-test:bit-test
+cd test\cli\output\work_gdrive_b && bit remote add origin gdrive-test:bit-test
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_gdrive_b & bit fetch
+cd test\cli\output\work_gdrive_b && bit fetch
 <<<
 >>>2 /From gdrive-test:bit-test|new branch.*origin\/main/
 >>>= 0
 
-cd test\cli\output\work_gdrive_b & bit pull origin
+cd test\cli\output\work_gdrive_b && bit pull origin
 <<<
 >>> /first pull|Checking out|Syncing binaries|Merge made|remote: Counting/
 >>>= 0
@@ -75,19 +75,19 @@ rclone deletefile gdrive-test:bit-test/bar.bin
 >>>= 0
 
 # --- B: verify remote detects missing file ---
-cd test\cli\output\work_gdrive_b & bit --remote origin verify
+cd test\cli\output\work_gdrive_b && bit --remote origin verify
 <<<
 >>> /Missing:|issues found|ERROR/
 >>>= 1
 
 # --- Restore remote: repair from A (push won't re-upload externally-deleted files) ---
-cd test\cli\output\work_gdrive_a & bit --remote origin repair
+cd test\cli\output\work_gdrive_a && bit --remote origin repair
 <<<
 >>> /repaired|REPAIRED|Nothing to repair/
 >>>= 0
 
 # --- B: verify remote should be clean again after repair ---
-cd test\cli\output\work_gdrive_b & bit --remote origin verify
+cd test\cli\output\work_gdrive_b && bit --remote origin verify
 <<<
 >>> /\[OK\] All.*files match|Checked.*files/
 >>>= 0
@@ -98,12 +98,12 @@ findstr /C:"hello from A" test\cli\output\work_gdrive_b\.bit\index\foo.txt >nul
 >>>= 0
 
 # --- Second round: A adds another file, pushes; B pulls ---
-cd test\cli\output\work_gdrive_a & echo second file> baz.txt & bit add baz.txt & bit commit -m "Add baz" & bit push
+cd test\cli\output\work_gdrive_a && echo second file> baz.txt & bit add baz.txt & bit commit -m "Add baz" & bit push
 <<<
 >>> /Metadata push complete\.|Remote check passed|Push complete\.|file changed/
 >>>= 0
 
-cd test\cli\output\work_gdrive_b & bit fetch & bit pull origin
+cd test\cli\output\work_gdrive_b && bit fetch & bit pull origin
 <<<
 >>> /Merge made|Syncing|Updating|remote: Counting/
 >>>= 0
@@ -120,12 +120,12 @@ echo junk content> test\cli\output\work_gdrive_b\junk.tmp & rclone copyto test\c
 >>>= 0
 
 # --- B: fetch (bundle unchanged), then pull: local should not get orphan; verify remote ---
-cd test\cli\output\work_gdrive_b & bit fetch
+cd test\cli\output\work_gdrive_b && bit fetch
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_gdrive_b & bit --remote origin verify
+cd test\cli\output\work_gdrive_b && bit --remote origin verify
 <<<
 >>> /Verifying|issues found/
 >>>= 1

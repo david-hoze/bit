@@ -30,22 +30,22 @@ mkdir test\cli\output\work_vbr_bare
 >>>
 >>>= 0
 
-cd test\cli\output\work_vbr_bare & bit init
+cd test\cli\output\work_vbr_bare && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_vbr_bare & bit remote add origin gdrive-test:bit-test-vbr-bare --bare
+cd test\cli\output\work_vbr_bare && bit remote add origin gdrive-test:bit-test-vbr-bare --bare
 <<<
 >>> /Remote.*added.*bare layout/
 >>>= 0
 
-cd test\cli\output\work_vbr_bare & echo hello> foo.txt & echo bindata> bar.bin & bit add foo.txt bar.bin & bit commit -m "Initial commit"
+cd test\cli\output\work_vbr_bare && echo hello> foo.txt & echo bindata> bar.bin & bit add foo.txt bar.bin & bit commit -m "Initial commit"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_vbr_bare & bit push -u origin
+cd test\cli\output\work_vbr_bare && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -54,7 +54,7 @@ cd test\cli\output\work_vbr_bare & bit push -u origin
 # TEST 1: bare remote verify after first push — should skip file scan
 # ======================================================================
 
-cd test\cli\output\work_vbr_bare & bit --remote origin verify
+cd test\cli\output\work_vbr_bare && bit --remote origin verify
 <<<
 >>> /\[OK\] Bare remote.*CAS blobs are self-verifying/
 >>>= 0
@@ -63,12 +63,12 @@ cd test\cli\output\work_vbr_bare & bit --remote origin verify
 # TEST 2: bare remote verify after second push — still OK
 # ======================================================================
 
-cd test\cli\output\work_vbr_bare & echo updated> foo.txt & bit add foo.txt & bit commit -m "Update foo" & bit push
+cd test\cli\output\work_vbr_bare && echo updated> foo.txt & bit add foo.txt & bit commit -m "Update foo" & bit push
 <<<
 >>> /Push complete/
 >>>= 0
 
-cd test\cli\output\work_vbr_bare & bit --remote origin verify
+cd test\cli\output\work_vbr_bare && bit --remote origin verify
 <<<
 >>> /\[OK\] Bare remote.*CAS blobs are self-verifying/
 >>>= 0
@@ -82,27 +82,27 @@ mkdir test\cli\output\work_vbr_full
 >>>
 >>>= 0
 
-cd test\cli\output\work_vbr_full & bit init
+cd test\cli\output\work_vbr_full && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_vbr_full & bit remote add origin gdrive-test:bit-test-vbr-full
+cd test\cli\output\work_vbr_full && bit remote add origin gdrive-test:bit-test-vbr-full
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_vbr_full & echo hello> greet.txt & echo data> info.bin & bit add greet.txt info.bin & bit commit -m "Add files"
+cd test\cli\output\work_vbr_full && echo hello> greet.txt & echo data> info.bin & bit add greet.txt info.bin & bit commit -m "Add files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_vbr_full & bit push -u origin
+cd test\cli\output\work_vbr_full && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
 
-sleep 3
+ping -n 4 127.0.0.1 >nul
 <<<
 >>>
 >>>= 0
@@ -111,7 +111,7 @@ sleep 3
 # TEST 3: full remote verify — should do file scan and pass
 # ======================================================================
 
-cd test\cli\output\work_vbr_full & bit --remote origin verify
+cd test\cli\output\work_vbr_full && bit --remote origin verify
 <<<
 >>> /\[OK\] All.*files match|Checked/
 >>>= 0
@@ -125,7 +125,7 @@ rclone deletefile gdrive-test:bit-test-vbr-full/info.bin
 >>>
 >>>= 0
 
-cd test\cli\output\work_vbr_full & bit --remote origin verify
+cd test\cli\output\work_vbr_full && bit --remote origin verify
 <<<
 >>> /Missing:|issues found|ERROR/
 >>>= 1

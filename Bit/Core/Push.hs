@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
@@ -24,7 +25,7 @@ import qualified Data.List as List
 import System.IO (stderr, hPutStrLn)
 import Bit.Remote (Remote, remoteName, remoteUrl, RemoteState(..), FetchResult(..), displayRemote, RemotePath(..))
 import Bit.Domain.Plan (RcloneAction(..))
-import Bit.Types (BitM, BitEnv(..), ForceMode(..), unPath)
+import Bit.Types (BitM, BitEnv(..), ForceMode(..), unPath, Hash(..), HashAlgo(..))
 import Control.Monad.Trans.Reader (asks)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
@@ -47,10 +48,13 @@ import Bit.Core.Init (initializeRemoteRepoAt)
 import Bit.Rclone.Sync (deriveActions, executeCommand)
 import Bit.Core.Fetch (classifyRemoteState, fetchBundle)
 import qualified Bit.Device.Identity as Device
-import Bit.CAS (casBlobPath)
+import Bit.CAS (casBlobPath, hasBlobInCas, writeBlobToCas)
 import Bit.Config.Metadata (parseMetadataFile, MetaContent(..))
 import Bit.CDC.Manifest (readManifestFromCas, casManifestPath)
 import Bit.CDC.Types (ChunkRef(..), ChunkManifest(..))
+import qualified Data.Set as Set
+import Data.Set (Set)
+import Bit.Remote.ChunkIndex (queryRemoteBlobs)
 
 -- ============================================================================
 -- Push seam: the only difference between cloud and filesystem push
@@ -348,12 +352,19 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
             -- Always upload binary files to remote CAS (both full and bare).
             -- TODO: Full layout then syncs same files to readable paths (double bandwidth).
             --       Future optimization: skip CAS upload for files that already exist at readable path.
-            -- TODO: Batch CAS uploads (single rclone --files-from) instead of one copyToRemote per file.
-            unless (null copyPaths) $
-                liftIO $ putStrLn $ "Uploading " ++ show (length copyPaths) ++ " file(s) to CAS..."
             let casDir = bitDir </> "cas"
+            -- Query remote CAS to skip blobs that already exist (dedup).
+            remoteBlobs <- liftIO $ do
+                unless (null copyPaths) $ putStrLn "Querying remote CAS for dedup..."
+                queryRemoteBlobs remote
             -- Collect all CAS-relative paths to upload in one batch.
-            casRelPaths <- fmap concat $ liftIO $ mapM (collectCasPaths indexDir casDir) copyPaths
+            -- In lite mode, CAS blobs may not exist locally — stage them from the working tree.
+            casRelPaths <- fmap concat $ liftIO $ mapM (collectCasPaths remoteBlobs cwd indexDir casDir) copyPaths
+            unless (null copyPaths) $
+                liftIO $ putStrLn $ "Uploading " ++ show (length casRelPaths) ++ " file(s) to CAS"
+                    ++ if not (Set.null remoteBlobs)
+                       then " (" ++ show (Set.size remoteBlobs) ++ " already on remote)..."
+                       else "..."
             -- Batch upload: one rclone subprocess with --files-from
             unless (null casRelPaths) $ liftIO $ do
                 progress <- CopyProgress.newSyncProgress (length casRelPaths)
@@ -376,21 +387,33 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
 
 -- | Collect CAS-relative paths for a file: chunk blobs + manifest (if chunked)
 -- or whole blob (if not). Paths are relative to the .bit/ directory.
-collectCasPaths :: FilePath -> FilePath -> FilePath -> IO [FilePath]
-collectCasPaths indexDir casDir filePath = do
+-- Filters out blobs already present on the remote (remoteBlobs set).
+-- In lite mode, CAS blobs may not exist locally. If a whole blob is missing,
+-- stage it from the working tree so the upload succeeds.
+collectCasPaths :: Set (Hash 'MD5) -> FilePath -> FilePath -> FilePath -> FilePath -> IO [FilePath]
+collectCasPaths remoteBlobs cwd indexDir casDir filePath = do
     mMeta <- parseMetadataFile (indexDir </> filePath)
     case mMeta of
         Just mc -> do
             mManifest <- readManifestFromCas casDir (metaHash mc)
             case mManifest of
                 Just manifest -> do
-                    -- Chunked: upload each chunk blob + the manifest file
-                    let chunkPaths = map (\cr -> casBlobPath "cas" (crHash cr)) (cmChunks manifest)
+                    -- Chunked: upload only chunks not already on remote + always the manifest
+                    let newChunkPaths = [ casBlobPath "cas" (crHash cr)
+                                        | cr <- cmChunks manifest
+                                        , not (Set.member (crHash cr) remoteBlobs) ]
                         manifestPath = casManifestPath "cas" (metaHash mc)
-                    pure (chunkPaths ++ [manifestPath])
-                Nothing ->
-                    -- Whole blob
-                    pure [casBlobPath "cas" (metaHash mc)]
+                    pure (newChunkPaths ++ [manifestPath])
+                Nothing -> do
+                    -- Whole blob — skip if already on remote
+                    let h = metaHash mc
+                    if Set.member h remoteBlobs
+                        then pure []
+                        else do
+                            exists <- hasBlobInCas casDir h
+                            unless exists $
+                                writeBlobToCas (cwd </> filePath) casDir h
+                            pure [casBlobPath "cas" h]
         Nothing -> pure []
 
 -- ============================================================================

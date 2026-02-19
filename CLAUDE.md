@@ -89,6 +89,32 @@ Save as `C:\Users\natanh\run.bat` and invoke via `cmd //c "C:\Users\natanh\run.b
 
 **Root cause**: Unknown — may be triggered by disk-full conditions or long-running MSYS2 sessions. Restarting the terminal sometimes fixes it; the batch file workaround always works.
 
+### Working with multiple agents (parallel workers)
+
+When another worker is also modifying code and using the global `bit.exe`, avoid interfering by building into a local `dev-bin/` directory and prepending it to PATH:
+
+```bash
+# Build into a separate binary (not bit.exe)
+cabal exec -- ghc --make -fforce-recomp -O -o bit-dev.exe Bit.hs
+cabal exec -- ghc --make -fforce-recomp -O -o bit-git-router-dev.exe BitGitRouter.hs
+
+# Copy to dev-bin/ as bit.exe and bit-git-router.exe
+mkdir -p dev-bin
+cp bit-dev.exe dev-bin/bit.exe
+cp bit-git-router-dev.exe dev-bin/bit-git-router.exe
+
+# Prepend to PATH in every shell command (shell state doesn't persist between calls)
+export PATH="/c/Users/natanh/repos/bit/dev-bin:$PATH"
+```
+
+Since shell state doesn't persist between Bash tool calls, **every command** must start with the `export PATH=...` prefix. For shelltest runs:
+
+```bash
+export PATH="/c/Users/natanh/repos/bit/dev-bin:$PATH" && cd /c/Users/natanh/repos/bit && shelltest test/cli/some.test
+```
+
+The `dev-bin/` directory is gitignored. After changes are validated, install globally with `cabal install --overwrite-policy=always` or copy `dev-bin/bit.exe` over the global one.
+
 ## Haskell Coding Standards
 
 Consult these docs when modifying `.hs` files:
@@ -125,6 +151,7 @@ When tests fail, analyze which is wrong — the test or the implementation. Fix 
 - Each directive (`<<<`, `>>>`, `>>>2`, `>>>=`) appears at most once per test case
 - All test directories under `test\cli\output\`
 - Use `timeout /t 1 >nul &` before `rmdir` on Windows
+- **Use `&&` (not `&`) after `cd`** — `cd dir & bit cmd` runs `bit cmd` even if `cd` fails (cmd.exe quirk), which leaks into the parent repo. Always: `cd test\cli\output\work_dir && bit cmd`
 
 ### Running Tests
 ```bash
