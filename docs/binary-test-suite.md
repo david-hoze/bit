@@ -137,3 +137,7 @@ The binary tests are adapted from these Git test scripts:
 8. Use files (not shell variables) to share state between `test_expect_success` blocks — each block runs in a subshell
 9. Use absolute paths when passing file arguments to `bit am`, `bit apply`, etc. — these commands pass paths to git which runs from `.bit/index/`
 10. After switching branches, the working tree binary content may be stale — restore it manually if needed for subsequent operations
+
+## Traceability
+
+See [Binary Test Traceability](binary-test-traceability.md) for a detailed mapping of which Git test suite cases inspired each bit test, including cases not yet extracted.

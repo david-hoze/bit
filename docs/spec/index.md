@@ -31,6 +31,7 @@ This directory contains the complete specification for bit, organized by feature
 - [Git Compatibility](git-compatibility.md) -- Git executable router, alias expansion, passthrough, repo discovery
 - [Git Test Suite](git-test-suite.md) -- Git shim, junction mode, test results
 - [Binary File Test Suite](../binary-test-suite.md) -- Binary-specific tests: classification, metadata, push/pull, merge, verify
+- [Binary Test Traceability](../binary-test-traceability.md) -- Git source → bit test mapping for extraction and validation
 - [Git Import](git-import.md) -- Converting git repos to bit repos
 - [Git Export](git-export.md) -- Converting bit repos back to git repos
 
