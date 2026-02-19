@@ -126,7 +126,7 @@
 - Concurrent file scanning with bounded parallelism and progress reporting
 - HLint enforcement of IO safety rules
 - Proof of possession verification for push and pull
-- CDC (content-defined chunking) -- enabled by default in solid mode; FastCDC with gear hash; batch CAS upload/download via `rclone --files-from`; manifest-based reassembly on pull; push dedup via `queryRemoteBlobs` (skips chunks already on remote); pull dedup via `hasBlobInCas` (skips chunks already in local CAS)
+- CDC (content-defined chunking) -- enabled by default in solid mode; FastCDC with gear hash; batch CAS upload/download via `rclone --files-from`; manifest-based reassembly on pull; push dedup via `queryRemoteBlobs` (skips chunks already on remote); pull dedup via `hasBlobInCas` (skips chunks already in local CAS); parallel chunk transfers (`--transfers 32`) for CAS uploads/downloads to overcome per-chunk latency
 
 ---
 

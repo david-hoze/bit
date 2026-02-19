@@ -507,10 +507,10 @@ uploadBlobsBatched remote casDir hashes = do
     -- Write a files-from list: each line is the relative CAS path
     let lines = map (\h -> let p = casBlobRelPath h in p) hashes
     writeFilesFrom tmpFile lines
-    rcloneCopy casDir (remoteTarget remote) ["--files-from", tmpFile]
+    rcloneCopy casDir (remoteTarget remote) ["--files-from", tmpFile, "--transfers", "32"]
 ```
 
-This collapses potentially thousands of chunk uploads into one rclone subprocess — critical for performance on high-latency remotes.
+This collapses potentially thousands of chunk uploads into one rclone subprocess — critical for performance on high-latency remotes. The `--transfers 32` flag runs 32 concurrent uploads within that single subprocess. CAS chunks are small (~128KB each), so each upload is latency-bound, not bandwidth-bound. With 32 parallel transfers at ~30ms round-trip, 1,775 PUTs take ~1.7s in pure latency overhead instead of ~13s at the rclone default of 4 transfers. This flag is applied only to CAS chunk operations — whole-file copies use the default parallelism since they are bandwidth-bound.
 
 ---
 
@@ -989,3 +989,44 @@ The `Bit.CDC.*` modules form a self-contained subsystem. `Bit.CAS` gains a few n
 - **No streaming push/pull of individual chunks.** Chunks are uploaded and downloaded as complete blobs via rclone, not streamed byte-by-byte. rclone handles resumption and retries at the file (blob) level.
     
 - **No CDC for bit-lite.** bit-lite has no CAS. CDC requires the CAS. Enabling CDC implicitly requires `mode: solid`.
+
+---
+
+## Benchmark Results
+
+### Test Setup
+
+- **File:** Blender 4.3 splash screen, 227 MB (238,766,205 bytes)
+- **CDC config:** default (min 128KB, avg 512KB, max 2MB)
+- **Chunks produced:** ~1,370 chunk blobs + 1 manifest per version
+- **Remote:** MinIO (localhost S3, <1ms RTT)
+- **Platform:** Windows MINGW64, bit with `--transfers 32` for CAS operations
+
+### End-to-End Push/Pull Timing (MinIO)
+
+| Step | Description | Time | Chunks transferred |
+|------|-------------|------|--------------------|
+| First push | All chunks, empty remote | 4.4s | 1,926 uploaded |
+| Incremental push | 6-byte edit at 1MB offset | 3.4s | 2 uploaded, 1,370 skipped (dedup) |
+| Incremental push | 4KB edit at 50MB offset | 3.5s | 2 uploaded, 1,371 skipped (dedup) |
+| Fresh pull | Clone into new repo | 5.9s | 1,925 downloaded |
+| Incremental pull | After another 6-byte edit | 6.3s | 1 downloaded, 1,924 skipped (local cache) |
+| Rename push | Rename only, no content change | 3.9s | 1 uploaded (manifest), 1,371 skipped |
+
+The ~3.4s floor on incremental push is overhead from remote state inspection, dedup query (`rclone lsf`), and metadata bundle upload — the actual chunk transfer is near-instant.
+
+### Parallel Transfers A/B Test (MinIO, 1,371 CAS files)
+
+| Transfers | Time | Notes |
+|-----------|------|-------|
+| 4 (old default) | 2.5s | Latency-bound on cloud; bandwidth-bound on localhost |
+| 32 (new) | 1.9s | ~1.3x on localhost (low RTT masks the difference) |
+
+On localhost MinIO (<1ms RTT), the improvement is modest because transfers are bandwidth-bound, not latency-bound. On cloud remotes with 30–100ms RTT, the theoretical speedup is ~8x: at 30ms RTT, 1,371 PUTs take ~10.3s with 4 transfers vs ~1.3s with 32 transfers.
+
+**Google Drive test (inconclusive):** An A/B test against `gdrive-test:` was attempted but did not complete after 28 minutes during the `--transfers 4` phase. This may be due to Google Drive API rate limiting (default: 2 requests/second for file creation) rather than pure latency. Google Drive rate limits would cap both `--transfers 4` and `--transfers 32` at the same throughput, making this remote a poor benchmark for parallelism. The MinIO results isolate the rclone parallelism variable cleanly.
+
+### Scripts
+
+- `test-minio-transfers.sh [remote]` — A/B comparison: same chunks, `--transfers 4` vs `--transfers 32`
+- `test-minio-e2e-timing.sh [remote]` — Full lifecycle: first push, incremental push, clone, incremental pull, verify

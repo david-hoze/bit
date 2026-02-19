@@ -7,6 +7,7 @@ module Bit.Rclone.Progress
     ( SyncProgress(..)
     , newSyncProgress
     , rcloneCopyFiles
+    , rcloneCopyFilesWithFlags
     , rcloneCopyto
     , withSyncProgressReporter
     , incrementFilesComplete
@@ -106,8 +107,14 @@ instance Aeson.FromJSON RcloneStats where
 -- src and dst can be local paths or rclone remote specs (e.g. "gdrive:path").
 -- The file paths must be relative to both src and dst roots.
 rcloneCopyFiles :: String -> String -> [FilePath] -> SyncProgress -> IO ()
-rcloneCopyFiles _ _ [] _ = pure ()
-rcloneCopyFiles src dst files progress = do
+rcloneCopyFiles = rcloneCopyFilesWithFlags []
+
+-- | Like 'rcloneCopyFiles' but with extra rclone flags prepended to the command.
+-- Use this when chunk uploads need different parallelism than whole-file copies,
+-- e.g. @["--transfers", "32"]@ for many small CAS chunks.
+rcloneCopyFilesWithFlags :: [String] -> String -> String -> [FilePath] -> SyncProgress -> IO ()
+rcloneCopyFilesWithFlags _ _ _ [] _ = pure ()
+rcloneCopyFilesWithFlags extraFlags src dst files progress = do
     tmpDir <- getTemporaryDirectory
     bracket (openTempFile tmpDir "bit-files-.txt") cleanupTmpFile $ \(tmpPath, tmpHandle) -> do
         -- Write one posix-style path per line (UTF-8 for rclone compatibility)
@@ -125,7 +132,7 @@ rcloneCopyFiles src dst files progress = do
                    , "--retries", "3"
                    , "--low-level-retries", "10"
                    , "--no-traverse"
-                   ]
+                   ] ++ extraFlags
             cp = (proc "rclone" args)
                    { std_out = NoStream
                    , std_err = CreatePipe

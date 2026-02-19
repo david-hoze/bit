@@ -179,9 +179,11 @@ classifyAndSync remoteRoot cwd layout mRemote filePaths = do
                 unless (null allRelPaths) $ do
                     -- Ensure CAS subdirectories exist for downloaded files
                     mapM_ (createDirectoryIfMissing True . (bitDir </>) . takeDirectory) allRelPaths
+                    -- CAS chunks are small (~128KB) — use high parallelism to beat latency.
                     progress <- CopyProgress.newSyncProgress (length allRelPaths)
                     CopyProgress.withSyncProgressReporter progress $
-                        CopyProgress.rcloneCopyFiles (remoteUrl remote) bitDir allRelPaths progress
+                        CopyProgress.rcloneCopyFilesWithFlags ["--transfers", "32"]
+                            (remoteUrl remote) bitDir allRelPaths progress
 
                 -- Phase 3: write manifests locally and reassemble chunked files.
                 forM_ chunkedFiles $ \(filePath, mc, manifest) -> do

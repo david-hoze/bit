@@ -365,11 +365,13 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
                     ++ if not (Set.null remoteBlobs)
                        then " (" ++ show (Set.size remoteBlobs) ++ " already on remote)..."
                        else "..."
-            -- Batch upload: one rclone subprocess with --files-from
+            -- Batch upload: one rclone subprocess with --files-from.
+            -- CAS chunks are small (~128KB), so latency dominates — use high parallelism.
             unless (null casRelPaths) $ liftIO $ do
                 progress <- CopyProgress.newSyncProgress (length casRelPaths)
                 CopyProgress.withSyncProgressReporter progress $
-                    CopyProgress.rcloneCopyFiles bitDir (remoteUrl remote) casRelPaths progress
+                    CopyProgress.rcloneCopyFilesWithFlags ["--transfers", "32"]
+                        bitDir (remoteUrl remote) casRelPaths progress
             -- Full layout: also sync readable paths and apply move/delete.
             -- Bare layout: no readable tree, so Move/Delete are intentionally not applied.
             when (layout == Device.LayoutFull) $ do
