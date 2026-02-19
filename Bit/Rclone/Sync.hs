@@ -140,8 +140,13 @@ classifyAndSync remoteRoot cwd layout mRemote filePaths = do
                             -- Try to download manifest first (chunked file)
                             createDirectoryIfMissing True casDir
                             manifestCode <- Transport.copyFromRemote remote remoteManifestPath localManifestTmp
-                            case manifestCode of
-                              ExitSuccess -> do
+                            -- Guard: rclone on some backends (S3/minio) may return exit 0
+                            -- without creating the file when the source doesn't exist.
+                            manifestExists <- case manifestCode of
+                                ExitSuccess -> Dir.doesFileExist localManifestTmp
+                                _           -> pure False
+                            case manifestExists of
+                              True -> do
                                 manifestContent <- readFile localManifestTmp
                                 case parseManifest manifestContent of
                                   Just manifest -> do
@@ -162,7 +167,7 @@ classifyAndSync remoteRoot cwd layout mRemote filePaths = do
                                     safeRemoveFile localManifestTmp
                                     createDirectoryIfMissing True (takeDirectory localPath)
                                     void $ Transport.copyFromRemote remote (toPosix (casBlobPath "cas" (metaHash mc))) localPath
-                              _ -> do
+                              False -> do
                                 -- No manifest on remote — download whole blob
                                 safeRemoveFile localManifestTmp
                                 createDirectoryIfMissing True (takeDirectory localPath)
