@@ -29,6 +29,9 @@
 | `RemoteType` | `Bit.Device.Identity` | RemoteFilesystem, RemoteDevice, RemoteCloud, RemoteGit |
 | `RemoteLayout` | `Bit.Device.Identity` | LayoutFull, LayoutBare, LayoutMetadata |
 | `BitMode` | `Bit.Core.Config` | ModeLite, ModeSolid |
+| `ChunkConfig` | `Bit.CDC.Types` | CDC parameters: minSize, avgSize, maxSize |
+| `ChunkManifest` | `Bit.CDC.Types` | File hash + size + ordered list of `ChunkRef` |
+| `ChunkRef` | `Bit.CDC.Types` | Single chunk: hash + offset + length |
 
 ---
 
@@ -55,6 +58,13 @@
 | `Bit/Config/File.hs` | Config file parsing (strict ByteString) |
 | `Bit/Config/Metadata.hs` | Canonical metadata parser/serializer |
 | `Bit/CAS.hs` | Content-addressed store: `casBlobPath`, `writeBlobToCas`, `hasBlobInCas`, `copyBlobFromCasTo` |
+| `Bit/CDC/FastCDC.hs` | FastCDC boundary detection + streaming file chunking |
+| `Bit/CDC/Gear.hs` | 256-entry gear hash table (MD5-generated, deterministic) |
+| `Bit/CDC/Types.hs` | `ChunkConfig`, `Chunk`, `ChunkRef`, `ChunkManifest` |
+| `Bit/CDC/Config.hs` | Read CDC config from `.bit/config`; enabled by default |
+| `Bit/CDC/Manifest.hs` | Serialize/parse/read/write chunk manifests |
+| `Bit/CDC/Reassemble.hs` | Reassemble files from CAS chunks |
+| `Bit/CDC/Store.hs` | Write chunked blobs to CAS |
 | `Bit/Types.hs` | Core types: Hash, FileEntry, BitEnv (with `envPrefix`), BitM |
 | `Bit/Path.hs` | `RemotePath` newtype for remote filesystem paths |
 | `Bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
@@ -115,6 +125,7 @@
 - Concurrent file scanning with bounded parallelism and progress reporting
 - HLint enforcement of IO safety rules
 - Proof of possession verification for push and pull
+- CDC (content-defined chunking) -- enabled by default in solid mode; FastCDC with gear hash; batch CAS upload/download via `rclone --files-from`; manifest-based reassembly on pull
 
 ---
 
