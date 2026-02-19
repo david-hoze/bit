@@ -41,7 +41,7 @@ cdc.enabled=true
 | Key | Values | Default | Description |
 |-----|--------|---------|-------------|
 | `core.mode` | `lite`, `solid` | `lite` | Whether `bit add` writes to the content-addressed store |
-| `cdc.enabled` | `true`, `false` | unset (disabled) | Enable content-defined chunking for large binaries |
+| `cdc.enabled` | `true`, `false` | `true` (enabled) | Enable content-defined chunking for large binaries |
 | `cdc.min-size` | positive integer | `32768` | Minimum chunk size in bytes (32 KB) |
 | `cdc.avg-size` | positive integer | `131072` | Target average chunk size (128 KB) |
 | `cdc.max-size` | positive integer | `524288` | Maximum chunk size (512 KB) |
@@ -95,11 +95,11 @@ The config file is **not** tracked by git. It's local to each clone. This means:
 
 ## Common Workflows
 
-### Enable solid mode with CDC
+### Enable solid mode (CDC is on by default)
 
 ```bash
 bit config core.mode solid
-bit config cdc.enabled true
+# CDC chunking is enabled by default — no need to set cdc.enabled
 ```
 
 ### Check current mode

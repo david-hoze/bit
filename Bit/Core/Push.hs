@@ -352,33 +352,13 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
             unless (null copyPaths) $
                 liftIO $ putStrLn $ "Uploading " ++ show (length copyPaths) ++ " file(s) to CAS..."
             let casDir = bitDir </> "cas"
-            forM_ copyPaths $ \filePath -> do
-                -- TODO: Carry hash from deriveActions to avoid re-reading metadata per file.
-                mMeta <- liftIO $ parseMetadataFile (indexDir </> filePath)
-                case mMeta of
-                    Just mc -> do
-                        -- Check if file has been chunked (CDC)
-                        mManifest <- liftIO $ readManifestFromCas casDir (metaHash mc)
-                        case mManifest of
-                            Just manifest -> do
-                                -- Upload each chunk blob from local CAS
-                                forM_ (cmChunks manifest) $ \cr -> do
-                                    let chunkSrc = casBlobPath casDir (crHash cr)
-                                        chunkDst = toPosix (casBlobPath "cas" (crHash cr))
-                                    _ <- liftIO $ Transport.copyToRemote chunkSrc remote chunkDst
-                                    pure ()
-                                -- Upload the manifest file
-                                let manifestSrc = casManifestPath casDir (metaHash mc)
-                                    manifestDst = toPosix (casManifestPath "cas" (metaHash mc))
-                                _ <- liftIO $ Transport.copyToRemote manifestSrc remote manifestDst
-                                pure ()
-                            Nothing -> do
-                                -- No chunks — upload whole file as before
-                                let localPath = cwd </> filePath
-                                    casRelPath = toPosix (casBlobPath "cas" (metaHash mc))
-                                _ <- liftIO $ Transport.copyToRemote localPath remote casRelPath
-                                pure ()
-                    Nothing -> pure ()
+            -- Collect all CAS-relative paths to upload in one batch.
+            casRelPaths <- fmap concat $ liftIO $ mapM (collectCasPaths indexDir casDir) copyPaths
+            -- Batch upload: one rclone subprocess with --files-from
+            unless (null casRelPaths) $ liftIO $ do
+                progress <- CopyProgress.newSyncProgress (length casRelPaths)
+                CopyProgress.withSyncProgressReporter progress $
+                    CopyProgress.rcloneCopyFiles bitDir (remoteUrl remote) casRelPaths progress
             -- Full layout: also sync readable paths and apply move/delete.
             -- Bare layout: no readable tree, so Move/Delete are intentionally not applied.
             when (layout == Device.LayoutFull) $ do
@@ -393,6 +373,25 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
   where
     isCopy (Copy _ _) = True
     isCopy _          = False
+
+-- | Collect CAS-relative paths for a file: chunk blobs + manifest (if chunked)
+-- or whole blob (if not). Paths are relative to the .bit/ directory.
+collectCasPaths :: FilePath -> FilePath -> FilePath -> IO [FilePath]
+collectCasPaths indexDir casDir filePath = do
+    mMeta <- parseMetadataFile (indexDir </> filePath)
+    case mMeta of
+        Just mc -> do
+            mManifest <- readManifestFromCas casDir (metaHash mc)
+            case mManifest of
+                Just manifest -> do
+                    -- Chunked: upload each chunk blob + the manifest file
+                    let chunkPaths = map (\cr -> casBlobPath "cas" (crHash cr)) (cmChunks manifest)
+                        manifestPath = casManifestPath "cas" (metaHash mc)
+                    pure (chunkPaths ++ [manifestPath])
+                Nothing ->
+                    -- Whole blob
+                    pure [casBlobPath "cas" (metaHash mc)]
+        Nothing -> pure []
 
 -- ============================================================================
 -- Bundle helpers (cloud transport)

@@ -59,11 +59,11 @@ Existing CAS data is preserved.
 
 ## Content-Defined Chunking (CDC)
 
-When `cdc.enabled = true`, `bit add` in solid mode splits large binary files into content-determined chunks using the FastCDC algorithm. Only files at or above `cdc.min-size` are chunked; smaller files are stored as whole blobs.
+In solid mode, `bit add` splits large binary files into content-determined chunks using the FastCDC algorithm. Only files at or above `cdc.min-size` are chunked; smaller files are stored as whole blobs. CDC is enabled by default; set `cdc.enabled = false` to disable.
 
 See [CDC Spec](cdc-spec.md) for the full specification of the chunking algorithm, manifest format, and integration with push/pull.
 
-**Backward compatibility**: CDC is opt-in. Repos without `cdc.enabled = true` behave exactly as before. A CAS containing a mix of whole-blob and chunked files works correctly.
+**Backward compatibility**: A CAS containing a mix of whole-blob and chunked files works correctly. Repos that explicitly set `cdc.enabled = false` store all files as whole blobs.
 
 ---
 
@@ -84,7 +84,7 @@ bit config --list             # dump all key=value pairs
 | Key | Values | Default | Description |
 |-----|--------|---------|-------------|
 | `core.mode` | `lite`, `solid` | `lite` | Whether `bit add` writes to CAS |
-| `cdc.enabled` | `true`, `false` | unset (disabled) | Enable content-defined chunking for large binaries |
+| `cdc.enabled` | `true`, `false` | `true` (enabled) | Enable content-defined chunking for large binaries |
 | `cdc.min-size` | positive integer | `32768` | Minimum chunk size in bytes |
 | `cdc.avg-size` | positive integer | `131072` | Target average chunk size in bytes |
 | `cdc.max-size` | positive integer | `524288` | Maximum chunk size in bytes |

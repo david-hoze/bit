@@ -62,6 +62,34 @@ data FileToSync
     | BinaryToSync FilePath
     deriving (Show, Eq)
 
+-- | Probe a remote for a file's manifest. Returns (filePath, MetaContent, Maybe manifest).
+-- If a manifest exists on the remote, parses it. Otherwise returns Nothing (whole blob).
+classifyForPull :: FilePath -> FilePath -> Remote -> FilePath -> IO (FilePath, Maybe MetaContent, Maybe ChunkManifest)
+classifyForPull indexDir casDir remote filePath = do
+    mMeta <- parseMetadataFile (indexDir </> filePath)
+    case mMeta of
+        Just mc -> do
+            let remoteManifestPath = toPosix (casManifestPath "cas" (metaHash mc))
+                localManifestTmp = casDir </> "tmp_manifest"
+            manifestCode <- Transport.copyFromRemote remote remoteManifestPath localManifestTmp
+            manifestExists <- case manifestCode of
+                ExitSuccess -> Dir.doesFileExist localManifestTmp
+                _           -> pure False
+            if manifestExists
+              then do
+                manifestBytes <- BS.readFile localManifestTmp
+                safeRemoveFile localManifestTmp
+                let manifestContent = case decodeUtf8' manifestBytes of
+                        Right t -> T.unpack t
+                        Left _  -> ""
+                case parseManifest manifestContent of
+                    Just manifest -> pure (filePath, Just mc, Just manifest)
+                    Nothing       -> pure (filePath, Just mc, Nothing)
+              else do
+                safeRemoveFile localManifestTmp
+                pure (filePath, Just mc, Nothing)
+        Nothing -> pure (filePath, Nothing, Nothing)
+
 -- ============================================================================
 -- Shared action derivation (used by both push and pull)
 -- ============================================================================
@@ -127,52 +155,42 @@ classifyAndSync remoteRoot cwd layout mRemote filePaths = do
         case (layout, mRemote) of
             (Device.LayoutBare, Just remote) -> do
                 putStrLn $ "Downloading " ++ show (length binaryPaths) ++ " file(s) from CAS..."
-                -- TODO: Batch CAS downloads (single rclone copy with multiple src/dst) instead of one per file.
                 indexDir <- Git.getIndexPath
                 let casDir = takeDirectory indexDir </> "cas"
-                forM_ binaryPaths $ \filePath -> do
-                    mMeta <- parseMetadataFile (indexDir </> filePath)
-                    case mMeta of
-                        Just mc -> do
-                            let localPath = cwd </> filePath
-                                remoteManifestPath = toPosix (casManifestPath "cas" (metaHash mc))
-                                localManifestTmp = casDir </> "tmp_manifest"
-                            -- Try to download manifest first (chunked file)
-                            createDirectoryIfMissing True casDir
-                            manifestCode <- Transport.copyFromRemote remote remoteManifestPath localManifestTmp
-                            -- Guard: rclone on some backends (S3/minio) may return exit 0
-                            -- without creating the file when the source doesn't exist.
-                            manifestExists <- case manifestCode of
-                                ExitSuccess -> Dir.doesFileExist localManifestTmp
-                                _           -> pure False
-                            case manifestExists of
-                              True -> do
-                                manifestContent <- readFile localManifestTmp
-                                case parseManifest manifestContent of
-                                  Just manifest -> do
-                                    -- Download each chunk to local CAS
-                                    forM_ (cmChunks manifest) $ \cr -> do
-                                      let chunkDst = casBlobPath casDir (crHash cr)
-                                          chunkSrc = toPosix (casBlobPath "cas" (crHash cr))
-                                      createDirectoryIfMissing True (takeDirectory chunkDst)
-                                      void $ Transport.copyFromRemote remote chunkSrc chunkDst
-                                    -- Write manifest locally
-                                    writeManifestToCas casDir (metaHash mc) manifest
-                                    -- Reassemble to working tree
-                                    createDirectoryIfMissing True (takeDirectory localPath)
-                                    void $ reassembleFile casDir manifest localPath
-                                    safeRemoveFile localManifestTmp
-                                  Nothing -> do
-                                    -- Invalid manifest, fall back to whole blob
-                                    safeRemoveFile localManifestTmp
-                                    createDirectoryIfMissing True (takeDirectory localPath)
-                                    void $ Transport.copyFromRemote remote (toPosix (casBlobPath "cas" (metaHash mc))) localPath
-                              False -> do
-                                -- No manifest on remote — download whole blob
-                                safeRemoveFile localManifestTmp
-                                createDirectoryIfMissing True (takeDirectory localPath)
-                                void $ Transport.copyFromRemote remote (toPosix (casBlobPath "cas" (metaHash mc))) localPath
-                        Nothing -> pure ()
+                    bitDir = takeDirectory indexDir
+                createDirectoryIfMissing True casDir
+
+                -- Phase 1: probe manifests and classify files as chunked or whole-blob.
+                -- Manifests are small, so individual downloads are fine here.
+                classified <- mapM (classifyForPull indexDir casDir remote) binaryPaths
+                let chunkedFiles  = [(fp, mc, m) | (fp, Just mc, Just m)  <- classified]
+                    wholeBlobFiles = [(fp, mc)    | (fp, Just mc, Nothing) <- classified]
+
+                -- Phase 2: batch-download all chunks + whole blobs in one rclone call.
+                let chunkRelPaths = concatMap (\(_, _, m) ->
+                        map (\cr -> casBlobPath "cas" (crHash cr)) (cmChunks m)) chunkedFiles
+                    wholeRelPaths = map (\(_, mc) -> casBlobPath "cas" (metaHash mc)) wholeBlobFiles
+                    allRelPaths = chunkRelPaths ++ wholeRelPaths
+                unless (null allRelPaths) $ do
+                    -- Ensure CAS subdirectories exist for downloaded files
+                    mapM_ (createDirectoryIfMissing True . (bitDir </>) . takeDirectory) allRelPaths
+                    progress <- CopyProgress.newSyncProgress (length allRelPaths)
+                    CopyProgress.withSyncProgressReporter progress $
+                        CopyProgress.rcloneCopyFiles (remoteUrl remote) bitDir allRelPaths progress
+
+                -- Phase 3: write manifests locally and reassemble chunked files.
+                forM_ chunkedFiles $ \(filePath, mc, manifest) -> do
+                    writeManifestToCas casDir (metaHash mc) manifest
+                    let localPath = cwd </> filePath
+                    createDirectoryIfMissing True (takeDirectory localPath)
+                    void $ reassembleFile casDir manifest localPath
+
+                -- Phase 4: copy whole blobs from local CAS to working tree.
+                forM_ wholeBlobFiles $ \(filePath, mc) -> do
+                    let localPath = cwd </> filePath
+                        casSrc = casBlobPath casDir (metaHash mc)
+                    createDirectoryIfMissing True (takeDirectory localPath)
+                    Dir.copyFile casSrc localPath
             _ -> do
                 progress <- CopyProgress.newSyncProgress (length binaryPaths)
                 CopyProgress.withSyncProgressReporter progress $
