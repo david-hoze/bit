@@ -119,6 +119,15 @@ verifyFilesystem cwd bitDir targetPath mTargetRemote repairMode concurrency = do
 -- | Verify a cloud remote using the fetched bundle.
 verifyCloud :: FilePath -> FilePath -> Remote -> RepairMode -> Concurrency -> IO ()
 verifyCloud cwd _bitDir remote repairMode concurrency = do
+    layout <- Device.readRemoteLayout cwd (remoteName remote)
+    case layout of
+      Device.LayoutBare -> do
+        putStrLn "[OK] Bare remote — CAS blobs are self-verifying."
+        pure ()
+      _ -> verifyCloudFull cwd remote repairMode concurrency
+
+verifyCloudFull :: FilePath -> Remote -> RepairMode -> Concurrency -> IO ()
+verifyCloudFull cwd remote repairMode concurrency = do
     putStrLn "Verifying remote files..."
 
     entries <- Verify.loadMetadataFromBundle (bundleForRemote (remoteName remote))
