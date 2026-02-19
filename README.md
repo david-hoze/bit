@@ -312,11 +312,17 @@ When you outgrow that and want full history, `bit config core.mode solid` turns 
 ## When to use bit
 
 ✓ Large binary files — video, audio, datasets, models, game assets
+
 ✓ Multiple copies across machines, drives, and cloud storage
+
 ✓ "Which copy is current?" — you need the answer, fast
+
 ✓ Teams sharing files via cloud storage or shared drives
+
 ✓ USB-drive workflows where drive letters change
+
 ✓ Binary history without terabytes of storage (bit-solid)
+
 ✓ GitHub/GitLab PRs and collaboration (via metadata-only remotes)
 
 ## When NOT to use bit
