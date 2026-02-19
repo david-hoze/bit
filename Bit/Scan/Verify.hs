@@ -40,9 +40,6 @@ import qualified Bit.Scan.Remote as Remote.Scan
 import qualified Bit.Remote
 import qualified Bit.Rclone.Run as Transport
 import Bit.Config.Paths (bundleForRemote, bundleCwdPath, fromCwdPath, BundleName)
-import Bit.CAS (hasBlobInCas)
-import Bit.CDC.Manifest (isChunkedInCas, readManifestFromCas)
-import Bit.CDC.Store (hasAllChunksInCas)
 -- System.Process no longer needed: all git calls go through Git.spawnGit
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
@@ -54,20 +51,6 @@ import qualified Data.Set as Set
 import Data.IORef (IORef, atomicModifyIORef')
 import qualified Bit.Scan.Local as Scan
 
--- | Check whether CAS contains content for a given hash, either as a whole blob
--- or as a complete set of CDC chunks with a manifest.
-hasContentInCas :: FilePath -> Hash 'MD5 -> IO Bool
-hasContentInCas casDir h = do
-  wholeBlob <- hasBlobInCas casDir h
-  if wholeBlob then pure True
-  else do
-    chunked <- isChunkedInCas casDir h
-    if not chunked then pure False
-    else do
-      mManifest <- readManifestFromCas casDir h
-      case mManifest of
-        Nothing -> pure False
-        Just manifest -> hasAllChunksInCas casDir manifest
 
 -- | Result of comparing one file to metadata.
 data VerifyIssue
@@ -277,27 +260,14 @@ findIssuesFromScan root entries = do
         | lsCode == ExitSuccess = filter isUserFile $ filter (not . null) (lines lsOut)
         | otherwise             = []
 
-  -- Proof of possession: consult CAS — if blob exists there, treat as verified
-  let casDir = takeDirectory indexDir </> "cas"
+  -- 6. Build issues from changed files (hash mismatches)
+  mismatchIssues <- concat <$> mapM (checkChanged indexDir) changedPaths
 
-  -- 6. Build issues from changed files (hash mismatches); skip if CAS has expected blob
-  mismatchIssues <- concat <$> mapM (checkChanged indexDir casDir) changedPaths
-
-  -- 7. Build issues from missing files (committed but not in working tree); skip if CAS has blob
+  -- 7. Build issues from missing files (committed but not in working tree)
   missingFiltered <- fmap concat $ mapM (\p -> do
     exists <- doesFileExist (root </> p)
     if exists then pure []
-    else do
-      (showCode, committedContent, _) <- Git.runGitAt indexDir ["show", "HEAD:" ++ p]
-      case showCode of
-        ExitSuccess -> do
-          let entry = classifyMetadata (Path p) committedContent
-          case entry of
-            BinaryEntry _ eh _ -> do
-              inCas <- hasContentInCas casDir eh
-              pure [Missing (Path p) | not inCas]
-            TextEntry _ -> pure [Missing (Path p)]
-        _ -> pure [Missing (Path p)]
+    else pure [Missing (Path p)]
     ) committedPaths
 
   let allIssues = mismatchIssues ++ missingFiltered
@@ -305,7 +275,7 @@ findIssuesFromScan root entries = do
 
   pure (VerifyResult totalChecked allIssues)
   where
-    checkChanged indexDir casDir relPath = do
+    checkChanged indexDir relPath = do
       (showCode, committedContent, _) <- Git.runGitAt indexDir ["show", "HEAD:" ++ relPath]
       let fsPath = indexDir </> relPath
       fsExists <- doesFileExist fsPath
@@ -314,18 +284,13 @@ findIssuesFromScan root entries = do
           let committed = classifyMetadata (Path relPath) committedContent
           actual <- classifyMetadataFile (Path relPath) fsPath
           case (committed, actual) of
-            (BinaryEntry _ eh es, BinaryEntry _ ah as') -> do
-              inCas <- hasContentInCas casDir eh
-              if inCas then pure []
-              else pure [HashMismatch (Path relPath)
-                          (T.unpack (hashToText eh))
-                          (T.unpack (hashToText ah))
-                          es
-                          as']
+            (BinaryEntry _ eh es, BinaryEntry _ ah as') ->
+              pure [HashMismatch (Path relPath)
+                      (T.unpack (hashToText eh))
+                      (T.unpack (hashToText ah))
+                      es
+                      as']
             (BinaryEntry _ eh es, TextEntry _) -> do
-              inCas <- hasContentInCas casDir eh
-              if inCas then pure []
-              else do
                 actualHash <- hashFile fsPath
                 actualSize <- fromIntegral . BS.length <$> BS.readFile fsPath
                 pure [HashMismatch (Path relPath)
