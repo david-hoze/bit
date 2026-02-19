@@ -348,7 +348,7 @@ cabal install
 
 `bit` is currently fully tested against Google Drive; other backends are supported through rclone but not yet verified.
 
-For the full design, see [docs/spec.md](docs/spec.md). Check out the [tutorials](docs/tutorials) folder.
+For the full design, see the [specification](docs/spec/index.md). Check out the [tutorials](docs/tutorials/index.md) for step-by-step guides on every feature.
 
 ## License
 
