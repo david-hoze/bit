@@ -118,7 +118,7 @@
 - `GIT_CEILING_DIRECTORIES` support
 - Subdirectory passthrough with CWD restoration
 - Git alias expansion and catch-all passthrough
-- Git test suite shim with `BIT_REAL_GIT` and `BIT_GIT_JUNCTION`
+- Git test suite via compiled router (`bit-git-router`) with `BIT_REAL_GIT` and `BIT_GIT_JUNCTION`; `bit become-git --init` for setup
 - Unified metadata parsing/serialization
 - `oldHead` pattern for diff-based working-tree sync
 - Strict ByteString IO throughout

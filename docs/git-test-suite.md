@@ -6,22 +6,27 @@ to verify compatibility and discover what needs special implementation.
 ## How it works
 
 The `extern/git-shim/` directory contains:
-- **`git`** — a shell script that sets `BIT_REAL_GIT` and `BIT_GIT_JUNCTION=1`,
-  then `exec bit "$@"`. All command routing (aliases, passthrough, init) is
-  handled by bit itself.
+- **`git.exe`** — the compiled git router (`bit-git-router`), installed by
+  `bit become-git --init`. When `BIT_GIT_JUNCTION=1` is set, it routes all
+  commands to bit unconditionally (same as the old bash shim, but without the
+  extra bash process). When the env var is not set, it uses normal routing
+  (init → real git, `.bit/` repos → bit, else → real git).
+- **`bit.exe`** — copied alongside the router by `bit become-git --init` so
+  the router's `findBit` locates it without relying on PATH.
 - **`setup.sh`** — creates the `GIT-BUILD-OPTIONS` stub and `templates/blt/`
   directory inside the `extern/git/` submodule, which the test harness requires.
 
-When `GIT_TEST_INSTALLED` points to the shim directory, the test harness uses our
-shim as `git`. The shim calls `bit`, which handles known commands, expands git
-aliases, and forwards unknown commands to the real git.
+When `GIT_TEST_INSTALLED` points to the shim directory, the test harness uses
+the router as `git`. With `BIT_GIT_JUNCTION=1`, the router calls bit for every
+command. Bit handles known commands, expands git aliases, and forwards unknown
+commands to the real git.
 
 ### Environment variables
 
 | Variable | Set by | Purpose |
 |----------|--------|---------|
-| `BIT_REAL_GIT` | shim | Path to the real git binary. `spawnGit` uses this instead of `git` to avoid recursion through the shim. |
-| `BIT_GIT_JUNCTION` | shim | When `=1`, `initializeRepoAt` creates a `.git` directory junction pointing to `.bit/index/.git` after init. Allows git's repo discovery to work naturally. Uses `mklink /j` (no admin rights). |
+| `BIT_REAL_GIT` | router | Path to the real git binary. `spawnGit` uses this instead of `git` to avoid recursion through the router. |
+| `BIT_GIT_JUNCTION` | test runner scripts | When `=1`, the router routes all commands to bit (no `.bit/` walk-up check). Also tells `initializeRepoAt` to create a `.git` directory junction pointing to `.bit/index/.git` after init. Uses `mklink /j` (no admin rights). |
 
 ### Junction mode behavior
 
@@ -51,7 +56,8 @@ When active, several bit subsystems adapt their behavior:
 ## One-time setup
 
 ```bash
-extern/git-shim/setup.sh
+extern/git-shim/setup.sh    # Create GIT-BUILD-OPTIONS and templates
+bit become-git --init        # Install compiled router as extern/git-shim/git.exe
 ```
 
 This creates:
@@ -66,7 +72,7 @@ All are inside the submodule and gitignored by it, so they won't show up in
 
 ```bash
 cd extern/git/t
-GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
+BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
 ```
 
 Add `--verbose-log` to write output to log files instead of the terminal.
@@ -81,8 +87,8 @@ Implemented:
 - **Inside-git-dir detection** — when CWD has a `HEAD` file (e.g. user `cd`'d
   into `.git`), passthrough uses `runGitHere` (no `-C` override) so git's own
   repo discovery works
-- **`BIT_REAL_GIT`** — prevents recursion when shim is on `PATH`
-- **`BIT_GIT_JUNCTION`** — creates `.git` junction for test compatibility
+- **`BIT_REAL_GIT`** — prevents recursion when router is on `PATH`
+- **`BIT_GIT_JUNCTION`** — router routes all commands to bit; creates `.git` junction for test compatibility
 - **Init before repo discovery** — `bit init` runs before `findBitRoot`, so
   nested init inside an existing repo works correctly
 - **Global flags** — `--exec-path`, `--version`, `--html-path`, etc.
@@ -121,8 +127,8 @@ the `.exe` binary instead of the extensionless script.
 ## Naming constraint on Windows
 
 Copying `bit.exe` as `git.exe` causes GHC runtime crashes (malloc/VirtualAlloc
-failures). The cause is unknown but consistent. The shell script shim avoids this
-by calling `bit` by its original name.
+failures). The cause is unknown but consistent. The router avoids this because it
+is a separate binary (`bit-git-router`) that calls `bit` by its original name.
 
 ## Troubleshooting
 
@@ -131,5 +137,5 @@ by calling `bit` by its original name.
 **"You haven't built things yet"** — The `templates/blt/` directory is missing.
 Run `extern/git-shim/setup.sh`.
 
-**"there is no working Git"** — The shim's `git` script isn't found or isn't
-executable. Check `chmod +x extern/git-shim/git`.
+**"there is no working Git"** — The router's `git.exe` isn't found. Run
+`bit become-git --init` from the repo root.

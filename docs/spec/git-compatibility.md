@@ -32,7 +32,7 @@ Priority order:
 
 ### `bit become-git`
 
-Installs the router:
+Installs the router globally:
 1. Finds real git (`where git` / `which -a git`, filtering out `~/.bit-router/`)
 2. Creates `~/.bit-router/` directory
 3. Saves real git path to `~/.bit-router/real-git`
@@ -41,6 +41,13 @@ Installs the router:
    - **Windows**: modifies `HKCU\Environment\Path` registry key, broadcasts `WM_SETTINGCHANGE`
    - **Unix**: appends `export PATH=...` to `~/.bashrc` and `~/.profile`
 6. Prints instructions to restart shell
+
+### `bit become-git --init`
+
+Sets up the router for git test suite use:
+1. Copies `bit-git-router` as `git.exe` into `extern/git-shim/`
+2. Copies `bit.exe` alongside it (so the router's `findBit` locates it)
+3. Prints instructions for running tests with `BIT_GIT_JUNCTION=1`
 
 ### `bit become-bit`
 

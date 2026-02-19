@@ -22,19 +22,34 @@ main :: IO ()
 main = do
     args <- getArgs
     realGit <- findRealGit
-    -- git init always goes to real git (preserve standard git init behavior)
-    if isGitInit args
-        then exec realGit args
+    junctionMode <- isJunctionMode
+    if junctionMode
+        then do
+            -- Test suite mode: always route to bit (same as bash shim).
+            -- BIT_GIT_JUNCTION=1 means bit will create .git junctions on init
+            -- and handle all commands unconditionally.
+            setEnv "BIT_REAL_GIT" realGit
+            setEnv "BIT_GIT_JUNCTION" "1"
+            bitExe <- findBit
+            exec bitExe args
         else do
-            isBit <- walkUpForBitDir
-            if isBit
-                then do
-                    -- Set BIT_REAL_GIT so bit's internal git calls don't
-                    -- recurse through this router
-                    setEnv "BIT_REAL_GIT" realGit
-                    bitExe <- findBit
-                    exec bitExe args
-                else exec realGit args
+            -- Normal mode: init → real git, bit repos → bit, else → real git
+            if isGitInit args
+                then exec realGit args
+                else do
+                    isBit <- walkUpForBitDir
+                    if isBit
+                        then do
+                            setEnv "BIT_REAL_GIT" realGit
+                            bitExe <- findBit
+                            exec bitExe args
+                        else exec realGit args
+
+-- | Check if junction mode is enabled via BIT_GIT_JUNCTION=1.
+isJunctionMode :: IO Bool
+isJunctionMode = do
+    mVal <- lookupEnv "BIT_GIT_JUNCTION"
+    pure (mVal == Just "1")
 
 -- | Check if the command is @git init@.
 -- Skips leading flags (-c, -C, --bare) to find the subcommand.

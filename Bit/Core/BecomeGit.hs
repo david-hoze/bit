@@ -14,7 +14,7 @@ module Bit.Core.BecomeGit
 
 import System.Directory (createDirectoryIfMissing, doesFileExist, copyFile,
                          removeDirectoryRecursive, doesDirectoryExist,
-                         findExecutable)
+                         findExecutable, getCurrentDirectory)
 import System.FilePath ((</>), takeDirectory)
 import System.Environment (lookupEnv, getExecutablePath)
 import System.IO (hPutStrLn, stderr)
@@ -22,10 +22,61 @@ import System.Exit (exitWith, ExitCode(..), exitSuccess)
 import System.Process (readProcessWithExitCode)
 import Data.List (isInfixOf)
 import Control.Monad (when)
+import Control.Exception (try, SomeException)
 
--- | Install the git router.
-becomeGit :: IO ()
-becomeGit = do
+-- | Install the git router. Dispatches on flags:
+--   --init  → copy router into extern/git-shim/ for test suite use
+--   (none)  → global install into ~/.bit-router/
+becomeGit :: [String] -> IO ()
+becomeGit ["--init"] = becomeGitInit
+becomeGit []         = becomeGitGlobal
+becomeGit flags      = do
+    hPutStrLn stderr $ "error: unknown flags: " ++ unwords flags
+    exitWith (ExitFailure 1)
+
+-- | Set up the router for git test suite use.
+-- Copies bit-git-router as git.exe into extern/git-shim/ (replacing the bash shim).
+becomeGitInit :: IO ()
+becomeGitInit = do
+    -- Find the router executable
+    myPath <- getExecutablePath
+    let myDir = takeDirectory myPath
+    routerSrc <- findRouter myDir
+
+    -- Target: extern/git-shim/ relative to repo root (CWD)
+    cwd <- getCurrentDirectory
+    let shimDir = cwd </> "extern" </> "git-shim"
+    shimExists <- doesDirectoryExist shimDir
+    if not shimExists
+        then do
+            hPutStrLn stderr $ "error: " ++ shimDir ++ " does not exist."
+            hPutStrLn stderr "Run this from the bit repo root."
+            exitWith (ExitFailure 1)
+        else do
+            -- Copy router as git.exe
+            let dst = shimDir </> gitExeName
+            copyFile routerSrc dst
+            putStrLn $ "Installed router as: " ++ dst
+            -- Copy bit.exe alongside so the router's findBit finds it.
+            -- This may fail on Windows if the destination is locked by a
+            -- running process; in that case, print a note for manual copy.
+            let bitSrc = myDir </> bitExeName
+                bitDst = shimDir </> bitExeName
+            bitExists <- doesFileExist bitSrc
+            when bitExists $ do
+                result <- try (copyFile bitSrc bitDst) :: IO (Either SomeException ())
+                case result of
+                    Right () -> putStrLn $ "Installed bit as: " ++ bitDst
+                    Left _   -> putStrLn $ "Note: could not copy bit.exe (file locked?). Copy manually:\n  cp " ++ bitSrc ++ " " ++ bitDst
+            putStrLn ""
+            putStrLn "For git test suite, run:"
+            putStrLn $ "  export BIT_GIT_JUNCTION=1"
+            putStrLn $ "  export GIT_TEST_INSTALLED=" ++ shimDir
+            putStrLn $ "  cd extern/git/t && bash t0001-init.sh --verbose"
+
+-- | Install the git router globally.
+becomeGitGlobal :: IO ()
+becomeGitGlobal = do
     -- 1. Find real git
     realGit <- findRealGit
     putStrLn $ "Real git found at: " ++ realGit
@@ -160,6 +211,14 @@ gitExeName :: FilePath
 gitExeName = "git.exe"
 #else
 gitExeName = "git"
+#endif
+
+-- | Platform-specific bit executable name.
+bitExeName :: FilePath
+#ifdef mingw32_HOST_OS
+bitExeName = "bit.exe"
+#else
+bitExeName = "bit"
 #endif
 
 -- | Add a directory to the front of the user's PATH.

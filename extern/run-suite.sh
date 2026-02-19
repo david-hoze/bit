@@ -22,7 +22,7 @@ cat > "$HELPER" <<SCRIPT
 t="\$1"
 name="\${t%.sh}"
 cd "$TEST_DIR"
-if GIT_TEST_INSTALLED="$SHIM_DIR" bash "\$t" > /dev/null 2>&1; then
+if BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED="$SHIM_DIR" bash "\$t" > /dev/null 2>&1; then
     echo "PASS \$name"
     echo "PASS" > "$RESULTS_DIR/\$name"
 else

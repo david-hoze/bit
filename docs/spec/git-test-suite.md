@@ -1,11 +1,11 @@
 # Git Test Suite Compatibility
 
-## Git Shim (`extern/git-shim/`)
+## Git Router (`extern/git-shim/`)
 
-The shim allows running git's own test suite with bit acting as git. It sets two environment variables and delegates everything to bit:
+The compiled router (`bit-git-router`, installed as `git.exe` by `bit become-git --init`) allows running git's own test suite with bit acting as git. Two environment variables control its behavior:
 
-- **`BIT_REAL_GIT`**: Path to the real git binary. Prevents recursion when bit's internal git calls would go through the shim. `spawnGit` in `Bit/Git/Run.hs` checks this variable and uses the real git instead of the shim.
-- **`BIT_GIT_JUNCTION=1`**: Tells `initializeRepoAt` to create a `.git` directory junction pointing to `.bit/index/.git` after creating a repo. This allows git's repo discovery to work naturally -- tests that do `cd .git && git config` find the git directory through the junction.
+- **`BIT_REAL_GIT`**: Path to the real git binary. Prevents recursion when bit's internal git calls would go through the router. `spawnGit` in `Bit/Git/Run.hs` checks this variable and uses the real git instead of the router.
+- **`BIT_GIT_JUNCTION=1`**: When set, the router routes **all** commands to bit unconditionally (no `.bit/` walk-up, no init-to-real-git bypass). Also tells `initializeRepoAt` to create a `.git` directory junction pointing to `.bit/index/.git` after creating a repo. This allows git's repo discovery to work naturally -- tests that do `cd .git && git config` find the git directory through the junction.
 
 The junction uses Windows `mklink /j` (directory junction), which does not require admin privileges. It is only created when `BIT_GIT_JUNCTION=1` is set -- normal bit usage does not create junctions.
 
@@ -23,7 +23,7 @@ In junction mode, several subsystems adapt:
 
 ```bash
 cd extern/git/t
-GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
+BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
 ```
 
 ---

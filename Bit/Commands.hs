@@ -580,7 +580,7 @@ runCommand args = do
         ("init":rest) -> runInit dashCFlags (otherPeeled ++ rest)
         ("import":rest) -> runImport rest
         ("export":rest) -> runExport rest
-        ["become-git"] -> Bit.becomeGit >> exitSuccess
+        ("become-git":flags) -> Bit.becomeGit flags >> exitSuccess
         ["become-bit"] -> Bit.becomeBit >> exitSuccess
         _ -> pure ()
 

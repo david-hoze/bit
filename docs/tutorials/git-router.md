@@ -57,7 +57,7 @@ Commands bit doesn't handle are passed through to real git automatically.
 
 ## The `git init` rule
 
-`git init` always creates a standard git repo, never a bit repo:
+In normal mode, `git init` always creates a standard git repo, never a bit repo:
 
 ```bash
 git init new-project    # Creates .git/ (standard git)
@@ -68,13 +68,33 @@ This ensures compatibility with scripts and tools that expect `git init` behavio
 
 ## How it works
 
-The router (`bit-git-router`) is a small, fast executable that:
+The router (`bit-git-router`) is a small, fast executable with two modes:
 
-1. Checks if any parent directory has `.bit/` → routes to `bit`
-2. Checks if the command is `init` → always routes to real git
+**Normal mode** (default):
+1. Checks if the command is `init` → always routes to real git
+2. Walks up from CWD looking for `.bit/` → routes to `bit`
 3. Otherwise → routes to real git
 
-It sets `BIT_REAL_GIT` before calling bit so bit's internal git calls don't recurse through the router.
+**Junction mode** (`BIT_GIT_JUNCTION=1`):
+- Routes **all** commands to bit unconditionally (used for git test suite)
+- See `docs/git-test-suite.md` for details
+
+In both modes, it sets `BIT_REAL_GIT` before calling bit so bit's internal git calls don't recurse through the router.
+
+## Test suite setup
+
+To set up the router for running git's own test suite:
+
+```bash
+bit become-git --init    # Copies router + bit into extern/git-shim/
+```
+
+Then run tests with `BIT_GIT_JUNCTION=1`:
+
+```bash
+cd extern/git/t
+BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose
+```
 
 ## Uninstalling
 
