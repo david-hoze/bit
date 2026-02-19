@@ -1,0 +1,141 @@
+# =============================================================================
+# Verify bare remote — CAS-only layout skips file scan
+#
+# Bug: bit --remote verify on a bare cloud remote reported all files as Missing
+# because verifyCloud filtered out cas/ paths and found nothing.
+# Fix: bare remotes skip verification (CAS blobs are self-verifying by spec).
+#
+# Scenarios:
+# 1. Bare remote verify immediately after push -> OK (the original bug)
+# 2. Bare remote verify after a second push -> still OK
+# 3. Full (non-bare) remote verify still does file scan -> OK with matching files
+# 4. Full remote verify detects corruption -> exit 1
+#
+# Requires: rclone remote "gdrive-test" configured.
+# =============================================================================
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_vbr_bare 2>nul & rmdir /s /q test\cli\output\work_vbr_full 2>nul & rclone purge gdrive-test:bit-test-vbr-bare 2>nul & rclone purge gdrive-test:bit-test-vbr-full 2>nul & rclone mkdir gdrive-test:bit-test-vbr-bare & rclone mkdir gdrive-test:bit-test-vbr-full & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: bare repo
+# ======================================================================
+
+mkdir test\cli\output\work_vbr_bare
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_vbr_bare & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_vbr_bare & bit remote add origin gdrive-test:bit-test-vbr-bare --bare
+<<<
+>>> /Remote.*added.*bare layout/
+>>>= 0
+
+cd test\cli\output\work_vbr_bare & echo hello> foo.txt & echo bindata> bar.bin & bit add foo.txt bar.bin & bit commit -m "Initial commit"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_vbr_bare & bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# TEST 1: bare remote verify after first push — should skip file scan
+# ======================================================================
+
+cd test\cli\output\work_vbr_bare & bit --remote origin verify
+<<<
+>>> /\[OK\] Bare remote.*CAS blobs are self-verifying/
+>>>= 0
+
+# ======================================================================
+# TEST 2: bare remote verify after second push — still OK
+# ======================================================================
+
+cd test\cli\output\work_vbr_bare & echo updated> foo.txt & bit add foo.txt & bit commit -m "Update foo" & bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+cd test\cli\output\work_vbr_bare & bit --remote origin verify
+<<<
+>>> /\[OK\] Bare remote.*CAS blobs are self-verifying/
+>>>= 0
+
+# ======================================================================
+# SETUP: full (non-bare) repo — verify still does file scan
+# ======================================================================
+
+mkdir test\cli\output\work_vbr_full
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_vbr_full & bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_vbr_full & bit remote add origin gdrive-test:bit-test-vbr-full
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\output\work_vbr_full & echo hello> greet.txt & echo data> info.bin & bit add greet.txt info.bin & bit commit -m "Add files"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_vbr_full & bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+sleep 3
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# TEST 3: full remote verify — should do file scan and pass
+# ======================================================================
+
+cd test\cli\output\work_vbr_full & bit --remote origin verify
+<<<
+>>> /\[OK\] All.*files match|Checked/
+>>>= 0
+
+# ======================================================================
+# TEST 4: full remote verify detects corruption
+# ======================================================================
+
+rclone deletefile gdrive-test:bit-test-vbr-full/info.bin
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_vbr_full & bit --remote origin verify
+<<<
+>>> /Missing:|issues found|ERROR/
+>>>= 1
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_vbr_bare 2>nul & rmdir /s /q test\cli\output\work_vbr_full 2>nul & rclone purge gdrive-test:bit-test-vbr-bare 2>nul & rclone purge gdrive-test:bit-test-vbr-full 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
