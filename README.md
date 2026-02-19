@@ -26,7 +26,7 @@ The binary file versioning landscape is fragmented because every existing tool m
 
 ### It's just like Git
 
-`bit` does this naturally — *without* losing Git's simplicity, syntax, or semantics. It [integrates](docs/git-compatibility.md) fully with git, creating a seamless experience with binary files:
+`bit` does this naturally — *without* losing Git's simplicity, syntax, or semantics. It [integrates](docs/spec/git-compatibility.md) fully with git, creating a seamless experience with binary files:
 
 ```bash
 bit become-git

@@ -162,12 +162,16 @@ GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose 2>&1 > 
 - Concise: under 72 characters
 - Examples: `Add safe.directory config for USB drives`, `Fix memory leak in pipeline`
 
+## Implementation Reference
+
+Consult `docs/spec/implementation-status.md` before making structural changes. It contains the current type table and module map — use it to stay consistent with existing types, avoid duplicating definitions, and orient yourself in the codebase. Update it when you add or rename types, modules, or significant interfaces.
+
 ## After Implementation
 
 1. Build: `cabal install --overwrite-policy=always`
 2. Add tests that test the feature, follow `.cursor/rules/creating-cli-tests.mdc`
 3. Test the feature and fix if necessary, follow `.cursor/rules/testing-principles.mdc`
 4. Test the entire suite, follow `.cursor/rules/testing-workflow.mdc`
-5. Update `docs/spec.md` accordingly
+5. Update `docs/spec/` accordingly (see `docs/spec/index.md` for file layout)
 6. Review the entire implementation process — if you introduced bugs, follow `.cursor/rules/review.mdc`
 7. Give a commit message, follow `.cursor/rules/commit-messages.mdc`
