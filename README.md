@@ -16,9 +16,18 @@ bit push
 
 ## Why `bit`?
 
-The binary file versioning landscape is fragmented because every existing tool makes trade-offs that hurt in practice. bit is designed around the gaps they leave.
+The binary file versioning landscape is fragmented because every existing tool makes trade-offs that hurt in practice.
 
-### It's just Git
+- **git-lfs** — no delta compression; every modification re-uploads the entire file.
+- **git-annex** — genuinely powerful, but 50+ subcommands and a steep learning curve.
+- **DVC** — built for ML pipelines, not pure binary versioning; slow uploads, no delta transfer.
+- **Perforce** — excellent binary handling, but requires a dedicated server and per-seat licensing.
+- **Dropbox / Google Drive** — convenient sync, but no commits, no branches, no integrity checks.
+- **rclone / rsync** — fast file movers, but no versioning, no rename detection, no conflict awareness.
+
+bit is designed around the gaps they leave.
+
+### It's just like Git
 
 `bit` fills those gaps naturally — *without* losing Git's simplicity, syntax, or semantics. It [integrates](docs/git-compatibility.md) fully with git, creating a seamless experience with binary files:
 
@@ -38,9 +47,11 @@ cd my-git-repo
 git status               # handled by real git — bit stays out of the way
 ```
 
-`bit` actually uses Git under the hood, but only for text. When `bit` needs to passthrough commands to git, it does, and when it has to meddle, it does so at minimum. `bit` philosophy is  "Orchestrate, don't reimplement". `bit` always prefers using git or rclone primitives and machinery whenever possible.
+`bit` actually uses Git under the hood, but only for text. When `bit` needs to passthrough commands to git, it does, and when it has to meddle, it does so at minimum. `bit`'a design philosophy is  "Orchestrate, don't reimplement". `bit` always prefers using git or rclone primitives and machinery whenever possible.
 
 `bit` is designed to pass all the tests in the git test suite, making it fully compatible with git, from submodules to arcane git commands.
+
+### Push & Pull
 
 Push and pull behave differently for binary files — but they should. `git push` in a bit repo uploads your binaries to the remote via rclone, which is what you'd expect, `bit pull` downloads them.`bit` does this using the minimal set of operations (renames and move detection), uploading **only** the data chunks that changed using FastCDC, thus cutting upload expenses.
 
@@ -100,7 +111,7 @@ This works on dumb storage — no server-side process needed. rclone copies the 
 
 Rename a 10GB file with rclone or rsync and you get a delete + full re-upload. Cloud sync tools do the same. git-lfs handles renames correctly (same content hash, no re-upload), but only within its server ecosystem.
 
-bit detects renames by content hash *before* transfer and executes server-side moves via rclone. Rename, reorganize, restructure — bit computes the minimal set of operations and does only what's necessary.
+`bit` detects renames by content hash *before* transfer and executes server-side moves via rclone. Rename, reorganize, restructure — `bit` computes the minimal set of operations and does only what's necessary.
 
 ### You always know where you stand
 
@@ -122,7 +133,7 @@ bit remote add github git@github.com:user/foo.git  # metadata only
 
 ### USB drives just work
 
-bit identifies devices by UUID, not mount point. Plug your drive into a different port, a different machine, a different OS — bit finds it. No other tool in this space handles removable media as a first-class remote.
+`bit` identifies devices by UUID, not mount point. Plug your drive into a different port, a different machine, a different OS — bit finds it. No other tool in this space handles removable media as a first-class remote.
 
 ### git-annex power without git-annex complexity
 
@@ -161,11 +172,11 @@ A fair question. Git already has binary delta compression in its pack files (xde
 
 **Git's remotes must speak the Git protocol.** Even promisor remotes need a process on the other end that understands Git's pack protocol. You can't `git push` to Google Drive. You can't `git fetch` from a USB stick formatted as FAT32. bit's entire value proposition is dumb-storage remotes — any folder rclone can reach. That's a fundamentally different bet about where files should live, and it's not one Git can make without becoming a different tool.
 
-**Forking Git means maintaining Git.** Git is ~400,000 lines of C. A fork means tracking upstream security patches, maintaining compatibility with GitHub/GitLab/Bitbucket, and diverging from a codebase that the entire industry depends on. bit's core is a few thousand lines of Haskell that *calls* Git — if Git improves, bit benefits automatically. A fork competes with Git; bit stands on it.
+**Forking Git means maintaining Git.** Git is ~400,000 lines of C. A fork means tracking upstream security patches, maintaining compatibility with GitHub/GitLab/Bitbucket, and diverging from a codebase that the entire industry depends on. bit's core is a few thousand lines of Haskell that *calls* Git — if Git improves, bit benefits automatically. A fork competes with Git; `bit` stands on it.
 
 **rclone already exists.** Git would need to reimplement multi-cloud file transfer to support S3, Google Drive, Backblaze B2, SFTP, WebDAV, and 70+ other backends. rclone already does this, battle-tested, with millions of users. bit wires Git and rclone together. A Git fork would need to absorb one or rebuild the other.
 
-bit's design bet is that **orchestration beats reimplementation**. Git is an extraordinarily good metadata engine. rclone is an extraordinarily good file mover. Connecting them is a small, auditable codebase. Replacing either is years of work against a moving target. bit chose to be the thin, smart layer between two proven tools — not a third tool trying to do everything.
+`bit`'s design bet is that **orchestration beats reimplementation**. Git is an extraordinarily good metadata engine. rclone is an extraordinarily good file mover. Connecting them is a small, auditable codebase. Replacing either is years of work against a moving target. bit chose to be the thin, smart layer between two proven tools — not a third tool trying to do everything.
 
 ### Comparison at a glance
 
@@ -262,30 +273,6 @@ bit remote add nas //server/share/project
 # bit normalizes and displays: \\server\share\project
 ```
 
-### Replacing git
-
-Want to use `git` commands everywhere and have them automatically route to bit in bit repos?
-
-```bash
-bit become-git
-# Restart your shell
-
-# Now 'git' routes to bit in .bit/ repos:
-cd my-bit-repo
-git status        # handled by bit
-git add .         # handled by bit
-git commit -m "x" # handled by bit
-
-# In regular git repos, git works normally:
-cd my-git-repo
-git status        # handled by real git
-
-# git init always creates a standard git repo:
-git init new-repo # real git, not bit
-```
-
-To uninstall and restore system git: `bit become-bit`
-
 ---
 
 ## bit for everyday use
@@ -325,20 +312,6 @@ When you outgrow that and want full history, `bit config core.mode solid` turns 
 
 ---
 
-## How it compares to Git
-
-bit mirrors Git's CLI, but the internals are fundamentally different:
-
-| Git | bit |
-|---|---|
-| Stores file content in `.git/objects/` | Stores 2-line metadata in `.bit/index/` |
-| `git push` uploads pack files to a Git server | `bit push` copies files via rclone to any backend |
-| Renames detected heuristically after the fact | Renames detected by content hash before transfer |
-| Large files bloat the repo permanently | Large files never enter Git |
-| Requires a Git-compatible server | Requires only a folder |
-
----
-
 ## When to use bit
 
 ✓ Large binary files — video, audio, datasets, models, game assets
@@ -359,7 +332,7 @@ bit mirrors Git's CLI, but the internals are fundamentally different:
 
 ```bash
 # From source (requires GHC + cabal)
-git clone https://github.com/yourorg/bit.git
+git clone https://github.com/david-hoze/bit.git
 cd bit
 cabal install
 ```
@@ -370,7 +343,7 @@ cabal install
 
 bit is under active development. The core workflow — init, add, commit, push, pull, merge, verify, fsck — works today. Both bit-lite (metadata tracking) and bit-solid (content-addressed binary history) are operational, with content-defined chunking for bandwidth-efficient sync.
 
-For the full design, see [docs/spec.md](docs/spec.md). For metadata-only remotes (GitHub, GitLab, bare repos), see the [tutorial](docs/tutorial-metadata-remotes.md).
+For the full design, see [docs/spec.md](docs/spec.md). Check out the [tutorials](docs/tutorials) folder.
 
 ## License
 
