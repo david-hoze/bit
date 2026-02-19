@@ -19,7 +19,7 @@ The git router allows bit to transparently replace `git` on the system. When act
 The router is a standalone executable with no bit module imports (fast startup, minimal dependencies):
 
 1. **`git init`** -> always exec real git (preserves standard `git init` behavior). The router peels leading flags (`-c`, `-C`, `--bare`) to find the `init` subcommand.
-2. **Walk up from CWD** looking for `.bit/` directory or `.bit` file (bitlink). If found -> exec `bit` with all args; otherwise -> exec real git.
+2. **Walk up from CWD** looking for `.bit/` directory or `.bit` file (bitlink). If found -> exec `bit` with all args. If a `.git/` directory (or `.git` file) is found without a `.bit/`, it's a pure git repo — stop walking and exec real git. This prevents a nested git repo from being routed to bit via a parent `.bit/` directory.
 
 Before calling bit, the router sets `BIT_REAL_GIT` to the real git path. This prevents recursion: `spawnGit` in `Bit/Git/Run.hs` checks this variable and uses the real git instead of the router.
 
