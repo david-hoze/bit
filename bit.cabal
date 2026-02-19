@@ -57,6 +57,7 @@ executable bit
                       Bit.CDC.Types,
                       Bit.Core.Config,
                       Bit.Core.Import,
+                      Bit.Core.Export,
                       Bit.Core.Submodule,
                       Bit.Core.BecomeGit
     build-depends:    base16-bytestring ^>=1.0.2.0,

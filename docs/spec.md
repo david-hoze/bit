@@ -557,6 +557,7 @@ Help (`bit help`, `bit -h`, `bit --help`, and `bit help <command>`) works withou
 |---------|---------------|---------------|
 | `bit init` | `git init` | Initialize `.bit/` with internal Git repo |
 | `bit import [<dir>]` | — | Convert existing git repo to bit repo (preserves history) |
+| `bit export [<path>]` | — | Convert bit repo back to plain git repo (inverse of import) |
 | `bit init --bare` | `git init --bare` | Create standard bare repo with `bit/cas/` |
 | `bit init --separate-git-dir <dir>` | `git init --separate-git-dir` | Place git DB and bit metadata at `<dir>`, leave bitlink/gitlink in working dir |
 | `bit add <path>` | `git add` | Compute metadata, write to `.bit/index/`, stage in Git |

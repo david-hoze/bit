@@ -94,7 +94,14 @@ bit push -u origin
 
 **Q: Is the conversion reversible?**
 
-The git history is fully preserved inside `.bit/index/.git/`. If you ever need to go back, you could move `.bit/index/.git` back to the repo root as `.git/`. But in practice there's no reason to — bit passes through all git commands transparently.
+Yes. Use `bit export` to convert back to a plain git repo:
+
+```bash
+bit export          # in-place: removes .bit, restores .git
+bit export /tmp/copy  # copies to a new directory as a plain git repo
+```
+
+See `docs/spec/git-export.md` for details.
 
 **Q: What about submodules?**
 

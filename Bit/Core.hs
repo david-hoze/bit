@@ -56,8 +56,9 @@ module Bit.Core
       -- Branch management
     , unsetUpstream
 
-      -- Import
+      -- Import / Export
     , importRepo
+    , exportRepo
 
       -- Git router
     , becomeGit
@@ -97,5 +98,6 @@ import Bit.Core.RemoteManagement (remoteAdd, remoteShow)
 import Bit.Core.Config (configGet, configSet, configList, configGetWithRoot, configSetWithRoot, configListWithRoot, knownConfigKeys)
 import Bit.Core.Verify (VerifyTarget(..), RepairMode(..), verify, repair, fsck, casBackfill)
 import Bit.Core.Import (importRepo)
+import Bit.Core.Export (exportRepo)
 import Bit.Core.BecomeGit (becomeGit, becomeBit)
 

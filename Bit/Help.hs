@@ -31,6 +31,8 @@ printMainHelp = putStr $ unlines
     , ""
     , "Getting started:"
     , "  init                              Initialize a new bit repository"
+    , "  import [<directory>]              Convert a git repo to a bit repo"
+    , "  export [<path>]                   Convert a bit repo back to a git repo"
     , ""
     , "Tracking changes:"
     , "  status                            Show working tree status"
@@ -131,6 +133,28 @@ commandRegistry =
                         , "for tracking file metadata." ]
         , cmdOptions  = []
         , cmdExamples = [HelpItem "bit init" "Initialize in current directory"]
+        }
+    , CommandHelp
+        { cmdName     = "import"
+        , cmdSynopsis = "Convert a git repo to a bit repo"
+        , cmdUsage    = "bit import [<directory>]"
+        , cmdDesc     = [ "Convert an existing git repository into a bit repository."
+                        , "Moves .git/ into .bit/index/.git/ and sets up bit directory structure."
+                        , "Git history is fully preserved." ]
+        , cmdOptions  = []
+        , cmdExamples = [ HelpItem "bit import" "Import current directory"
+                        , HelpItem "bit import /path/to/repo" "Import a specific repo" ]
+        }
+    , CommandHelp
+        { cmdName     = "export"
+        , cmdSynopsis = "Convert a bit repo back to a plain git repo"
+        , cmdUsage    = "bit export [<path>]"
+        , cmdDesc     = [ "Export a bit repository back to a plain git repository."
+                        , "Without a path: in-place export (removes .bit, restores .git)."
+                        , "With a path: copies to a new directory as a plain git repo." ]
+        , cmdOptions  = []
+        , cmdExamples = [ HelpItem "bit export" "In-place export (destructive)"
+                        , HelpItem "bit export /tmp/copy" "Export to a new directory" ]
         }
     , CommandHelp
         { cmdName     = "status"

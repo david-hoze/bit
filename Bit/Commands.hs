@@ -136,6 +136,40 @@ runImport args = do
     code <- Bit.importRepo targetDir
     exitWith code
 
+-- | Run 'bit export [path]' — convert a bit repo back to a git repo.
+-- Without a path: in-place export (removes .bit, restores .git).
+-- With a path: copies to a new directory as a plain git repo.
+runExport :: [String] -> IO ()
+runExport args = do
+    cwd <- Dir.getCurrentDirectory
+    case args of
+        [] -> do
+            -- In-place: must be in a bit repo
+            hasBit <- Dir.doesDirectoryExist (cwd </> ".bit")
+            hasBitLink <- Dir.doesFileExist (cwd </> ".bit")
+            if not hasBit && not hasBitLink
+                then do
+                    hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
+                    exitWith (ExitFailure 1)
+                else do
+                    code <- Bit.exportRepo Nothing cwd
+                    exitWith code
+        [p] -> do
+            -- Export to path: find bit root from cwd
+            hasBit <- Dir.doesDirectoryExist (cwd </> ".bit")
+            hasBitLink <- Dir.doesFileExist (cwd </> ".bit")
+            if not hasBit && not hasBitLink
+                then do
+                    hPutStrLn stderr "fatal: not a bit repository (or any of the parent directories): .bit"
+                    exitWith (ExitFailure 1)
+                else do
+                    absTarget <- Dir.makeAbsolute p
+                    code <- Bit.exportRepo (Just absTarget) cwd
+                    exitWith code
+        _ -> do
+            hPutStrLn stderr "usage: bit export [<path>]"
+            exitWith (ExitFailure 1)
+
 -- | Git flags that don't need a repo (or .bit directory).
 isGitGlobalFlag :: [String] -> Bool
 isGitGlobalFlag (flag:_) = flag `elem`
@@ -182,7 +216,7 @@ handleDashC dir rest = do
 -- | Commands that bit handles natively (not aliases).
 isKnownCommand :: String -> Bool
 isKnownCommand name = name `elem`
-    [ "init", "import", "add", "commit", "diff", "status", "log", "ls-files"
+    [ "init", "import", "export", "add", "commit", "diff", "status", "log", "ls-files"
     , "rm", "mv", "reset", "restore", "checkout", "branch", "merge"
     , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
     , "cas", "submodule"
@@ -531,6 +565,7 @@ runCommand args = do
     case coreCmd of
         ("init":rest) -> runInit dashCFlags (otherPeeled ++ rest)
         ("import":rest) -> runImport rest
+        ("export":rest) -> runExport rest
         ["become-git"] -> Bit.becomeGit >> exitSuccess
         ["become-bit"] -> Bit.becomeBit >> exitSuccess
         _ -> pure ()
