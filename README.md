@@ -340,7 +340,7 @@ cabal install
 
 `bit` is under active development. The core workflow — init, add, commit, push, pull, merge, verify, fsck — works today. Both bit-lite (metadata tracking) and bit-solid (content-addressed binary history) are operational, with content-defined chunking for bandwidth-efficient sync.
 
-`bit` is currently fully tested against Google Drive; other backends are supported through rclone but not yet verified."
+`bit` is currently fully tested against Google Drive; other backends are supported through rclone but not yet verified.
 
 For the full design, see [docs/spec.md](docs/spec.md). Check out the [tutorials](docs/tutorials) folder.
 
