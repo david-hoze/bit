@@ -8,6 +8,7 @@ module Bit.Core.Init
     , InitOptions(..)
     , defaultInitOptions
     , initializeBareRepoAt
+    , createGitJunction
     ) where
 
 import Prelude hiding (init)

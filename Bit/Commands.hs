@@ -124,6 +124,18 @@ runInit dashCFlags args = do
                     putStrLn "bit initialized successfully!"
             exitWith code
 
+-- | Run 'bit import [dir]' — convert a git repo to a bit repo.
+runImport :: [String] -> IO ()
+runImport args = do
+    targetDir <- case args of
+        []    -> Dir.getCurrentDirectory
+        [d]   -> Dir.makeAbsolute d
+        _     -> do
+            hPutStrLn stderr "usage: bit import [<directory>]"
+            exitWith (ExitFailure 1)
+    code <- Bit.importRepo targetDir
+    exitWith code
+
 -- | Git flags that don't need a repo (or .bit directory).
 isGitGlobalFlag :: [String] -> Bool
 isGitGlobalFlag (flag:_) = flag `elem`
@@ -170,7 +182,7 @@ handleDashC dir rest = do
 -- | Commands that bit handles natively (not aliases).
 isKnownCommand :: String -> Bool
 isKnownCommand name = name `elem`
-    [ "init", "add", "commit", "diff", "status", "log", "ls-files"
+    [ "init", "import", "add", "commit", "diff", "status", "log", "ls-files"
     , "rm", "mv", "reset", "restore", "checkout", "branch", "merge"
     , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
     , "cas", "submodule"
@@ -518,6 +530,7 @@ runCommand args = do
     let (dashCFlags, otherPeeled) = partitionDashC peeledFlags
     case coreCmd of
         ("init":rest) -> runInit dashCFlags (otherPeeled ++ rest)
+        ("import":rest) -> runImport rest
         ["become-git"] -> Bit.becomeGit >> exitSuccess
         ["become-bit"] -> Bit.becomeBit >> exitSuccess
         _ -> pure ()

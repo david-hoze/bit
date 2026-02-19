@@ -1,0 +1,106 @@
+# =============================================================================
+# Import - Convert existing git repo to bit repo
+#
+# Tests: bit import (in-place), bit import <path>, error cases
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_import 2>nul & rmdir /s /q test\cli\output\work_import_ext 2>nul & rmdir /s /q test\cli\output\work_import_nobit 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP - create a git repo with history
+# ======================================================================
+
+mkdir test\cli\output\work_import & cd test\cli\output\work_import & git init & echo hello> file.txt & git add file.txt & git commit -m "initial commit" & echo world> file2.txt & git add file2.txt & git commit -m "second commit"
+<<<
+>>> /.*commit.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: IMPORT IN-PLACE
+# ======================================================================
+
+# ---- Run bit import from inside the git repo ----
+cd test\cli\output\work_import & set "BIT_GIT_JUNCTION=1" & bit import
+<<<
+>>> /Imported git repository/
+>>>= 0
+
+# ---- Verify .bit directory exists ----
+if exist "test\cli\output\work_import\.bit\" (echo bit-exists) else (echo bit-missing)
+<<<
+>>>
+bit-exists
+>>>= 0
+
+# ---- Verify .bit/index/.git exists ----
+if exist "test\cli\output\work_import\.bit\index\.git\" (echo index-git-exists) else (echo index-git-missing)
+<<<
+>>>
+index-git-exists
+>>>= 0
+
+# ---- Verify git history is preserved ----
+cd test\cli\output\work_import & git log --oneline
+<<<
+>>> /initial commit/
+>>>= 0
+
+# ---- Verify bit status shows files need committing (metadata transition) ----
+cd test\cli\output\work_import & set "BIT_GIT_JUNCTION=1" & bit status
+<<<
+>>> /modified/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: ERROR CASES
+# ======================================================================
+
+# ---- Error: not a git repo ----
+mkdir test\cli\output\work_import_nobit & cd test\cli\output\work_import_nobit & bit import
+<<<
+>>>2 /not a git repository/
+>>>= 1
+
+# ---- Error: already a bit repo ----
+cd test\cli\output\work_import & bit import
+<<<
+>>>2 /already a bit repository/
+>>>= 1
+
+# ======================================================================
+# SECTION 4: IMPORT WITH PATH ARGUMENT
+# ======================================================================
+
+# ---- Create another git repo for external import ----
+mkdir test\cli\output\work_import_ext & cd test\cli\output\work_import_ext & git init & echo test> f.txt & git add f.txt & git commit -m "ext commit"
+<<<
+>>> /.*commit.*/
+>>>= 0
+
+# ---- Import from outside the repo ----
+set "BIT_GIT_JUNCTION=1" & bit import test\cli\output\work_import_ext
+<<<
+>>> /Imported git repository/
+>>>= 0
+
+# ---- Verify the external import worked ----
+if exist "test\cli\output\work_import_ext\.bit\index\.git\" (echo ext-ok) else (echo ext-fail)
+<<<
+>>>
+ext-ok
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_import 2>nul & rmdir /s /q test\cli\output\work_import_ext 2>nul & rmdir /s /q test\cli\output\work_import_nobit 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

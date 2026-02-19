@@ -549,13 +549,14 @@ Pull uses `applyMergeToWorkingDir` to sync after a merge; when the user runs **m
 
 **CRITICAL**: The CLI mirrors Git's interface. Users familiar with Git should feel immediately at home. Exit codes follow git's convention: 0 for success, 1 for failure.
 
-Help (`bit help`, `bit -h`, `bit --help`, and `bit help <command>`) works without a repository; all other commands require `.bit` to exist (except `bit init`).
+Help (`bit help`, `bit -h`, `bit --help`, and `bit help <command>`) works without a repository; all other commands require `.bit` to exist (except `bit init` and `bit import`).
 
 ### Command Mapping
 
 | Command | Git Equivalent | bit Behavior |
 |---------|---------------|---------------|
 | `bit init` | `git init` | Initialize `.bit/` with internal Git repo |
+| `bit import [<dir>]` | — | Convert existing git repo to bit repo (preserves history) |
 | `bit init --bare` | `git init --bare` | Create standard bare repo with `bit/cas/` |
 | `bit init --separate-git-dir <dir>` | `git init --separate-git-dir` | Place git DB and bit metadata at `<dir>`, leave bitlink/gitlink in working dir |
 | `bit add <path>` | `git add` | Compute metadata, write to `.bit/index/`, stage in Git |
