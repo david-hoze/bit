@@ -90,36 +90,33 @@ Implemented:
 
 ### Test results
 
-| Test Suite | Pass | Fail | Notes |
-|------------|------|------|-------|
-| t0001-init.sh | 89/91 | 2 | Test 41 (Windows file lock flake), Test 91 (`test-tool path-utils absolute_path` stub limitation) |
-| t0002-gitfile.sh | 14/14 | 0 | All gitfile tests pass |
-| t0003-attributes.sh | 54/54 | 0 | All attribute tests pass |
-| t0004-unwritable.sh | 9/9 | 0 | 8 skipped (missing POSIXPERM/SANITY) |
-| t0005-signals.sh | 3/5 | 2 | 2 fail (MINGW signal handling differences) |
-| t0006-date.sh | 0/129 | 129 | All tests need `test-tool date` (stub limitation) |
-| t0007-git-var.sh | 24/27 | 3 | 3 fail (need `test-tool` for shell-path / ident) |
-| t0008-ignores.sh | 397/397 | 0 | All ignore tests pass (junction detection) |
-| t0010-racy-git.sh | 10/10 | 0 | All racy git tests pass |
-| t0012-help.sh | 5/179 | 174 | Help tests require git's man pages / html docs (not available via shim) |
-| t0013-sha1dc.sh | 1/1 | 0 | SHA-1 collision detection passes |
-| t0014-alias.sh | 5/5 | 0 | All alias tests pass (loop detection + config passthrough) |
+**Full run**: 1007 test suites, **855 pass** (85%), 142 fail.
+See `docs/git-test-suite-report.md` for the full categorized breakdown.
 
-### test-tool stub
+**Failure categories** (not bit regressions):
+- Infrastructure (GPG, Perl, man pages, SSH helper): ~15 suites
+- Git version mismatch (v2.47 tests vs v2.48+ git): ~20 suites
+- Known upstream breakage (`# TODO known breakage`): ~15 suites
+- Submodule known breakage: ~15 suites
+- Trace2 output differences (shim adds events): 4 suites
+- Windows/MINGW issues (TAR, symlinks, file locks): ~10 suites
+- TAR helper extraction failures (cascading): ~8 suites
 
-The `extern/git` submodule is a **shallow clone** (`--depth 1`) to save disk space.
-Git's `test-tool` binary requires `make` and a full build of libgit.a, which is not
-available. Instead, `setup.sh` (or a manual step) creates a bash stub at
-`extern/git/t/helper/test-tool` that handles the subset of test-tool commands needed
-by the test framework:
+**Highlighted passing suites** (exercising core git compatibility):
+- t0001-init (90/91), t0003-attributes (54/54), t0008-ignores (397/397)
+- t0020-crlf (36/36), t0021-conversion (42/42), t0027-auto-crlf (2600/2600)
+- t1000-read-tree-m-3way (83/83), t1300-config (480/480)
+- t1500-rev-parse (79/79), t1510-repo-setup (109/109)
+- t0033-safe-directory (22/22), t0610-reftable-basics (89/89)
 
-- `path-utils file-size` — uses `wc -c`
-- `date is64bit` / `date time_t-is64bit` — always exits 0
-- `env-helper` — reads env vars for boolean test prerequisites
+### test-tool
 
-Tests that require the real `test-tool` (e.g. `test-tool date relative`,
-`test-tool path-utils absolute_path`) will fail. These failures are
-**test-tool stub limitations**, not bit regressions.
+The real `test-tool.exe` is compiled from the git submodule using w64devkit.
+See `docs/compiling-git-test-tool.md` for build instructions.
+
+The compiled binary lives at `extern/git/t/helper/test-tool.exe`. The old bash
+stub (`test-tool`) has been renamed to `test-tool.sh.bak` so that MSYS2 resolves
+the `.exe` binary instead of the extensionless script.
 
 ## Naming constraint on Windows
 
