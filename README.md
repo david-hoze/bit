@@ -16,11 +16,17 @@ bit push
 
 ## Why `bit`?
 
-The binary file versioning landscape is fragmented because every existing tool makes trade-offs that hurt in practice. bit is designed around the gaps they leave.
+The binary file versioning landscape is fragmented because every existing tool makes trade-offs that hurt in practice. bit is designed around the gaps they leave. It's features:
+
+- Full Git compatibility — branches, merges, PRs, the entire workflow.
+- No server required — any folder rclone can reach is a valid remote.
+- Sub-file delta transfer — only changed chunks get uploaded, not entire files.
+- Multi-remote by design — cloud, USB, NAS, and Git hosts in one repo.
+- Flexible history — switch between lightweight tracking and full binary versioning per-repo.
 
 ### It's just like Git
 
-`bit` fills those gaps naturally — *without* losing Git's simplicity, syntax, or semantics. It [integrates](docs/git-compatibility.md) fully with git, creating a seamless experience with binary files:
+`bit` does this naturally — *without* losing Git's simplicity, syntax, or semantics. It [integrates](docs/git-compatibility.md) fully with git, creating a seamless experience with binary files:
 
 ```bash
 bit become-git
@@ -38,9 +44,9 @@ cd my-git-repo
 git status               # handled by real git — bit stays out of the way
 ```
 
-`bit` actually uses Git under the hood, but only for text. When `bit` needs to passthrough commands to git, it does, and when it has to meddle, it does so at minimum. `bit`'a design philosophy is  "Orchestrate, don't reimplement". `bit` always prefers using git or rclone primitives and machinery whenever possible.
+`bit` actually uses Git under the hood, but only for text. When `bit` needs to passthrough commands to git, it does, and when it has to meddle, it does so at minimum. `bit`'s design philosophy is  "Orchestrate, don't reimplement". `bit` always prefers using git or rclone primitives and machinery whenever possible.
 
-`bit` is designed to pass all the tests in the git test suite, making it fully compatible with git, from submodules to arcane git commands.
+`bit` targets full compatibility with Git's CLI, including its test suite. That means you can use it in scripts, CI pipelines, and existing Git-based workflows without modification — if it works with `git`, it works with `bit`.
 
 ### Push & Pull
 
@@ -78,7 +84,7 @@ DVC takes a similar approach (`.dvc` sidecar files tracked by Git), but adds an 
 
 git-lfs requires a server implementing its Batch API — GitHub, GitLab, or a self-hosted server like Rudolfs or Giftless. Perforce requires a `p4d` server (free for ≤5 users, ~$39/user/month beyond that). Both create infrastructure dependencies and, in LFS's case, bandwidth bills that can reach thousands of dollars monthly from CI alone.
 
-bit needs only a folder. Any rclone backend works as a remote — Google Drive, S3, Backblaze B2, SFTP, a USB drive, a network share. No server process, no API, no per-seat licensing. Your files live wherever you put them.
+`bit` needs only a folder. Any rclone backend works as a remote — Google Drive, S3, Backblaze B2, SFTP, a USB drive, a network share. No server process, no API, no per-seat licensing. Your files live wherever you put them.
 
 ### Small edits don't mean big uploads
 
@@ -332,7 +338,9 @@ cabal install
 
 ## Status
 
-bit is under active development. The core workflow — init, add, commit, push, pull, merge, verify, fsck — works today. Both bit-lite (metadata tracking) and bit-solid (content-addressed binary history) are operational, with content-defined chunking for bandwidth-efficient sync.
+`bit` is under active development. The core workflow — init, add, commit, push, pull, merge, verify, fsck — works today. Both bit-lite (metadata tracking) and bit-solid (content-addressed binary history) are operational, with content-defined chunking for bandwidth-efficient sync.
+
+`bit` is currently fully tested against Google Drive; other backends are supported through rclone but not yet verified."
 
 For the full design, see [docs/spec.md](docs/spec.md). Check out the [tutorials](docs/tutorials) folder.
 
