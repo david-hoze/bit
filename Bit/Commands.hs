@@ -547,16 +547,25 @@ runCommand args = do
     -- (e.g. -f = --file for config, -f = --force for checkout). The hasForce
     -- check above detects it for push/pull force mode; passthrough commands
     -- keep -f for git to interpret per-command.
-    let cmd = filter (`notElem` ["--force", "--force-with-lease", "--sequential", "-h", "--help"]) args
+    let cmdBase = filter (`notElem` ["--force", "--force-with-lease", "--sequential"]) args
+    let cmdName0 = commandKey (filter (`notElem` ["-h", "--help"]) cmdBase)
 
     -- Help intercept (before repo check — help works without a repo)
-    when (hasHelp || hasTerseHelp) $ do
-        let key = commandKey cmd
-        if null key
+    -- Only intercept for known bit commands; unknown commands pass through
+    -- to git with -h/--help intact (git expects exit code 129 for -h).
+    when (hasHelp || hasTerseHelp) $
+        if null cmdName0
             then printMainHelp >> exitSuccess
-            else if hasTerseHelp
-                then printTerseHelp key >> exitSuccess
-                else printCommandHelp key >> exitSuccess
+            else when (isKnownCommand cmdName0) $
+                if hasTerseHelp
+                    then printTerseHelp cmdName0 >> exitSuccess
+                    else printCommandHelp cmdName0 >> exitSuccess
+
+    -- Strip -h/--help for known commands (already handled above or will be
+    -- handled by bit). For unknown commands, keep them for git passthrough.
+    let cmd = if isKnownCommand cmdName0
+                then filter (`notElem` ["-h", "--help"]) cmdBase
+                else cmdBase
 
     -- init runs before repo discovery — it creates repos, not uses them.
     -- Peel global flags (-c key=val, --bare) that appear before "init".

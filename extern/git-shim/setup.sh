@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GIT_DIR="$(cd "$SCRIPT_DIR/../git" && pwd)"
 
 # 1. Create GIT-BUILD-OPTIONS stub
-cat > "$GIT_DIR/GIT-BUILD-OPTIONS" <<'EOF'
+cat > "$GIT_DIR/GIT-BUILD-OPTIONS" <<EOF
 PERL_PATH='/usr/bin/perl'
 SHELL_PATH='/usr/bin/bash'
 TEST_SHELL_PATH='/usr/bin/bash'
@@ -16,8 +16,9 @@ NO_PERL=
 NO_PYTHON=
 NO_UNIX_SOCKETS=
 PAGER_ENV='LESS=FRX LV=-c'
-DC_SHA1=
 X=''
+TAR='tar'
+GIT_TEST_TEMPLATE_DIR='$GIT_DIR/templates/blt'
 EOF
 
 # 2. Create templates/blt directory with default template files
@@ -34,14 +35,21 @@ cat > "$GIT_DIR/templates/blt/description" <<'TMPL'
 Unnamed repository; edit this file 'description' to name the repository.
 TMPL
 
-# 3. Create test-tool stub
-# The test harness requires t/helper/test-tool. Building the real one needs
-# make + libgit.a, which we don't have. This stub handles the subset of
-# commands the harness checks during startup (prereqs, file-size).
-# Tests that need the real test-tool (e.g. date relative, path-utils
-# absolute_path) will fail — those are stub limitations, not bit regressions.
+# 3. Ensure test-tool exists
+# The test harness requires t/helper/test-tool. If a compiled test-tool.exe
+# exists (built via docs/compiling-git-test-tool.md), skip stub creation.
+# Otherwise, create a minimal bash stub for basic harness startup.
 mkdir -p "$GIT_DIR/t/helper"
-cat > "$GIT_DIR/t/helper/test-tool" <<'STUB'
+if [ -f "$GIT_DIR/t/helper/test-tool.exe" ] && [ "$(wc -c < "$GIT_DIR/t/helper/test-tool.exe")" -gt 10000 ]; then
+    echo "Using compiled test-tool.exe ($(wc -c < "$GIT_DIR/t/helper/test-tool.exe") bytes)."
+    # Remove any extensionless stub that could shadow the .exe on MSYS2
+    if [ -f "$GIT_DIR/t/helper/test-tool" ] && [ ! "$GIT_DIR/t/helper/test-tool" -ef "$GIT_DIR/t/helper/test-tool.exe" ]; then
+        rm -f "$GIT_DIR/t/helper/test-tool"
+    fi
+else
+    echo "No compiled test-tool.exe found — creating bash stub (limited)."
+    echo "Build the real one with: docs/compiling-git-test-tool.md"
+    cat > "$GIT_DIR/t/helper/test-tool" <<'STUB'
 #!/bin/bash
 case "$1" in
     path-utils)
@@ -74,7 +82,8 @@ case "$1" in
     *) exit 1 ;;
 esac
 STUB
-chmod +x "$GIT_DIR/t/helper/test-tool"
+    chmod +x "$GIT_DIR/t/helper/test-tool"
+fi
 
 echo "Git test infrastructure ready."
 echo "Run tests with:"
