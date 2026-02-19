@@ -30,32 +30,32 @@ mkdir test\cli\output\work_ml_lite_remote
 >>>
 >>>= 0
 
-cd test\cli\output\work_ml_lite_local & bit init
+cd test\cli\output\work_ml_lite_local && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_local & bit config core.mode lite
+cd test\cli\output\work_ml_lite_local && bit config core.mode lite
 <<<
 >>> /[Mm]ode set to lite|lite/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_local & bit remote add origin ..\work_ml_lite_remote
+cd test\cli\output\work_ml_lite_local && bit remote add origin ..\work_ml_lite_remote
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_local & echo lite content> file.txt & echo bin> x.bin & bit add file.txt x.bin & bit commit -m "Add files"
+cd test\cli\output\work_ml_lite_local && echo lite content> file.txt & echo bin> x.bin & bit add file.txt x.bin & bit commit -m "Add files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_local & bit push -u origin
+cd test\cli\output\work_ml_lite_local && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_remote & bit status
+cd test\cli\output\work_ml_lite_remote && bit status
 <<<
 >>> /nothing to commit|On branch/
 >>>= 0
@@ -65,54 +65,54 @@ mkdir test\cli\output\work_ml_lite_b
 >>>
 >>>= 0
 
-cd test\cli\output\work_ml_lite_b & bit init & bit config core.mode lite & bit remote add origin ..\work_ml_lite_remote
+cd test\cli\output\work_ml_lite_b && bit init & bit config core.mode lite & bit remote add origin ..\work_ml_lite_remote
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_b & bit fetch & bit pull origin
+cd test\cli\output\work_ml_lite_b && bit fetch & bit pull origin
 <<<
 >>> /first pull|Checking out|Syncing|Merge made|Pulling/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_b & findstr /C:"lite content" .bit\index\file.txt >nul
+cd test\cli\output\work_ml_lite_b && findstr /C:"lite content" .bit\index\file.txt >nul
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_ml_lite_b & echo from B> b.txt & bit add b.txt & bit commit -m "Add b" & bit push origin
+cd test\cli\output\work_ml_lite_b && echo from B> b.txt & bit add b.txt & bit commit -m "Add b" & bit push origin
 <<<
 >>> /Push complete/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_local & echo from A> a.txt & bit add a.txt & bit commit -m "Add a" & bit pull origin
+cd test\cli\output\work_ml_lite_local && echo from A> a.txt & bit add a.txt & bit commit -m "Add a" & bit pull origin
 <<<
 >>> /Merge made|Updating|Syncing/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_local & if exist a.txt (echo a) else (echo no)
+cd test\cli\output\work_ml_lite_local && if exist a.txt (echo a) else (echo no)
 <<<
 >>>
 a
 >>>= 0
 
-cd test\cli\output\work_ml_lite_local & if exist b.txt (echo b) else (echo no)
+cd test\cli\output\work_ml_lite_local && if exist b.txt (echo b) else (echo no)
 <<<
 >>>
 b
 >>>= 0
 
-cd test\cli\output\work_ml_lite_remote & echo bad> x.bin
+cd test\cli\output\work_ml_lite_remote && echo bad> x.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_ml_lite_remote & echo new> new.bin & bit add new.bin & bit commit -m "Remote add"
+cd test\cli\output\work_ml_lite_remote && echo new> new.bin & bit add new.bin & bit commit -m "Remote add"
 <<<
 >>> /.*changed/
 >>>= 0
 
-cd test\cli\output\work_ml_lite_local & bit pull origin --manual-merge
+cd test\cli\output\work_ml_lite_local && bit pull origin --manual-merge
 <<<
 >>> /Remote divergence|conflicts|No remote divergence|Proceeding with normal pull/
 >>>= 0
@@ -131,27 +131,27 @@ mkdir test\cli\output\work_ml_solid_remote
 >>>
 >>>= 0
 
-cd test\cli\output\work_ml_solid_local & bit init
+cd test\cli\output\work_ml_solid_local && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_ml_solid_local & bit config core.mode solid
+cd test\cli\output\work_ml_solid_local && bit config core.mode solid
 <<<
 >>> /[Ss]olid|Mode set/
 >>>= 0
 
-cd test\cli\output\work_ml_solid_local & bit remote add origin ..\work_ml_solid_remote
+cd test\cli\output\work_ml_solid_local && bit remote add origin ..\work_ml_solid_remote
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_ml_solid_local & echo solid content> file.txt & echo bin> x.bin & bit add file.txt x.bin & bit commit -m "Add files"
+cd test\cli\output\work_ml_solid_local && echo solid content> file.txt & echo bin> x.bin & bit add file.txt x.bin & bit commit -m "Add files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_ml_solid_local & bit push -u origin
+cd test\cli\output\work_ml_solid_local && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -161,54 +161,54 @@ mkdir test\cli\output\work_ml_solid_b
 >>>
 >>>= 0
 
-cd test\cli\output\work_ml_solid_b & bit init & bit config core.mode solid & bit remote add origin ..\work_ml_solid_remote
+cd test\cli\output\work_ml_solid_b && bit init & bit config core.mode solid & bit remote add origin ..\work_ml_solid_remote
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_ml_solid_b & bit fetch & bit pull origin
+cd test\cli\output\work_ml_solid_b && bit fetch & bit pull origin
 <<<
 >>> /first pull|Checking out|Syncing|Merge made|Pulling/
 >>>= 0
 
-cd test\cli\output\work_ml_solid_b & findstr /C:"solid content" .bit\index\file.txt >nul
+cd test\cli\output\work_ml_solid_b && findstr /C:"solid content" .bit\index\file.txt >nul
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_ml_solid_b & echo from B> b.txt & bit add b.txt & bit commit -m "Add b" & bit push origin
+cd test\cli\output\work_ml_solid_b && echo from B> b.txt & bit add b.txt & bit commit -m "Add b" & bit push origin
 <<<
 >>> /Push complete/
 >>>= 0
 
-cd test\cli\output\work_ml_solid_local & echo from A> a.txt & bit add a.txt & bit commit -m "Add a" & bit pull origin
+cd test\cli\output\work_ml_solid_local && echo from A> a.txt & bit add a.txt & bit commit -m "Add a" & bit pull origin
 <<<
 >>> /Merge made|Updating|Syncing/
 >>>= 0
 
-cd test\cli\output\work_ml_solid_local & if exist a.txt (echo a) else (echo no)
+cd test\cli\output\work_ml_solid_local && if exist a.txt (echo a) else (echo no)
 <<<
 >>>
 a
 >>>= 0
 
-cd test\cli\output\work_ml_solid_local & if exist b.txt (echo b) else (echo no)
+cd test\cli\output\work_ml_solid_local && if exist b.txt (echo b) else (echo no)
 <<<
 >>>
 b
 >>>= 0
 
-cd test\cli\output\work_ml_solid_remote & echo bad> x.bin
+cd test\cli\output\work_ml_solid_remote && echo bad> x.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_ml_solid_remote & echo new> new.bin & bit add new.bin & bit commit -m "Remote add"
+cd test\cli\output\work_ml_solid_remote && echo new> new.bin & bit add new.bin & bit commit -m "Remote add"
 <<<
 >>> /.*changed/
 >>>= 0
 
-cd test\cli\output\work_ml_solid_local & bit pull origin --manual-merge
+cd test\cli\output\work_ml_solid_local && bit pull origin --manual-merge
 <<<
 >>> /Remote divergence|conflicts|No remote divergence|Proceeding with normal pull/
 >>>= 0

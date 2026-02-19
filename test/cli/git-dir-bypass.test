@@ -22,7 +22,7 @@ mkdir test\cli\output\work_gitdir
 <<<
 >>>= 0
 
-cd test\cli\output\work_gitdir & bit init -q
+cd test\cli\output\work_gitdir && bit init -q
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -32,11 +32,11 @@ cd test\cli\output\work_gitdir & bit init -q
 # ======================================================================
 
 # ---- diff --no-index works with GIT_DIR=/dev/null ----
-cd test\cli\output\work_gitdir & echo aaa> a.txt & echo bbb> b.txt
+cd test\cli\output\work_gitdir && echo aaa> a.txt & echo bbb> b.txt
 <<<
 >>>= 0
 
-cd test\cli\output\work_gitdir & set "GIT_DIR=/dev/null" & bit diff --no-index --stat a.txt b.txt
+cd test\cli\output\work_gitdir && set "GIT_DIR=/dev/null" & bit diff --no-index --stat a.txt b.txt
 <<<
 >>> /a\.txt.*b\.txt/
 >>>= 1
@@ -46,18 +46,18 @@ cd test\cli\output\work_gitdir & set "GIT_DIR=/dev/null" & bit diff --no-index -
 # ======================================================================
 
 # ---- Create a bare git repo to use as GIT_DIR ----
-cd test\cli\output\work_gitdir & git init --bare bare.git
+cd test\cli\output\work_gitdir && git init --bare bare.git
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Set a config value in the bare repo ----
-cd test\cli\output\work_gitdir & git config -f bare.git\config test.mykey myvalue
+cd test\cli\output\work_gitdir && git config -f bare.git\config test.mykey myvalue
 <<<
 >>>= 0
 
 # ---- GIT_DIR=bare.git bit config should read from bare.git, not .bit ----
-cd test\cli\output\work_gitdir & set "GIT_DIR=bare.git" & bit config test.mykey
+cd test\cli\output\work_gitdir && set "GIT_DIR=bare.git" & bit config test.mykey
 <<<
 >>>
 myvalue
@@ -68,7 +68,7 @@ myvalue
 # ======================================================================
 
 # ---- GIT_DIR=bare.git rev-parse --git-dir should return bare.git ----
-cd test\cli\output\work_gitdir & set "GIT_DIR=bare.git" & bit rev-parse --git-dir
+cd test\cli\output\work_gitdir && set "GIT_DIR=bare.git" & bit rev-parse --git-dir
 <<<
 >>> /bare\.git/
 >>>= 0

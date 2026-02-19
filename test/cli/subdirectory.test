@@ -21,12 +21,12 @@ mkdir test\cli\output\work_subdir & cd test\cli\output\work_subdir & bit init
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_subdir & echo root file> root.txt & bit add root.txt
+cd test\cli\output\work_subdir && echo root file> root.txt & bit add root.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_subdir & bit commit -m "Add root.txt"
+cd test\cli\output\work_subdir && bit commit -m "Add root.txt"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
@@ -42,7 +42,7 @@ mkdir test\cli\output\work_subdir\subdir
 >>>= 0
 
 # ---- bit status from subdirectory should work (clean tree) ----
-cd test\cli\output\work_subdir\subdir & bit status
+cd test\cli\output\work_subdir\subdir && bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
@@ -52,22 +52,22 @@ cd test\cli\output\work_subdir\subdir & bit status
 # ======================================================================
 
 # ---- Create a file in the subdirectory, add and commit from there ----
-cd test\cli\output\work_subdir\subdir & echo sub file> sub.txt & bit add sub.txt
+cd test\cli\output\work_subdir\subdir && echo sub file> sub.txt & bit add sub.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_subdir\subdir & bit status
+cd test\cli\output\work_subdir\subdir && bit status
 <<<
 >>> /new file:.*sub\.txt/
 >>>= 0
 
-cd test\cli\output\work_subdir\subdir & bit commit -m "Add sub.txt from subdir"
+cd test\cli\output\work_subdir\subdir && bit commit -m "Add sub.txt from subdir"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_subdir\subdir & bit status
+cd test\cli\output\work_subdir\subdir && bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
@@ -77,12 +77,12 @@ cd test\cli\output\work_subdir\subdir & bit status
 # ======================================================================
 
 # ---- Modify a file and check diff from subdirectory ----
-cd test\cli\output\work_subdir\subdir & echo modified> sub.txt & bit add sub.txt & bit diff --cached
+cd test\cli\output\work_subdir\subdir && echo modified> sub.txt & bit add sub.txt & bit diff --cached
 <<<
 >>> /sub\.txt/
 >>>= 0
 
-cd test\cli\output\work_subdir\subdir & bit commit -m "Modify sub.txt"
+cd test\cli\output\work_subdir\subdir && bit commit -m "Modify sub.txt"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
@@ -92,7 +92,7 @@ cd test\cli\output\work_subdir\subdir & bit commit -m "Modify sub.txt"
 # ======================================================================
 
 # ---- bit log from subdirectory should show full history ----
-cd test\cli\output\work_subdir\subdir & bit log --oneline
+cd test\cli\output\work_subdir\subdir && bit log --oneline
 <<<
 >>> /Add root\.txt/
 >>>= 0
@@ -101,7 +101,7 @@ cd test\cli\output\work_subdir\subdir & bit log --oneline
 # SECTION 5: ls-files from subdirectory
 # ======================================================================
 
-cd test\cli\output\work_subdir\subdir & bit ls-files
+cd test\cli\output\work_subdir\subdir && bit ls-files
 <<<
 >>> /sub\.txt/
 >>>= 0
@@ -115,17 +115,17 @@ mkdir test\cli\output\work_subdir\subdir\deep
 >>>
 >>>= 0
 
-cd test\cli\output\work_subdir\subdir\deep & echo deep file> deep.txt & bit add deep.txt
+cd test\cli\output\work_subdir\subdir\deep && echo deep file> deep.txt & bit add deep.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_subdir\subdir\deep & bit status
+cd test\cli\output\work_subdir\subdir\deep && bit status
 <<<
 >>> /new file:.*deep\.txt/
 >>>= 0
 
-cd test\cli\output\work_subdir\subdir\deep & bit commit -m "Add deep.txt"
+cd test\cli\output\work_subdir\subdir\deep && bit commit -m "Add deep.txt"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
@@ -139,7 +139,7 @@ mkdir test\cli\output\work_subdir_norepo 2>nul
 >>>
 >>>= 0
 
-cd test\cli\output\work_subdir_norepo & bit status 2>&1
+cd test\cli\output\work_subdir_norepo && bit status 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1

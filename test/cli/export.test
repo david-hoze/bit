@@ -22,7 +22,7 @@ mkdir test\cli\output\work_export & cd test\cli\output\work_export & set "BIT_GI
 >>>= 0
 
 # ---- Run bit export from inside the bit repo ----
-cd test\cli\output\work_export & bit export
+cd test\cli\output\work_export && bit export
 <<<
 >>> /Exported bit repository to git/
 >>>= 0
@@ -42,7 +42,7 @@ bit-gone
 >>>= 0
 
 # ---- Verify git log works ----
-cd test\cli\output\work_export & git log --oneline
+cd test\cli\output\work_export && git log --oneline
 <<<
 >>> /initial-commit/
 >>>= 0
@@ -58,7 +58,7 @@ mkdir test\cli\output\work_export_copy & cd test\cli\output\work_export_copy & s
 >>>= 0
 
 # ---- Export to a new directory ----
-cd test\cli\output\work_export_copy & bit export ..\..\..\..\test\cli\output\work_export_target
+cd test\cli\output\work_export_copy && bit export ..\..\..\..\test\cli\output\work_export_target
 <<<
 >>> /Exported bit repository to/
 >>>= 0
@@ -85,7 +85,7 @@ target-bit-gone
 >>>= 0
 
 # ---- Verify git log works in target ----
-cd test\cli\output\work_export_target & git log --oneline
+cd test\cli\output\work_export_target && git log --oneline
 <<<
 >>> /copy-test/
 >>>= 0
@@ -108,7 +108,7 @@ mkdir test\cli\output\work_export_nobit & cd test\cli\output\work_export_nobit &
 >>>= 1
 
 # ---- Error: target path already exists ----
-cd test\cli\output\work_export_copy & bit export ..\..\..\..\test\cli\output\work_export_target
+cd test\cli\output\work_export_copy && bit export ..\..\..\..\test\cli\output\work_export_target
 <<<
 >>>2 /target path already exists/
 >>>= 1

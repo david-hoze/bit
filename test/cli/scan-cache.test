@@ -7,7 +7,7 @@ rmdir /s /q test\cli\output\work_scancache 2>nul & mkdir test\cli\output\work_sc
 >>>= 0
 
 # Create test files and add them
-cd test\cli\output\work_scancache & echo test1> file1.txt & echo test2> file2.txt & bit add .
+cd test\cli\output\work_scancache && echo test1> file1.txt & echo test2> file2.txt & bit add .
 <<<
 >>>= 0
 
@@ -46,28 +46,28 @@ findstr /C:"isText:" test\cli\output\work_scancache\.bit\cache\file1.txt >nul
 >>>= 0
 
 # Save original hash for comparison
-cd test\cli\output\work_scancache & findstr "hash:" .bit\cache\file1.txt
+cd test\cli\output\work_scancache && findstr "hash:" .bit\cache\file1.txt
 <<<
 >>> /hash: md5:[a-f0-9]+/
 >>>= 0
 
 # Run add again without changes - should use cache (no errors)
-cd test\cli\output\work_scancache & bit add .
+cd test\cli\output\work_scancache && bit add .
 <<<
 >>>= 0
 
 # Modify file1.txt
-cd test\cli\output\work_scancache & echo modified content> file1.txt
+cd test\cli\output\work_scancache && echo modified content> file1.txt
 <<<
 >>>= 0
 
 # Run add after modification - cache should be updated
-cd test\cli\output\work_scancache & bit add .
+cd test\cli\output\work_scancache && bit add .
 <<<
 >>>= 0
 
 # Verify cache was updated with new hash (different from original)
-cd test\cli\output\work_scancache & findstr "hash:" .bit\cache\file1.txt
+cd test\cli\output\work_scancache && findstr "hash:" .bit\cache\file1.txt
 <<<
 >>> /hash: md5:[a-f0-9]+/
 >>>= 0
@@ -80,7 +80,7 @@ file2 still cached
 >>>= 0
 
 # Test cache with subdirectory
-cd test\cli\output\work_scancache & mkdir subdir & echo subfile> subdir\nested.txt & bit add .
+cd test\cli\output\work_scancache && mkdir subdir & echo subfile> subdir\nested.txt & bit add .
 <<<
 >>>= 0
 

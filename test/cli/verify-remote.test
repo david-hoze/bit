@@ -18,17 +18,17 @@ mkdir test\cli\output\work_vr & mkdir test\cli\output\remote_vr & cd test\cli\ou
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_vr & bit remote add origin ..\remote_vr
+cd test\cli\output\work_vr && bit remote add origin ..\remote_vr
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_vr & echo hello> greet.txt & echo binarydata> data.bin & bit add greet.txt data.bin & bit commit -m "Add files"
+cd test\cli\output\work_vr && echo hello> greet.txt & echo binarydata> data.bin & bit add greet.txt data.bin & bit commit -m "Add files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_vr & bit push -u origin
+cd test\cli\output\work_vr && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -37,7 +37,7 @@ cd test\cli\output\work_vr & bit push -u origin
 # TEST: Clean verify — all files match
 # ======================================================================
 
-cd test\cli\output\work_vr & bit --remote origin verify
+cd test\cli\output\work_vr && bit --remote origin verify
 <<<
 >>> /\[OK\] All [0-9]+ files match metadata/
 >>>= 0
@@ -46,12 +46,12 @@ cd test\cli\output\work_vr & bit --remote origin verify
 # TEST: Corrupted file — hash mismatch detected
 # ======================================================================
 
-cd test\cli\output\remote_vr & echo corrupted> data.bin
+cd test\cli\output\remote_vr && echo corrupted> data.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_vr & bit --remote origin verify
+cd test\cli\output\work_vr && bit --remote origin verify
 <<<
 >>>2 /\[ERROR\] Metadata mismatch.*data\.bin/
 >>>= 1
@@ -60,12 +60,12 @@ cd test\cli\output\work_vr & bit --remote origin verify
 # TEST: Missing file — detected
 # ======================================================================
 
-cd test\cli\output\remote_vr & del greet.txt
+cd test\cli\output\remote_vr && del greet.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_vr & bit --remote origin verify
+cd test\cli\output\work_vr && bit --remote origin verify
 <<<
 >>>2 /\[ERROR\] Missing.*greet\.txt/
 >>>= 1

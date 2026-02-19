@@ -20,7 +20,7 @@ mkdir test\cli\output\work_bare_remote
 >>>
 >>>= 0
 
-cd test\cli\output\work_bare_remote & bit init
+cd test\cli\output\work_bare_remote && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -29,22 +29,22 @@ cd test\cli\output\work_bare_remote & bit init
 # Cloud remote without --bare: default full layout
 # ======================================================================
 
-cd test\cli\output\work_bare_remote & bit remote add origin gdrive:Projects/foo
+cd test\cli\output\work_bare_remote && bit remote add origin gdrive:Projects/foo
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_bare_remote & type .bit\remotes\origin
+cd test\cli\output\work_bare_remote && type .bit\remotes\origin
 <<<
 >>> /layout: full/
 >>>= 0
 
-cd test\cli\output\work_bare_remote & bit remote show origin
+cd test\cli\output\work_bare_remote && bit remote show origin
 <<<
 >>> /  Remote: origin/
 >>>= 0
 
-cd test\cli\output\work_bare_remote & bit remote show origin
+cd test\cli\output\work_bare_remote && bit remote show origin
 <<<
 >>> /  Layout: full/
 >>>= 0
@@ -53,32 +53,32 @@ cd test\cli\output\work_bare_remote & bit remote show origin
 # Cloud remote with --bare: layout bare, message includes "(bare layout)."
 # ======================================================================
 
-cd test\cli\output\work_bare_remote & bit remote add backup gdrive:Backup/foo --bare
+cd test\cli\output\work_bare_remote && bit remote add backup gdrive:Backup/foo --bare
 <<<
 >>> /Remote.*added.*bare layout/
 >>>= 0
 
-cd test\cli\output\work_bare_remote & type .bit\remotes\backup
+cd test\cli\output\work_bare_remote && type .bit\remotes\backup
 <<<
 >>> /layout: bare/
 >>>= 0
 
-cd test\cli\output\work_bare_remote & bit remote show backup
+cd test\cli\output\work_bare_remote && bit remote show backup
 <<<
 >>> /  Remote: backup/
 >>>= 0
 
-cd test\cli\output\work_bare_remote & bit remote show backup
+cd test\cli\output\work_bare_remote && bit remote show backup
 <<<
 >>> /  Type: cloud/
 >>>= 0
 
-cd test\cli\output\work_bare_remote & bit remote show backup
+cd test\cli\output\work_bare_remote && bit remote show backup
 <<<
 >>> /  Target: gdrive:Backup\/foo/
 >>>= 0
 
-cd test\cli\output\work_bare_remote & bit remote show backup
+cd test\cli\output\work_bare_remote && bit remote show backup
 <<<
 >>> /  Layout: bare/
 >>>= 0
@@ -87,12 +87,12 @@ cd test\cli\output\work_bare_remote & bit remote show backup
 # Usage: remote add requires exactly name and url; --bare is optional
 # ======================================================================
 
-cd test\cli\output\work_bare_remote & bit remote add 2>&1
+cd test\cli\output\work_bare_remote && bit remote add 2>&1
 <<<
 >>> /usage: bit remote add/
 >>>= 1
 
-cd test\cli\output\work_bare_remote & bit remote add onlyname 2>&1
+cd test\cli\output\work_bare_remote && bit remote add onlyname 2>&1
 <<<
 >>> /usage: bit remote add/
 >>>= 1
@@ -106,13 +106,13 @@ mkdir test\cli\output\bare_fs_remote 2>nul
 >>>
 >>>= 0
 
-cd test\cli\output\work_bare_remote & bit remote add fs ..\bare_fs_remote --bare
+cd test\cli\output\work_bare_remote && bit remote add fs ..\bare_fs_remote --bare
 <<<
 >>> /Remote.*added/
 >>>2 /warning:.*--bare.*only valid for cloud/
 >>>= 0
 
-cd test\cli\output\work_bare_remote & bit remote show fs
+cd test\cli\output\work_bare_remote && bit remote show fs
 <<<
 >>> /fs.*bare_fs_remote.*filesystem/
 >>>= 0

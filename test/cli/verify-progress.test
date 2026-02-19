@@ -23,7 +23,7 @@ mkdir test\cli\output\work_verify_progress
 >>>= 0
 
 # Initialize repo with multiple files
-cd test\cli\output\work_verify_progress & bit init
+cd test\cli\output\work_verify_progress && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -32,7 +32,7 @@ cd test\cli\output\work_verify_progress & bit init
 # TEST: Verify with no files (edge case)
 # ======================================================================
 
-cd test\cli\output\work_verify_progress & bit verify
+cd test\cli\output\work_verify_progress && bit verify
 <<<
 >>> /\[OK\] All 0 files match|All.*files match/
 >>>= 0
@@ -42,13 +42,13 @@ cd test\cli\output\work_verify_progress & bit verify
 # ======================================================================
 
 # Add several files to trigger progress code path (need >5 files)
-cd test\cli\output\work_verify_progress & echo file1> f1.txt & echo file2> f2.txt & echo file3> f3.txt & echo file4> f4.txt & echo file5> f5.txt & echo file6> f6.txt & bit add . & bit commit -m "Add files"
+cd test\cli\output\work_verify_progress && echo file1> f1.txt & echo file2> f2.txt & echo file3> f3.txt & echo file4> f4.txt & echo file5> f5.txt & echo file6> f6.txt & bit add . & bit commit -m "Add files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
 # Verify should succeed with all files matching
-cd test\cli\output\work_verify_progress & bit verify
+cd test\cli\output\work_verify_progress && bit verify
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
@@ -58,13 +58,13 @@ cd test\cli\output\work_verify_progress & bit verify
 # ======================================================================
 
 # Corrupt a file
-cd test\cli\output\work_verify_progress & echo corrupted> f1.txt
+cd test\cli\output\work_verify_progress && echo corrupted> f1.txt
 <<<
 >>>
 >>>= 0
 
 # Verify should detect mismatch
-cd test\cli\output\work_verify_progress & bit verify
+cd test\cli\output\work_verify_progress && bit verify
 <<<
 >>> /Checked.*files.*issues found|hash mismatch/
 >>>= 1
@@ -74,13 +74,13 @@ cd test\cli\output\work_verify_progress & bit verify
 # ======================================================================
 
 # Restore f1.txt and delete f2.txt
-cd test\cli\output\work_verify_progress & echo file1> f1.txt & del f2.txt
+cd test\cli\output\work_verify_progress && echo file1> f1.txt & del f2.txt
 <<<
 >>>
 >>>= 0
 
 # Verify should detect missing file
-cd test\cli\output\work_verify_progress & bit verify
+cd test\cli\output\work_verify_progress && bit verify
 <<<
 >>> /Checked.*files.*issues found|Missing/
 >>>= 1
@@ -90,13 +90,13 @@ cd test\cli\output\work_verify_progress & bit verify
 # ======================================================================
 
 # Restore f2.txt (it was deleted earlier)
-cd test\cli\output\work_verify_progress & echo file2> f2.txt
+cd test\cli\output\work_verify_progress && echo file2> f2.txt
 <<<
 >>>
 >>>= 0
 
 # Fsck is a passthrough to git fsck — exits 0 on a healthy repo
-cd test\cli\output\work_verify_progress & bit fsck
+cd test\cli\output\work_verify_progress && bit fsck
 <<<
 >>>= 0
 

@@ -25,7 +25,7 @@ mkdir test\cli\output\work_submodule
 <<<
 >>>= 0
 
-cd test\cli\output\work_submodule & bit init
+cd test\cli\output\work_submodule && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -41,7 +41,7 @@ bash -c "cd test/cli/output/work_submodule && mkdir sub && cd sub && git init &&
 >>>= 0
 
 # ---- Create a regular file in the parent repo ----
-cd test\cli\output\work_submodule & echo toplevel> top.txt
+cd test\cli\output\work_submodule && echo toplevel> top.txt
 <<<
 >>>= 0
 
@@ -50,7 +50,7 @@ cd test\cli\output\work_submodule & echo toplevel> top.txt
 # ======================================================================
 
 # ---- bit add top.txt first (scanner handles regular files) ----
-cd test\cli\output\work_submodule & bit add top.txt
+cd test\cli\output\work_submodule && bit add top.txt
 <<<
 >>>= 0
 
@@ -58,18 +58,18 @@ cd test\cli\output\work_submodule & bit add top.txt
 # Note: sub has .git file (gitlink) not directory, and .real/ directory.
 # The scanner treats sub/ as having a gitlink, not a .git/ directory, so
 # sub/ is NOT a subrepo boundary. The gitlink file is allowed through.
-cd test\cli\output\work_submodule & bit add sub
+cd test\cli\output\work_submodule && bit add sub
 <<<
 >>>= 0
 
 # ---- Verify git sees mode 160000 for the submodule ----
-cd test\cli\output\work_submodule & bit ls-files --stage sub
+cd test\cli\output\work_submodule && bit ls-files --stage sub
 <<<
 >>> /160000/
 >>>= 0
 
 # ---- Commit the submodule entry ----
-cd test\cli\output\work_submodule & bit commit -m "Add submodule"
+cd test\cli\output\work_submodule && bit commit -m "Add submodule"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
@@ -85,12 +85,12 @@ bash -c "cd test/cli/output/work_submodule && mkdir nested && cd nested && git i
 >>>= 0
 
 # ---- bit add nested registers as subrepo (moves .git/ to index) ----
-cd test\cli\output\work_submodule & bit add nested
+cd test\cli\output\work_submodule && bit add nested
 <<<
 >>>= 0
 
 # ---- nested/ should have a 160000 entry (subrepo) ----
-cd test\cli\output\work_submodule & bit ls-files --stage nested
+cd test\cli\output\work_submodule && bit ls-files --stage nested
 <<<
 >>> /160000/
 >>>= 0

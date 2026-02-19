@@ -5,18 +5,18 @@ rmdir /s /q test\cli\output\work_restore 2>nul & mkdir test\cli\output\work_rest
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_restore & echo original> file.txt & bit add file.txt & bit commit -m "Add file"
+cd test\cli\output\work_restore && echo original> file.txt & bit add file.txt & bit commit -m "Add file"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
 # Modify file, then restore (discard working tree changes)
-cd test\cli\output\work_restore & echo modified> file.txt
+cd test\cli\output\work_restore && echo modified> file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_restore & bit restore file.txt
+cd test\cli\output\work_restore && bit restore file.txt
 <<<
 >>>
 >>>= 0
@@ -27,7 +27,7 @@ findstr /C:"original" test\cli\output\work_restore\file.txt >nul
 >>>= 0
 
 # Modify again, use restore -- (explicit pathspec separator, like git)
-cd test\cli\output\work_restore & echo changed> file.txt & bit restore -- file.txt
+cd test\cli\output\work_restore && echo changed> file.txt & bit restore -- file.txt
 <<<
 >>>
 >>>= 0
@@ -38,7 +38,7 @@ findstr /C:"original" test\cli\output\work_restore\file.txt >nul
 >>>= 0
 
 # Modify, then checkout -- (legacy git syntax)
-cd test\cli\output\work_restore & echo discarded> file.txt & bit checkout -- file.txt
+cd test\cli\output\work_restore && echo discarded> file.txt & bit checkout -- file.txt
 <<<
 >>>
 >>>= 0
@@ -49,17 +49,17 @@ findstr /C:"original" test\cli\output\work_restore\file.txt >nul
 >>>= 0
 
 # Test restore --staged (unstage without discarding working tree)
-cd test\cli\output\work_restore & echo staged change> file.txt & bit add file.txt
+cd test\cli\output\work_restore && echo staged change> file.txt & bit add file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_restore & bit restore --staged file.txt
+cd test\cli\output\work_restore && bit restore --staged file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_restore & bit status
+cd test\cli\output\work_restore && bit status
 <<<
 >>> /modified:.*file\.txt/
 >>>= 0
@@ -70,7 +70,7 @@ findstr /C:"staged change" test\cli\output\work_restore\file.txt >nul
 >>>= 0
 
 # Restore working tree (discard the modification)
-cd test\cli\output\work_restore & bit restore file.txt
+cd test\cli\output\work_restore && bit restore file.txt
 <<<
 >>>
 >>>= 0
@@ -80,18 +80,18 @@ findstr /C:"original" test\cli\output\work_restore\file.txt >nul
 >>>
 >>>= 0
 
-cd test\cli\output\work_restore & bit status
+cd test\cli\output\work_restore && bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
 
 # Test restore . (all files)
-cd test\cli\output\work_restore & echo a> a.txt & echo b> b.txt & bit add . & bit commit -m "Add a and b"
+cd test\cli\output\work_restore && echo a> a.txt & echo b> b.txt & bit add . & bit commit -m "Add a and b"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_restore & echo x> a.txt & echo y> b.txt & bit restore .
+cd test\cli\output\work_restore && echo x> a.txt & echo y> b.txt & bit restore .
 <<<
 >>>
 >>>= 0
@@ -107,7 +107,7 @@ findstr /C:"b" test\cli\output\work_restore\b.txt >nul
 >>>= 0
 
 # Test checkout -- with multiple paths
-cd test\cli\output\work_restore & echo XX> a.txt & echo YY> b.txt & bit checkout -- a.txt b.txt
+cd test\cli\output\work_restore && echo XX> a.txt & echo YY> b.txt & bit checkout -- a.txt b.txt
 <<<
 >>>
 >>>= 0

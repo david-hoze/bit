@@ -21,7 +21,7 @@ mkdir test\cli\output\work_scannested
 <<<
 >>>= 0
 
-cd test\cli\output\work_scannested & bit init
+cd test\cli\output\work_scannested && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -31,13 +31,13 @@ cd test\cli\output\work_scannested & bit init
 # ======================================================================
 
 # ---- Create a subdir with a nested git repo (simulates git init inside project) ----
-cd test\cli\output\work_scannested & mkdir subdir & cd subdir & git init
+cd test\cli\output\work_scannested && mkdir subdir & cd subdir & git init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Create a file in the main repo and one inside the nested git repo ----
-cd test\cli\output\work_scannested & echo toplevel> file.txt & echo nested> subdir\file.txt
+cd test\cli\output\work_scannested && echo toplevel> file.txt & echo nested> subdir\file.txt
 <<<
 >>>= 0
 
@@ -46,7 +46,7 @@ cd test\cli\output\work_scannested & echo toplevel> file.txt & echo nested> subd
 # ======================================================================
 
 # ---- bit add succeeds (scan doesn't crash on nested .git) ----
-cd test\cli\output\work_scannested & bit add file.txt
+cd test\cli\output\work_scannested && bit add file.txt
 <<<
 >>>= 0
 
@@ -76,7 +76,7 @@ excluded
 # ======================================================================
 
 # ---- Commit works (nested .git didn't pollute index) ----
-cd test\cli\output\work_scannested & bit commit -m "test nested git"
+cd test\cli\output\work_scannested && bit commit -m "test nested git"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0

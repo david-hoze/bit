@@ -29,12 +29,12 @@ mkdir test\cli\output\work_rflag_a
 >>>
 >>>= 0
 
-cd test\cli\output\work_rflag_a & bit init
+cd test\cli\output\work_rflag_a && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_rflag_a & bit remote add origin ..\fs_remote_rflag
+cd test\cli\output\work_rflag_a && bit remote add origin ..\fs_remote_rflag
 <<<
 >>> /Remote.*added/
 >>>= 0
@@ -44,37 +44,37 @@ cd test\cli\output\work_rflag_a & bit remote add origin ..\fs_remote_rflag
 # ======================================================================
 
 # ---- --remote origin init rejected ----
-cd test\cli\output\work_rflag_a & bit --remote origin init
+cd test\cli\output\work_rflag_a && bit --remote origin init
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- --remote origin add rejected ----
-cd test\cli\output\work_rflag_a & bit --remote origin add .
+cd test\cli\output\work_rflag_a && bit --remote origin add .
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- --remote origin status rejected ----
-cd test\cli\output\work_rflag_a & bit --remote origin status
+cd test\cli\output\work_rflag_a && bit --remote origin status
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- --remote origin commit rejected ----
-cd test\cli\output\work_rflag_a & bit --remote origin commit -m "test"
+cd test\cli\output\work_rflag_a && bit --remote origin commit -m "test"
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- --remote origin log rejected ----
-cd test\cli\output\work_rflag_a & bit --remote origin log --oneline
+cd test\cli\output\work_rflag_a && bit --remote origin log --oneline
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- --remote origin ls-files rejected ----
-cd test\cli\output\work_rflag_a & bit --remote origin ls-files
+cd test\cli\output\work_rflag_a && bit --remote origin ls-files
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
@@ -84,19 +84,19 @@ cd test\cli\output\work_rflag_a & bit --remote origin ls-files
 # ======================================================================
 
 # ---- --remote without argument ----
-cd test\cli\output\work_rflag_a & bit --remote
+cd test\cli\output\work_rflag_a && bit --remote
 <<<
 >>>2 /requires a remote name argument/
 >>>= 1
 
 # ---- --remote with non-existent remote ----
-cd test\cli\output\work_rflag_a & bit --remote fake init
+cd test\cli\output\work_rflag_a && bit --remote fake init
 <<<
 >>>2 /remote.*not found/
 >>>= 1
 
 # ---- Unsupported command in remote context ----
-cd test\cli\output\work_rflag_a & bit --remote origin push
+cd test\cli\output\work_rflag_a && bit --remote origin push
 <<<
 >>>2 /not supported in remote context/
 >>>= 1
@@ -106,13 +106,13 @@ cd test\cli\output\work_rflag_a & bit --remote origin push
 # ======================================================================
 
 # ---- Push so remote is a valid bit repo ----
-cd test\cli\output\work_rflag_a & echo test content > file.txt & bit add file.txt & bit commit -m "Initial" & bit push -u origin
+cd test\cli\output\work_rflag_a && echo test content > file.txt & bit add file.txt & bit commit -m "Initial" & bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
 
 # ---- verify via --remote prefix should work ----
-cd test\cli\output\work_rflag_a & bit --remote origin verify
+cd test\cli\output\work_rflag_a && bit --remote origin verify
 <<<
 >>> /Verifying remote files|\[OK\] All/
 >>>= 0

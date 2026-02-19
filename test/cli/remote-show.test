@@ -24,13 +24,13 @@ mkdir test\cli\output\work_remote_show
 >>>
 >>>= 0
 
-cd test\cli\output\work_remote_show & bit init
+cd test\cli\output\work_remote_show && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Test: bit remote show with no remotes ----
-cd test\cli\output\work_remote_show & bit remote show
+cd test\cli\output\work_remote_show && bit remote show
 <<<
 >>> /No remotes configured.*bit remote add/
 >>>= 0
@@ -44,29 +44,29 @@ mkdir test\cli\output\remote_show_a
 >>>
 >>>= 0
 
-cd test\cli\output\work_remote_show & bit remote add dok1 ..\remote_show_a
+cd test\cli\output\work_remote_show && bit remote add dok1 ..\remote_show_a
 <<<
 >>> /Remote.*added/
 >>>= 0
 
 # ---- Test: bit remote show lists the remote ----
-cd test\cli\output\work_remote_show & bit remote show
+cd test\cli\output\work_remote_show && bit remote show
 <<<
 >>> /dok1.*remote_show_a/
 >>>= 0
 
 # ---- Test: bit remote show <name> shows details ----
-cd test\cli\output\work_remote_show & bit remote show dok1
+cd test\cli\output\work_remote_show && bit remote show dok1
 <<<
 >>> /dok1.*remote_show_a/
 >>>= 0
 
 # ---- Test: push status line (up to date, fast-forwardable, local out of date, or diverged) ----
-cd test\cli\output\work_remote_show & echo x> f.txt & bit add f.txt & bit commit -m "Add f" & bit push dok1 & bit fetch dok1
+cd test\cli\output\work_remote_show && echo x> f.txt & bit add f.txt & bit commit -m "Add f" & bit push dok1 & bit fetch dok1
 <<<
 >>>= 0
 
-cd test\cli\output\work_remote_show & bit remote show dok1
+cd test\cli\output\work_remote_show && bit remote show dok1
 <<<
 >>> /main pushes to main \(up to date\)/
 >>>= 0
@@ -80,24 +80,24 @@ mkdir test\cli\output\remote_show_b
 >>>
 >>>= 0
 
-cd test\cli\output\work_remote_show & bit remote add backup ..\remote_show_b
+cd test\cli\output\work_remote_show && bit remote add backup ..\remote_show_b
 <<<
 >>> /Remote.*added/
 >>>= 0
 
 # ---- Test: bit remote show lists all remotes ----
-cd test\cli\output\work_remote_show & bit remote show
+cd test\cli\output\work_remote_show && bit remote show
 <<<
 >>> /dok1.*remote_show_a/
 >>>= 0
 
-cd test\cli\output\work_remote_show & bit remote show
+cd test\cli\output\work_remote_show && bit remote show
 <<<
 >>> /backup.*remote_show_b/
 >>>= 0
 
 # ---- Test: bit remote show <name> still works for specific remote ----
-cd test\cli\output\work_remote_show & bit remote show backup
+cd test\cli\output\work_remote_show && bit remote show backup
 <<<
 >>> /backup.*remote_show_b/
 >>>= 0

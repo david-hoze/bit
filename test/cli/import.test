@@ -25,7 +25,7 @@ mkdir test\cli\output\work_import & cd test\cli\output\work_import & git init & 
 # ======================================================================
 
 # ---- Run bit import from inside the git repo ----
-cd test\cli\output\work_import & set "BIT_GIT_JUNCTION=1" & bit import
+cd test\cli\output\work_import && set "BIT_GIT_JUNCTION=1" & bit import
 <<<
 >>> /Imported git repository/
 >>>= 0
@@ -45,13 +45,13 @@ index-git-exists
 >>>= 0
 
 # ---- Verify git history is preserved ----
-cd test\cli\output\work_import & git log --oneline
+cd test\cli\output\work_import && git log --oneline
 <<<
 >>> /initial commit/
 >>>= 0
 
 # ---- Verify bit status shows files need committing (metadata transition) ----
-cd test\cli\output\work_import & set "BIT_GIT_JUNCTION=1" & bit status
+cd test\cli\output\work_import && set "BIT_GIT_JUNCTION=1" & bit status
 <<<
 >>> /modified/
 >>>= 0
@@ -67,7 +67,7 @@ mkdir test\cli\output\work_import_nobit & cd test\cli\output\work_import_nobit &
 >>>= 1
 
 # ---- Error: already a bit repo ----
-cd test\cli\output\work_import & bit import
+cd test\cli\output\work_import && bit import
 <<<
 >>>2 /already a bit repository/
 >>>= 1

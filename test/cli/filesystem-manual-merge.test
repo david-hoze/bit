@@ -25,13 +25,13 @@ mkdir test\cli\output\work_mm_local
 >>>
 >>>= 0
 
-cd test\cli\output\work_mm_local & bit init
+cd test\cli\output\work_mm_local && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Create a binary file (.bin extension forces binary classification) ----
-cd test\cli\output\work_mm_local & echo original binary content> data.bin & bit add data.bin & bit commit -m "Initial"
+cd test\cli\output\work_mm_local && echo original binary content> data.bin & bit add data.bin & bit commit -m "Initial"
 <<<
 >>> /.*1 file changed.*/
 >>>= 0
@@ -41,12 +41,12 @@ mkdir test\cli\output\work_mm_remote
 >>>
 >>>= 0
 
-cd test\cli\output\work_mm_local & bit remote add origin ..\work_mm_remote
+cd test\cli\output\work_mm_local && bit remote add origin ..\work_mm_remote
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_mm_local & bit push -u origin
+cd test\cli\output\work_mm_local && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -56,13 +56,13 @@ cd test\cli\output\work_mm_local & bit push -u origin
 # ======================================================================
 
 # ---- Make a change at the remote so there's something to pull ----
-cd test\cli\output\work_mm_remote & echo remote binary change> data.bin & bit add data.bin & bit commit -m "Remote edit"
+cd test\cli\output\work_mm_remote && echo remote binary change> data.bin & bit add data.bin & bit commit -m "Remote edit"
 <<<
 >>> /.*1 file changed.*/
 >>>= 0
 
 # ---- Pull with --manual-merge: no divergence, should proceed with normal pull ----
-cd test\cli\output\work_mm_local & bit pull origin --manual-merge
+cd test\cli\output\work_mm_local && bit pull origin --manual-merge
 <<<
 >>> /No remote divergence detected.*Proceeding with normal pull/
 >>>= 0
@@ -72,25 +72,25 @@ cd test\cli\output\work_mm_local & bit pull origin --manual-merge
 # ======================================================================
 
 # ---- Push current state to re-sync ----
-cd test\cli\output\work_mm_local & bit add data.bin & bit commit -m "Re-sync" & bit push
+cd test\cli\output\work_mm_local && bit add data.bin & bit commit -m "Re-sync" & bit push
 <<<
 >>> /Push complete/
 >>>= 0
 
 # ---- Corrupt binary file at remote (actual file doesn't match metadata) ----
-cd test\cli\output\work_mm_remote & echo corrupted by external tool> data.bin
+cd test\cli\output\work_mm_remote && echo corrupted by external tool> data.bin
 <<<
 >>>
 >>>= 0
 
 # ---- Make a new commit at remote so local has something to merge ----
-cd test\cli\output\work_mm_remote & echo new tracked file> other.bin & bit add other.bin & bit commit -m "Add other"
+cd test\cli\output\work_mm_remote && echo new tracked file> other.bin & bit add other.bin & bit commit -m "Add other"
 <<<
 >>> /.*1 file changed.*/
 >>>= 0
 
 # ---- Pull with --manual-merge: should detect divergence and create conflict dirs ----
-cd test\cli\output\work_mm_local & bit pull origin --manual-merge
+cd test\cli\output\work_mm_local && bit pull origin --manual-merge
 <<<
 >>> /Remote divergence detected|conflicts/
 >>>= 0

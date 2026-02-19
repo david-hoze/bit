@@ -12,70 +12,70 @@ mkdir test\cli\output\work_sgdir & mkdir test\cli\output\sgdir_db & bit init --s
 >>>= 0
 
 # ---- .bit is a file (bitlink), not a directory ----
-cd test\cli\output\work_sgdir & if exist .bit (if exist .bit\NUL (echo FAIL_IS_DIR) else (echo OK_IS_FILE)) else (echo FAIL_NO_BIT)
+cd test\cli\output\work_sgdir && if exist .bit (if exist .bit\NUL (echo FAIL_IS_DIR) else (echo OK_IS_FILE)) else (echo FAIL_NO_BIT)
 <<<
 >>>
 OK_IS_FILE
 >>>= 0
 
 # ---- .git is a file (gitlink), not a directory ----
-cd test\cli\output\work_sgdir & if exist .git (if exist .git\NUL (echo FAIL_IS_DIR) else (echo OK_IS_FILE)) else (echo FAIL_NO_GIT)
+cd test\cli\output\work_sgdir && if exist .git (if exist .git\NUL (echo FAIL_IS_DIR) else (echo OK_IS_FILE)) else (echo FAIL_NO_GIT)
 <<<
 >>>
 OK_IS_FILE
 >>>= 0
 
 # ---- sgdir has git database HEAD ----
-cd test\cli\output\sgdir_db & if exist HEAD (echo HEAD_EXISTS) else (echo NO_HEAD)
+cd test\cli\output\sgdir_db && if exist HEAD (echo HEAD_EXISTS) else (echo NO_HEAD)
 <<<
 >>>
 HEAD_EXISTS
 >>>= 0
 
 # ---- sgdir/bit/index exists ----
-cd test\cli\output\sgdir_db\bit & if exist index\NUL (echo INDEX_EXISTS) else (echo NO_INDEX)
+cd test\cli\output\sgdir_db\bit && if exist index\NUL (echo INDEX_EXISTS) else (echo NO_INDEX)
 <<<
 >>>
 INDEX_EXISTS
 >>>= 0
 
 # ---- Add and commit a file ----
-cd test\cli\output\work_sgdir & echo hello world> test.txt & bit add test.txt & bit commit -m "Initial commit"
+cd test\cli\output\work_sgdir && echo hello world> test.txt & bit add test.txt & bit commit -m "Initial commit"
 <<<
 >>> /.*1 file.* changed.*/
 >>>= 0
 
 # ---- Status should be clean ----
-cd test\cli\output\work_sgdir & bit status
+cd test\cli\output\work_sgdir && bit status
 <<<
 >>> /nothing to commit/
 >>>= 0
 
 # ---- Log shows the commit ----
-cd test\cli\output\work_sgdir & bit log --oneline
+cd test\cli\output\work_sgdir && bit log --oneline
 <<<
 >>> /Initial commit/
 >>>= 0
 
 # ---- Verify passes ----
-cd test\cli\output\work_sgdir & bit verify
+cd test\cli\output\work_sgdir && bit verify
 <<<
 >>> /All 1 files match metadata/
 >>>= 0
 
 # ---- Modify, commit, restore from previous ----
-cd test\cli\output\work_sgdir & echo modified> test.txt & bit add test.txt & bit commit -m "Modify test.txt"
+cd test\cli\output\work_sgdir && echo modified> test.txt & bit add test.txt & bit commit -m "Modify test.txt"
 <<<
 >>> /.*1 file.* changed.*/
 >>>= 0
 
 # ---- Restore file from HEAD~1 ----
-cd test\cli\output\work_sgdir & bit restore --source=HEAD~1 -- test.txt
+cd test\cli\output\work_sgdir && bit restore --source=HEAD~1 -- test.txt
 <<<
 >>>= 0
 
 # ---- Verify restored content ----
-cd test\cli\output\work_sgdir & findstr "hello" test.txt
+cd test\cli\output\work_sgdir && findstr "hello" test.txt
 <<<
 >>> /hello/
 >>>= 0

@@ -22,13 +22,13 @@ mkdir test\cli\output\work_dashc
 >>>
 >>>= 0
 
-cd test\cli\output\work_dashc & bit init
+cd test\cli\output\work_dashc && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Add a file and commit so rev-parse and log have something to work with
-cd test\cli\output\work_dashc & echo hello> file.txt & bit add file.txt & bit commit -m "Initial commit"
+cd test\cli\output\work_dashc && echo hello> file.txt & bit add file.txt & bit commit -m "Initial commit"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
@@ -39,12 +39,12 @@ mkdir test\cli\output\work_dashc_plain
 >>>
 >>>= 0
 
-cd test\cli\output\work_dashc_plain & git init
+cd test\cli\output\work_dashc_plain && git init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_dashc_plain & echo hello> file.txt & git add file.txt & git commit -m "Initial commit"
+cd test\cli\output\work_dashc_plain && echo hello> file.txt & git add file.txt & git commit -m "Initial commit"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0

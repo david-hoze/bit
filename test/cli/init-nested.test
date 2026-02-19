@@ -25,7 +25,7 @@ mkdir test\cli\output\work_init_nested
 # TEST: Init creates repo in specified directory
 # ======================================================================
 
-cd test\cli\output\work_init_nested & bit init parent
+cd test\cli\output\work_init_nested && bit init parent
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -36,13 +36,13 @@ cd test\cli\output\work_init_nested & bit init parent
 
 # Create a subdirectory inside the existing repo and init there.
 # bit init must initialize in CWD, not walk up to parent's .bit.
-cd test\cli\output\work_init_nested\parent & mkdir nested & cd nested & bit init
+cd test\cli\output\work_init_nested\parent && mkdir nested & cd nested & bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Verify nested dir got its own .bit
-cd test\cli\output\work_init_nested\parent\nested & dir /b .bit
+cd test\cli\output\work_init_nested\parent\nested && dir /b .bit
 <<<
 >>> /config/
 >>>= 0
@@ -51,13 +51,13 @@ cd test\cli\output\work_init_nested\parent\nested & dir /b .bit
 # TEST: Nested init inside existing repo (with dir argument)
 # ======================================================================
 
-cd test\cli\output\work_init_nested\parent & bit init sibling
+cd test\cli\output\work_init_nested\parent && bit init sibling
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Verify sibling got its own .bit
-cd test\cli\output\work_init_nested\parent\sibling & dir /b .bit
+cd test\cli\output\work_init_nested\parent\sibling && dir /b .bit
 <<<
 >>> /config/
 >>>= 0
@@ -78,7 +78,7 @@ set BIT_GIT_JUNCTION=1 & cd test\cli\output\work_init_nested & bit init junction
 # ======================================================================
 
 # Normal init (no BIT_GIT_JUNCTION) should NOT create .git
-cd test\cli\output\work_init_nested & bit init nojunction & dir /b nojunction\.git 2>&1
+cd test\cli\output\work_init_nested && bit init nojunction & dir /b nojunction\.git 2>&1
 <<<
 >>> /File Not Found|cannot find/
 >>>= 1

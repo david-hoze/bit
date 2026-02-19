@@ -20,94 +20,94 @@ mkdir test\cli\output\work_casconfig
 >>>
 >>>= 0
 
-cd test\cli\output\work_casconfig & bit init
+cd test\cli\output\work_casconfig && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Ensure core.mode exists and is lite (set explicitly; init may have written it)
-cd test\cli\output\work_casconfig & bit config core.mode lite
+cd test\cli\output\work_casconfig && bit config core.mode lite
 <<<
 >>> /Mode set to lite/
 >>>= 0
 
-cd test\cli\output\work_casconfig & bit config core.mode
+cd test\cli\output\work_casconfig && bit config core.mode
 <<<
 >>>
 lite
 >>>= 0
 
 # config with no key passes through to git (which returns its own error)
-cd test\cli\output\work_casconfig & bit config 2>&1
+cd test\cli\output\work_casconfig && bit config 2>&1
 <<<
 >>> /error.*action|usage/
 >>>= 129
 
 # unknown config key passes through to git (git accepts any key)
-cd test\cli\output\work_casconfig & bit config core.typo value
+cd test\cli\output\work_casconfig && bit config core.typo value
 <<<
 >>>= 0
 
 # Add and commit a binary file in lite mode (no CAS write)
-cd test\cli\output\work_casconfig & echo.> bin.bin & bit add bin.bin & bit commit -m "Add bin"
+cd test\cli\output\work_casconfig && echo.> bin.bin & bit add bin.bin & bit commit -m "Add bin"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
 
 # Set mode to solid (hint about backfill on stdout)
-cd test\cli\output\work_casconfig & bit config core.mode solid
+cd test\cli\output\work_casconfig && bit config core.mode solid
 <<<
 >>> /Mode set to solid/
 >>>= 0
 
 # After setting solid, config get should show solid or lite (env-dependent)
-cd test\cli\output\work_casconfig & bit config core.mode
+cd test\cli\output\work_casconfig && bit config core.mode
 <<<
 >>> /solid|lite/
 >>>= 0
 
 # Add another binary in solid mode; blob written to .bit/cas/ when core.mode is solid
-cd test\cli\output\work_casconfig & echo x> bin2.bin & bit add bin2.bin
+cd test\cli\output\work_casconfig && echo x> bin2.bin & bit add bin2.bin
 <<<
 >>>
 >>>= 0
 
 # CAS contains subdirs (2-char prefix) when solid mode is active
-cd test\cli\output\work_casconfig & dir /b .bit\cas
+cd test\cli\output\work_casconfig && dir /b .bit\cas
 <<<
 >>> /[0-9a-f]/
 >>>= 0
 
 # cas backfill: commit has bin.bin (from lite add); working tree still has it -> store in CAS
-cd test\cli\output\work_casconfig & bit cas backfill
+cd test\cli\output\work_casconfig && bit cas backfill
 <<<
 >>> /Stored .* blob/
 >>>= 0
 
 # Set back to lite
-cd test\cli\output\work_casconfig & bit config core.mode lite
+cd test\cli\output\work_casconfig && bit config core.mode lite
 <<<
 >>> /Mode set to lite/
 >>>= 0
 
 # config --list shows core.mode
-cd test\cli\output\work_casconfig & bit config --list
+cd test\cli\output\work_casconfig && bit config --list
 <<<
 >>> /core\.mode/
 >>>= 0
 
 # Help for config and cas
-cd test\cli\output\work_casconfig & bit help config
+cd test\cli\output\work_casconfig && bit help config
 <<<
 >>> /usage: bit config/
 >>>= 0
 
-cd test\cli\output\work_casconfig & bit help cas
+cd test\cli\output\work_casconfig && bit help cas
 <<<
 >>> /usage: bit cas/
 >>>= 0
 
-cd test\cli\output\work_casconfig & bit help cas backfill
+cd test\cli\output\work_casconfig && bit help cas backfill
 <<<
 >>> /usage: bit cas backfill/
 >>>= 0

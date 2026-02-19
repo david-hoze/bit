@@ -9,7 +9,7 @@ rmdir /s /q test\cli\output\work_norepo 2>nul & mkdir test\cli\output\work_norep
 >>>= 0
 
 # bit status - should fail with proper error message
-cd test\cli\output\work_norepo & bit status 2>&1
+cd test\cli\output\work_norepo && bit status 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
@@ -22,7 +22,7 @@ not created
 >>>= 0
 
 # bit add - should fail with proper error message
-cd test\cli\output\work_norepo & echo test> file.txt & bit add file.txt 2>&1
+cd test\cli\output\work_norepo && echo test> file.txt & bit add file.txt 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
@@ -35,67 +35,67 @@ not created
 >>>= 0
 
 # bit commit - should fail with proper error message
-cd test\cli\output\work_norepo & bit commit -m "test" 2>&1
+cd test\cli\output\work_norepo && bit commit -m "test" 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit log - should fail with proper error message
-cd test\cli\output\work_norepo & bit log 2>&1
+cd test\cli\output\work_norepo && bit log 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit diff - should fail with proper error message
-cd test\cli\output\work_norepo & bit diff 2>&1
+cd test\cli\output\work_norepo && bit diff 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit push - should fail with proper error message
-cd test\cli\output\work_norepo & bit push 2>&1
+cd test\cli\output\work_norepo && bit push 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit pull - should fail with proper error message
-cd test\cli\output\work_norepo & bit pull 2>&1
+cd test\cli\output\work_norepo && bit pull 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit fetch - should fail with proper error message
-cd test\cli\output\work_norepo & bit fetch 2>&1
+cd test\cli\output\work_norepo && bit fetch 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit restore - should fail with proper error message
-cd test\cli\output\work_norepo & bit restore file.txt 2>&1
+cd test\cli\output\work_norepo && bit restore file.txt 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit checkout - should fail with proper error message
-cd test\cli\output\work_norepo & bit checkout file.txt 2>&1
+cd test\cli\output\work_norepo && bit checkout file.txt 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit remote show - should fail with proper error message
-cd test\cli\output\work_norepo & bit remote show 2>&1
+cd test\cli\output\work_norepo && bit remote show 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit remote add - should fail with proper error message
-cd test\cli\output\work_norepo & bit remote add origin /tmp/remote 2>&1
+cd test\cli\output\work_norepo && bit remote add origin /tmp/remote 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
 
 # bit verify - should fail with proper error message
-cd test\cli\output\work_norepo & bit verify 2>&1
+cd test\cli\output\work_norepo && bit verify 2>&1
 <<<
 >>> /fatal: not a bit repository/
 >>>= 1
@@ -108,7 +108,7 @@ not created
 >>>= 0
 
 # bit init - should succeed (doesn't need existing repo)
-cd test\cli\output\work_norepo & bit init
+cd test\cli\output\work_norepo && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -127,7 +127,7 @@ del test\cli\output\work_norepo\file.txt 2>nul
 >>>= 0
 
 # After init, bit status should work (clean working directory)
-cd test\cli\output\work_norepo & bit status
+cd test\cli\output\work_norepo && bit status
 <<<
 >>> /.*/
 >>>= 0

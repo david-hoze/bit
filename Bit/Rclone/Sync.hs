@@ -19,7 +19,7 @@ module Bit.Rclone.Sync
 import qualified System.Directory as Dir
 import Bit.IO.Platform (copyFile, createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
-import Control.Monad (when, void, forM, forM_, unless)
+import Control.Monad (when, void, forM, forM_, unless, filterM)
 import Control.Exception (try, SomeException)
 import Bit.IO.Concurrency (ioConcurrency, mapConcurrentlyBounded)
 import Data.Foldable (traverse_)
@@ -27,7 +27,7 @@ import qualified Bit.Git.Run as Git
 import qualified Bit.Rclone.Run as Transport
 import Bit.Config.Paths (bundleForRemote)
 import Bit.Config.Metadata (parseMetadataFile, MetaContent(..))
-import Bit.CAS (casBlobPath)
+import Bit.CAS (casBlobPath, hasBlobInCas)
 import Bit.CDC.Manifest (casManifestPath, writeManifestToCas, parseManifest)
 import Bit.CDC.Types (ChunkRef(..), ChunkManifest(..))
 import Bit.CDC.Reassemble (reassembleFile)
@@ -154,7 +154,6 @@ classifyAndSync remoteRoot cwd layout mRemote filePaths = do
     unless (null binaryPaths) $
         case (layout, mRemote) of
             (Device.LayoutBare, Just remote) -> do
-                putStrLn $ "Downloading " ++ show (length binaryPaths) ++ " file(s) from CAS..."
                 indexDir <- Git.getIndexPath
                 let casDir = takeDirectory indexDir </> "cas"
                     bitDir = takeDirectory indexDir
@@ -166,11 +165,17 @@ classifyAndSync remoteRoot cwd layout mRemote filePaths = do
                 let chunkedFiles  = [(fp, mc, m) | (fp, Just mc, Just m)  <- classified]
                     wholeBlobFiles = [(fp, mc)    | (fp, Just mc, Nothing) <- classified]
 
-                -- Phase 2: batch-download all chunks + whole blobs in one rclone call.
-                let chunkRelPaths = concatMap (\(_, _, m) ->
-                        map (\cr -> casBlobPath "cas" (crHash cr)) (cmChunks m)) chunkedFiles
-                    wholeRelPaths = map (\(_, mc) -> casBlobPath "cas" (metaHash mc)) wholeBlobFiles
-                    allRelPaths = chunkRelPaths ++ wholeRelPaths
+                -- Phase 2: batch-download only chunks/blobs not already in local CAS.
+                chunkRelPaths <- fmap concat $ mapM (\(_, _, m) ->
+                    filterM (\cr -> not <$> hasBlobInCas casDir (crHash cr)) (cmChunks m) >>= \needed ->
+                        pure (map (\cr -> casBlobPath "cas" (crHash cr)) needed)) chunkedFiles
+                wholeRelPaths <- filterM (\(_, mc) -> not <$> hasBlobInCas casDir (metaHash mc)) wholeBlobFiles
+                    >>= pure . map (\(_, mc) -> casBlobPath "cas" (metaHash mc))
+                let allRelPaths = chunkRelPaths ++ wholeRelPaths
+                    totalBlobs = sum (map (\(_, _, m) -> length (cmChunks m)) chunkedFiles) + length wholeBlobFiles
+                    cached = totalBlobs - length allRelPaths
+                putStrLn $ "Downloading " ++ show (length allRelPaths) ++ " file(s) from CAS"
+                    ++ if cached > 0 then " (" ++ show cached ++ " already cached)..." else "..."
                 unless (null allRelPaths) $ do
                     -- Ensure CAS subdirectories exist for downloaded files
                     mapM_ (createDirectoryIfMissing True . (bitDir </>) . takeDirectory) allRelPaths

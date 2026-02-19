@@ -18,12 +18,12 @@ mkdir test\cli\output\work_network
 >>>
 >>>= 0
 
-cd test\cli\output\work_network & bit init
+cd test\cli\output\work_network && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_network & echo binary data> data.bin & echo hello world> greet.txt & bit add data.bin greet.txt & bit commit -m "Initial commit"
+cd test\cli\output\work_network && echo binary data> data.bin & echo hello world> greet.txt & bit add data.bin greet.txt & bit commit -m "Initial commit"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
@@ -34,13 +34,13 @@ mkdir \\tsclient\c\users\david\bit-testing & rclone copy test\cli\output\work_ne
 >>>
 >>>= 0
 
-cd test\cli\output\work_network & bit remote add origin \\tsclient\c\users\david\bit-testing
+cd test\cli\output\work_network && bit remote add origin \\tsclient\c\users\david\bit-testing
 <<<
 >>> /Remote 'origin' added/
 >>>= 0
 
 # Fetch + push to sync tracking refs (remote already has content, push is a no-op)
-cd test\cli\output\work_network & bit fetch & bit push -u origin
+cd test\cli\output\work_network && bit fetch & bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -65,7 +65,7 @@ greet exists
 # TEST: bit status shows up-to-date after push
 # ======================================================================
 
-cd test\cli\output\work_network & bit status
+cd test\cli\output\work_network && bit status
 <<<
 >>> /up to date/
 >>>= 0
@@ -74,12 +74,12 @@ cd test\cli\output\work_network & bit status
 # TEST: Modify locally, push to UNC
 # ======================================================================
 
-cd test\cli\output\work_network & echo updated binary> data.bin & bit add data.bin & bit commit -m "Update data"
+cd test\cli\output\work_network && echo updated binary> data.bin & bit add data.bin & bit commit -m "Update data"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_network & bit push
+cd test\cli\output\work_network && bit push
 <<<
 >>> /Push complete/
 >>>= 0
@@ -88,7 +88,7 @@ cd test\cli\output\work_network & bit push
 # TEST: Verify against network remote
 # ======================================================================
 
-cd test\cli\output\work_network & bit verify
+cd test\cli\output\work_network && bit verify
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
@@ -97,17 +97,17 @@ cd test\cli\output\work_network & bit verify
 # TEST: Repair from network remote
 # ======================================================================
 
-cd test\cli\output\work_network & echo corrupted> data.bin
+cd test\cli\output\work_network && echo corrupted> data.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_network & bit repair
+cd test\cli\output\work_network && bit repair
 <<<
 >>> /REPAIRED.*data\.bin/
 >>>= 0
 
-cd test\cli\output\work_network & bit verify
+cd test\cli\output\work_network && bit verify
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0

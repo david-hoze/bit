@@ -6,7 +6,7 @@ rmdir /s /q test\cli\output\work_fsck 2>nul & mkdir test\cli\output\work_fsck & 
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_fsck & bit fsck
+cd test\cli\output\work_fsck && bit fsck
 <<<
 >>>= 0
 
@@ -16,7 +16,7 @@ rmdir /s /q test\cli\output\work_fsck 2>nul & mkdir test\cli\output\work_fsck & 
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_fsck & bit fsck
+cd test\cli\output\work_fsck && bit fsck
 <<<
 >>>= 0
 

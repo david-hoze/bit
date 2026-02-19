@@ -75,13 +75,13 @@ exists
 # ======================================================================
 
 # ---- Known bit commands rejected in bare repo ----
-cd test\cli\output\work_bare\bare.git & bit status
+cd test\cli\output\work_bare\bare.git && bit status
 <<<
 >>>2 /work tree/
 >>>= 128
 
 # ---- Git passthrough works in bare repo (e.g. git config) ----
-cd test\cli\output\work_bare\bare.git & bit config core.bare
+cd test\cli\output\work_bare\bare.git && bit config core.bare
 <<<
 >>>
 true

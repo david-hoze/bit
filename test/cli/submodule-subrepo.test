@@ -24,21 +24,21 @@ mkdir test\cli\output\work_subrepo
 <<<
 >>>= 0
 
-cd test\cli\output\work_subrepo & bit init
+cd test\cli\output\work_subrepo && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Create a file in the parent repo ----
-cd test\cli\output\work_subrepo & echo toplevel> top.txt
+cd test\cli\output\work_subrepo && echo toplevel> top.txt
 <<<
 >>>= 0
 
-cd test\cli\output\work_subrepo & bit add top.txt
+cd test\cli\output\work_subrepo && bit add top.txt
 <<<
 >>>= 0
 
-cd test\cli\output\work_subrepo & bit commit -m "initial"
+cd test\cli\output\work_subrepo && bit commit -m "initial"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0
@@ -61,7 +61,7 @@ is_directory
 >>>= 0
 
 # ---- bit add should move .git/ to index and create 160000 entry ----
-cd test\cli\output\work_subrepo & bit add sub
+cd test\cli\output\work_subrepo && bit add sub
 <<<
 >>>= 0
 
@@ -80,13 +80,13 @@ in_index
 >>>= 0
 
 # ---- Verify git sees mode 160000 for the subrepo ----
-cd test\cli\output\work_subrepo & bit ls-files --stage sub
+cd test\cli\output\work_subrepo && bit ls-files --stage sub
 <<<
 >>> /160000/
 >>>= 0
 
 # ---- Commit the subrepo entry ----
-cd test\cli\output\work_subrepo & bit commit -m "Add subrepo"
+cd test\cli\output\work_subrepo && bit commit -m "Add subrepo"
 <<<
 >>> /\[main|master|files? changed/
 >>>= 0

@@ -23,7 +23,7 @@ mkdir test\cli\output\work_path_safety
 >>>
 >>>= 0
 
-cd test\cli\output\work_path_safety & bit init
+cd test\cli\output\work_path_safety && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -48,7 +48,7 @@ echo nope> test\cli\output\work_path_safety\.bit\junk\should_not_show.txt
 >>>
 >>>= 0
 
-cd test\cli\output\work_path_safety & bit add . & bit commit -m "Add nested file"
+cd test\cli\output\work_path_safety && bit add . & bit commit -m "Add nested file"
 <<<
 >>> /\[main.*\].*Add nested file/
 >>>= 0
@@ -58,12 +58,12 @@ cd test\cli\output\work_path_safety & bit add . & bit commit -m "Add nested file
 # ======================================================================
 
 # Tracked output should include nested file
-cd test\cli\output\work_path_safety & bit ls-files | findstr /R /C:"sub[\\/]*file\.txt" >nul
+cd test\cli\output\work_path_safety && bit ls-files | findstr /R /C:"sub[\\/]*file\.txt" >nul
 <<<
 >>>= 0
 
 # Tracked output should NOT include `.bit` paths
-cd test\cli\output\work_path_safety & bit ls-files | findstr /C:".bit" >nul
+cd test\cli\output\work_path_safety && bit ls-files | findstr /C:".bit" >nul
 <<<
 >>>= 1
 

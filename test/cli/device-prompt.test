@@ -15,7 +15,7 @@ rmdir /s /q test\cli\output\work 2>nul & rmdir /s /q test\cli\output\device_prom
 >>>= 0
 
 # --- Add remote with piped device name (BIT_USE_STDIN=1) ---
-cd test\cli\output\work & set BIT_USE_STDIN=1 & echo test_device| bit remote add origin Z:\output\device_prompt_remote
+cd test\cli\output\work && set BIT_USE_STDIN=1 & echo test_device| bit remote add origin Z:\output\device_prompt_remote
 <<<
 >>> /Remote.*origin|Device.*registered/
 >>>= 0

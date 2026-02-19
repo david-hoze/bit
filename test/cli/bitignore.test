@@ -7,33 +7,33 @@ rmdir /s /q test\cli\output\work_bitignore 2>nul & mkdir test\cli\output\work_bi
 >>>= 0
 
 # Create .bitignore with *.log pattern
-cd test\cli\output\work_bitignore & echo *.log> .bitignore
+cd test\cli\output\work_bitignore && echo *.log> .bitignore
 <<<
 >>>= 0
 
 # Create test files: file.txt and debug.log
-cd test\cli\output\work_bitignore & echo hello> file.txt & echo debug content> debug.log
+cd test\cli\output\work_bitignore && echo hello> file.txt & echo debug content> debug.log
 <<<
 >>>= 0
 
 # Add all files - should only stage file.txt
-cd test\cli\output\work_bitignore & bit add .
+cd test\cli\output\work_bitignore && bit add .
 <<<
 >>>= 0
 
 # Status should show file.txt as staged
-cd test\cli\output\work_bitignore & bit status
+cd test\cli\output\work_bitignore && bit status
 <<<
 >>> /file\.txt/
 >>>= 0
 
 # Verify debug.log is NOT shown in status (use findstr exit code - fail if found)
-cd test\cli\output\work_bitignore & bit status | findstr "debug.log" && exit 1 || exit 0
+cd test\cli\output\work_bitignore && bit status | findstr "debug.log" && exit 1 || exit 0
 <<<
 >>>= 0
 
 # Commit
-cd test\cli\output\work_bitignore & bit commit -m "test commit"
+cd test\cli\output\work_bitignore && bit commit -m "test commit"
 <<<
 >>> /file.*changed/
 >>>= 0
@@ -49,22 +49,22 @@ if exist "test\cli\output\work_bitignore\.bit\index\file.txt" (exit 0) else (exi
 >>>= 0
 
 # Modify .bitignore to also ignore *.tmp
-cd test\cli\output\work_bitignore & echo *.tmp>> .bitignore
+cd test\cli\output\work_bitignore && echo *.tmp>> .bitignore
 <<<
 >>>= 0
 
 # Create test.tmp file
-cd test\cli\output\work_bitignore & echo temp content> test.tmp
+cd test\cli\output\work_bitignore && echo temp content> test.tmp
 <<<
 >>>= 0
 
 # Add all - test.tmp should be ignored
-cd test\cli\output\work_bitignore & bit add .
+cd test\cli\output\work_bitignore && bit add .
 <<<
 >>>= 0
 
 # Verify test.tmp is NOT shown in status
-cd test\cli\output\work_bitignore & bit status | findstr "test.tmp" && exit 1 || exit 0
+cd test\cli\output\work_bitignore && bit status | findstr "test.tmp" && exit 1 || exit 0
 <<<
 >>>= 0
 

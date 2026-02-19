@@ -29,17 +29,17 @@ mkdir test\cli\output\work_gitattr & cd test\cli\output\work_gitattr & bit init 
 # ======================================================================
 
 # ---- Create .gitattributes with a custom pattern ----
-cd test\cli\output\work_gitattr & echo *.bin binary> .gitattributes
+cd test\cli\output\work_gitattr && echo *.bin binary> .gitattributes
 <<<
 >>>= 0
 
 # ---- Create a file and add it (triggers scan) ----
-cd test\cli\output\work_gitattr & echo hello> file.txt & bit add file.txt
+cd test\cli\output\work_gitattr && echo hello> file.txt & bit add file.txt
 <<<
 >>>= 0
 
 # ---- Verify .gitattributes was synced to .bit/index/ ----
-cd test\cli\output\work_gitattr & type .bit\index\.gitattributes
+cd test\cli\output\work_gitattr && type .bit\index\.gitattributes
 <<<
 >>> /\*\.bin binary/
 >>>= 0
@@ -49,17 +49,17 @@ cd test\cli\output\work_gitattr & type .bit\index\.gitattributes
 # ======================================================================
 
 # ---- Modify .gitattributes to add another pattern ----
-cd test\cli\output\work_gitattr & (echo *.bin binary & echo *.dat -diff) > .gitattributes
+cd test\cli\output\work_gitattr && (echo *.bin binary & echo *.dat -diff) > .gitattributes
 <<<
 >>>= 0
 
 # ---- Run bit status (triggers scan which re-syncs) ----
-cd test\cli\output\work_gitattr & bit status
+cd test\cli\output\work_gitattr && bit status
 <<<
 >>>= 0
 
 # ---- Verify updated content was synced ----
-cd test\cli\output\work_gitattr & type .bit\index\.gitattributes
+cd test\cli\output\work_gitattr && type .bit\index\.gitattributes
 <<<
 >>> /\*\.dat -diff/
 >>>= 0
@@ -69,12 +69,12 @@ cd test\cli\output\work_gitattr & type .bit\index\.gitattributes
 # ======================================================================
 
 # ---- Delete user's .gitattributes ----
-cd test\cli\output\work_gitattr & del .gitattributes
+cd test\cli\output\work_gitattr && del .gitattributes
 <<<
 >>>= 0
 
 # ---- Run bit status (triggers scan) ----
-cd test\cli\output\work_gitattr & bit status
+cd test\cli\output\work_gitattr && bit status
 <<<
 >>>= 0
 
@@ -88,17 +88,17 @@ if exist "test\cli\output\work_gitattr\.bit\index\.gitattributes" (exit 1) else 
 # ======================================================================
 
 # ---- Recreate .gitattributes with text=auto ----
-cd test\cli\output\work_gitattr & echo * text=auto> .gitattributes
+cd test\cli\output\work_gitattr && echo * text=auto> .gitattributes
 <<<
 >>>= 0
 
 # ---- Add a file (triggers sync) ----
-cd test\cli\output\work_gitattr & echo content> new.txt & bit add new.txt
+cd test\cli\output\work_gitattr && echo content> new.txt & bit add new.txt
 <<<
 >>>= 0
 
 # ---- Verify git check-attr sees the attribute through bit ----
-cd test\cli\output\work_gitattr & bit check-attr text new.txt
+cd test\cli\output\work_gitattr && bit check-attr text new.txt
 <<<
 >>> /new\.txt.*text.*auto/
 >>>= 0

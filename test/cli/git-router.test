@@ -70,30 +70,30 @@ mkdir test\cli\output\work_router
 >>>
 >>>= 0
 
-cd test\cli\output\work_router & bit init
+cd test\cli\output\work_router && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Router in a .bit repo routes to bit (bit status output)
-cd test\cli\output\work_router & set "BIT_REAL_GIT=git" & bit-git-router status
+cd test\cli\output\work_router && set "BIT_REAL_GIT=git" & bit-git-router status
 <<<
 >>> /On branch main/
 >>>= 0
 
 # Router passes add/commit through to bit
-cd test\cli\output\work_router & echo hello> file.txt & set "BIT_REAL_GIT=git" & bit-git-router add file.txt
+cd test\cli\output\work_router && echo hello> file.txt & set "BIT_REAL_GIT=git" & bit-git-router add file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_router & set "BIT_REAL_GIT=git" & bit-git-router commit -m "test commit"
+cd test\cli\output\work_router && set "BIT_REAL_GIT=git" & bit-git-router commit -m "test commit"
 <<<
 >>> /main.*test commit/
 >>>= 0
 
 # Router passes log through to bit
-cd test\cli\output\work_router & set "BIT_REAL_GIT=git" & bit-git-router log --oneline
+cd test\cli\output\work_router && set "BIT_REAL_GIT=git" & bit-git-router log --oneline
 <<<
 >>> /test commit/
 >>>= 0
@@ -127,7 +127,7 @@ no-bit
 # ======================================================================
 
 # Router in a .git repo (no .bit) routes to real git
-cd test\cli\output\work_router_git & set "BIT_REAL_GIT=git" & bit-git-router status
+cd test\cli\output\work_router_git && set "BIT_REAL_GIT=git" & bit-git-router status
 <<<
 >>> /On branch/
 >>>= 0
@@ -137,7 +137,7 @@ cd test\cli\output\work_router_git & set "BIT_REAL_GIT=git" & bit-git-router sta
 # ======================================================================
 
 # git -c key=val init via router still goes to real git (run from .bit repo)
-cd test\cli\output\work_router & set "BIT_REAL_GIT=git" & bit-git-router -c init.defaultBranch=main init subgit 2>&1
+cd test\cli\output\work_router && set "BIT_REAL_GIT=git" & bit-git-router -c init.defaultBranch=main init subgit 2>&1
 <<<
 >>> /Initialized|Reinitialized/
 >>>= 0

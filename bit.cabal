@@ -59,7 +59,8 @@ executable bit
                       Bit.Core.Import,
                       Bit.Core.Export,
                       Bit.Core.Submodule,
-                      Bit.Core.BecomeGit
+                      Bit.Core.BecomeGit,
+                      Bit.Remote.ChunkIndex
     build-depends:    base16-bytestring ^>=1.0.2.0,
                       base,
                       array,

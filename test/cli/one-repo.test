@@ -5,7 +5,7 @@ rmdir /s /q test\cli\output\work_onerepo 2>nul & mkdir test\cli\output\work_oner
 >>>= 0
 
 # Add text file - metadata should be created in .bit/index (content copy for text files)
-cd test\cli\output\work_onerepo & echo hello> test.txt & bit add test.txt
+cd test\cli\output\work_onerepo && echo hello> test.txt & bit add test.txt
 <<<
 >>>
 >>>= 0
@@ -23,25 +23,25 @@ findstr /C:"hello" test\cli\output\work_onerepo\.bit\index\test.txt >nul
 >>>= 0
 
 # Status: new file staged
-cd test\cli\output\work_onerepo & bit status
+cd test\cli\output\work_onerepo && bit status
 <<<
 >>> /new file:.*test\.txt/
 >>>= 0
 
 # Commit the staged file
-cd test\cli\output\work_onerepo & bit commit -m "Add test.txt"
+cd test\cli\output\work_onerepo && bit commit -m "Add test.txt"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
 # Status after commit: working tree clean
-cd test\cli\output\work_onerepo & bit status
+cd test\cli\output\work_onerepo && bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
 
 # Add binary file - metadata should have hash and size
-cd test\cli\output\work_onerepo & echo x> file.bin & bit add file.bin
+cd test\cli\output\work_onerepo && echo x> file.bin & bit add file.bin
 <<<
 >>>
 >>>= 0
@@ -64,19 +64,19 @@ findstr /C:"size:" test\cli\output\work_onerepo\.bit\index\file.bin >nul
 >>>= 0
 
 # Status: new binary file staged
-cd test\cli\output\work_onerepo & bit status
+cd test\cli\output\work_onerepo && bit status
 <<<
 >>> /new file:.*file\.bin/
 >>>= 0
 
 # Commit binary
-cd test\cli\output\work_onerepo & bit commit -m "Add file.bin"
+cd test\cli\output\work_onerepo && bit commit -m "Add file.bin"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
 # Add multiple files with "add ."
-cd test\cli\output\work_onerepo & echo data> data.txt & echo notes> notes.txt & bit add .
+cd test\cli\output\work_onerepo && echo data> data.txt & echo notes> notes.txt & bit add .
 <<<
 >>>
 >>>= 0
@@ -95,19 +95,19 @@ notes ok
 >>>= 0
 
 # Status: both new files staged
-cd test\cli\output\work_onerepo & bit status
+cd test\cli\output\work_onerepo && bit status
 <<<
 >>> /new file:.*data\.txt/
 >>>= 0
 
 # Commit multiple files
-cd test\cli\output\work_onerepo & bit commit -m "Add data and notes"
+cd test\cli\output\work_onerepo && bit commit -m "Add data and notes"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
 # Modify text file, add it
-cd test\cli\output\work_onerepo & echo hello world> test.txt & bit add test.txt
+cd test\cli\output\work_onerepo && echo hello world> test.txt & bit add test.txt
 <<<
 >>>
 >>>= 0
@@ -119,31 +119,31 @@ findstr /C:"hello world" test\cli\output\work_onerepo\.bit\index\test.txt >nul
 >>>= 0
 
 # Status: modified file staged
-cd test\cli\output\work_onerepo & bit status
+cd test\cli\output\work_onerepo && bit status
 <<<
 >>> /modified:.*test\.txt/
 >>>= 0
 
 # Commit modification
-cd test\cli\output\work_onerepo & bit commit -m "Update test.txt"
+cd test\cli\output\work_onerepo && bit commit -m "Update test.txt"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
 # Final status: clean
-cd test\cli\output\work_onerepo & bit status
+cd test\cli\output\work_onerepo && bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
 
 # Test bit log - should show commit history
-cd test\cli\output\work_onerepo & bit log --oneline
+cd test\cli\output\work_onerepo && bit log --oneline
 <<<
 >>> /Update test\.txt/
 >>>= 0
 
 # Test bit log with formatting - should work like git log
-cd test\cli\output\work_onerepo & bit log --pretty=format:"%s" -n 1
+cd test\cli\output\work_onerepo && bit log --pretty=format:"%s" -n 1
 <<<
 >>> /Update test\.txt/
 >>>= 0

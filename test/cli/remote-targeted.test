@@ -29,12 +29,12 @@ mkdir test\cli\output\work_rmt_a
 >>>
 >>>= 0
 
-cd test\cli\output\work_rmt_a & bit init
+cd test\cli\output\work_rmt_a && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_rmt_a & bit remote add origin ..\fs_remote_rmt
+cd test\cli\output\work_rmt_a && bit remote add origin ..\fs_remote_rmt
 <<<
 >>> /Remote.*added/
 >>>= 0
@@ -44,68 +44,68 @@ cd test\cli\output\work_rmt_a & bit remote add origin ..\fs_remote_rmt
 # ======================================================================
 
 # ---- @origin init rejected ----
-cd test\cli\output\work_rmt_a & bit @origin init
+cd test\cli\output\work_rmt_a && bit @origin init
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- Verify NO persistent workspace was created ----
-cd test\cli\output\work_rmt_a & if exist .bit\remote-workspaces\origin\.git (echo workspace exists) else (echo no workspace)
+cd test\cli\output\work_rmt_a && if exist .bit\remote-workspaces\origin\.git (echo workspace exists) else (echo no workspace)
 <<<
 >>>
 no workspace
 >>>= 0
 
 # ---- @origin add rejected ----
-cd test\cli\output\work_rmt_a & bit @origin add .
+cd test\cli\output\work_rmt_a && bit @origin add .
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- @nonexistent add error (remote not found) ----
-cd test\cli\output\work_rmt_a & bit @nonexistent add .
+cd test\cli\output\work_rmt_a && bit @nonexistent add .
 <<<
 >>>2 /not found/
 >>>= 1
 
 # ---- @origin status rejected ----
-cd test\cli\output\work_rmt_a & bit @origin status
+cd test\cli\output\work_rmt_a && bit @origin status
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- @origin log rejected ----
-cd test\cli\output\work_rmt_a & bit @origin log --oneline
+cd test\cli\output\work_rmt_a && bit @origin log --oneline
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- @origin ls-files rejected ----
-cd test\cli\output\work_rmt_a & bit @origin ls-files
+cd test\cli\output\work_rmt_a && bit @origin ls-files
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- --remote origin ls-files also rejected ----
-cd test\cli\output\work_rmt_a & bit --remote origin ls-files
+cd test\cli\output\work_rmt_a && bit --remote origin ls-files
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- @origin commit rejected ----
-cd test\cli\output\work_rmt_a & bit @origin commit -m "test"
+cd test\cli\output\work_rmt_a && bit @origin commit -m "test"
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- --remote origin status also rejected ----
-cd test\cli\output\work_rmt_a & bit --remote origin status
+cd test\cli\output\work_rmt_a && bit --remote origin status
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
 
 # ---- --remote origin log also rejected ----
-cd test\cli\output\work_rmt_a & bit --remote origin log --oneline
+cd test\cli\output\work_rmt_a && bit --remote origin log --oneline
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1
@@ -115,13 +115,13 @@ cd test\cli\output\work_rmt_a & bit --remote origin log --oneline
 # ======================================================================
 
 # ---- Unsupported command in remote context ----
-cd test\cli\output\work_rmt_a & bit @origin push
+cd test\cli\output\work_rmt_a && bit @origin push
 <<<
 >>>2 /not supported in remote context/
 >>>= 1
 
 # ---- Non-existent remote ----
-cd test\cli\output\work_rmt_a & bit @fake init
+cd test\cli\output\work_rmt_a && bit @fake init
 <<<
 >>>2 /remote.*not found/
 >>>= 1
@@ -132,7 +132,7 @@ mkdir test\cli\output\work_rmt_a\notrepo
 >>>
 >>>= 0
 
-cd test\cli\output\work_rmt_a\notrepo & bit @origin init
+cd test\cli\output\work_rmt_a\notrepo && bit @origin init
 <<<
 >>>2 /Remote workspaces are only supported for cloud remotes/
 >>>= 1

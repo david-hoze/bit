@@ -21,7 +21,7 @@ mkdir test\cli\output\work_alias
 >>>
 >>>= 0
 
-cd test\cli\output\work_alias & bit init
+cd test\cli\output\work_alias && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -31,12 +31,12 @@ cd test\cli\output\work_alias & bit init
 # ======================================================================
 
 # Configure a git alias in the bit repo's git config
-cd test\cli\output\work_alias & git -C .bit\index config alias.ci "commit"
+cd test\cli\output\work_alias && git -C .bit\index config alias.ci "commit"
 <<<
 >>>= 0
 
 # Use the alias — should expand to "bit commit" and show "nothing to commit"
-cd test\cli\output\work_alias & bit ci
+cd test\cli\output\work_alias && bit ci
 <<<
 >>> /nothing to commit/
 >>>= 1
@@ -46,12 +46,12 @@ cd test\cli\output\work_alias & bit ci
 # ======================================================================
 
 # Alias that includes flags
-cd test\cli\output\work_alias & git -C .bit\index config alias.st "status --short"
+cd test\cli\output\work_alias && git -C .bit\index config alias.st "status --short"
 <<<
 >>>= 0
 
 # Should expand to "bit status --short"
-cd test\cli\output\work_alias & bit st
+cd test\cli\output\work_alias && bit st
 <<<
 >>>= 0
 
@@ -59,7 +59,7 @@ cd test\cli\output\work_alias & bit st
 # TEST: Unknown command with no alias — passes through to git
 # ======================================================================
 
-cd test\cli\output\work_alias & bit notacommand
+cd test\cli\output\work_alias && bit notacommand
 <<<
 >>>2 /not a git command/
 >>>= 1

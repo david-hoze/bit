@@ -35,22 +35,22 @@ rclone mkdir gdrive-test:bit-test-fetch
 >>>= 0
 
 # ---- Repo A: init, add remote, create initial file ----
-cd test\cli\output\work_fetch_a & bit init
+cd test\cli\output\work_fetch_a && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_fetch_a & bit remote add origin gdrive-test:bit-test-fetch
+cd test\cli\output\work_fetch_a && bit remote add origin gdrive-test:bit-test-fetch
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_fetch_a & echo initial> file1.txt & bit add file1.txt & bit commit -m "Initial commit"
+cd test\cli\output\work_fetch_a && echo initial> file1.txt & bit add file1.txt & bit commit -m "Initial commit"
 <<<
 >>> /\[master|main|file changed/
 >>>= 0
 
-cd test\cli\output\work_fetch_a & bit push -u origin
+cd test\cli\output\work_fetch_a && bit push -u origin
 <<<
 >>> /Metadata push complete\.|Remote check passed|Push complete\./
 >>>= 0
@@ -59,18 +59,18 @@ cd test\cli\output\work_fetch_a & bit push -u origin
 # TEST CASE 1: FetchedFirst - First fetch should show output
 # ======================================================================
 
-cd test\cli\output\work_fetch_b & bit init
+cd test\cli\output\work_fetch_b && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_fetch_b & bit remote add origin gdrive-test:bit-test-fetch
+cd test\cli\output\work_fetch_b && bit remote add origin gdrive-test:bit-test-fetch
 <<<
 >>> /Remote.*added/
 >>>= 0
 
 # ---- First fetch: should show "Fetched: <hash>" and "From <remote>" ----
-cd test\cli\output\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b && bit fetch
 <<<
 >>> /Scanning remote|Fetched:|Fetch complete/
 >>>2 /From gdrive-test:bit-test-fetch|new branch.*origin\/main/
@@ -81,13 +81,13 @@ cd test\cli\output\work_fetch_b & bit fetch
 # ======================================================================
 
 # ---- Second fetch with no changes: should be silent (UpToDate) ----
-cd test\cli\output\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b && bit fetch
 <<<
 >>>
 >>>= 0
 
 # ---- Third fetch still silent ----
-cd test\cli\output\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b && bit fetch
 <<<
 >>>
 >>>= 0
@@ -97,24 +97,24 @@ cd test\cli\output\work_fetch_b & bit fetch
 # ======================================================================
 
 # ---- A: make a change and push ----
-cd test\cli\output\work_fetch_a & echo updated> file2.txt & bit add file2.txt & bit commit -m "Second commit"
+cd test\cli\output\work_fetch_a && echo updated> file2.txt & bit add file2.txt & bit commit -m "Second commit"
 <<<
 >>> /\[master|main|file changed/
 >>>= 0
 
-cd test\cli\output\work_fetch_a & bit push
+cd test\cli\output\work_fetch_a && bit push
 <<<
 >>> /Metadata push complete\.|Remote check passed|Push complete\./
 >>>= 0
 
 # ---- B: fetch should show "Updated: <old> -> <new>" ----
-cd test\cli\output\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b && bit fetch
 <<<
 >>> /Scanning remote|Updated:|Fetch complete/
 >>>= 0
 
 # ---- B: fetch again should be silent (UpToDate) ----
-cd test\cli\output\work_fetch_b & bit fetch
+cd test\cli\output\work_fetch_b && bit fetch
 <<<
 >>>
 >>>= 0

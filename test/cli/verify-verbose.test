@@ -25,17 +25,17 @@ mkdir test\cli\output\work_vv & cd test\cli\output\work_vv & bit init
 # TEST: Empty repo — collecting 0 files, all cached
 # ======================================================================
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /Collecting files\.\.\. 0 found/
 >>>= 0
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /All 0 files cached/
 >>>= 0
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /Comparing against committed metadata/
 >>>= 0
@@ -44,7 +44,7 @@ cd test\cli\output\work_vv & bit verify
 # SETUP: add files and commit
 # ======================================================================
 
-cd test\cli\output\work_vv & echo hello> a.txt & echo data> b.bin & bit add a.txt b.bin & bit commit -m "Add files"
+cd test\cli\output\work_vv && echo hello> a.txt & echo data> b.bin & bit add a.txt b.bin & bit commit -m "Add files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
@@ -53,12 +53,12 @@ cd test\cli\output\work_vv & echo hello> a.txt & echo data> b.bin & bit add a.tx
 # TEST: All files cached — "All N files cached, no hashing needed."
 # ======================================================================
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /Collecting files\.\.\. 2 found/
 >>>= 0
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /All 2 files cached, no hashing needed/
 >>>= 0
@@ -68,12 +68,12 @@ cd test\cli\output\work_vv & bit verify
 # ======================================================================
 
 # Delete one cache entry to force re-hash
-cd test\cli\output\work_vv & del .bit\cache\b.bin
+cd test\cli\output\work_vv && del .bit\cache\b.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /Checking cache\.\.\. 1 cached, 1 need hashing/
 >>>= 0
@@ -82,12 +82,12 @@ cd test\cli\output\work_vv & bit verify
 # TEST: All caches cleared — "0 cached, 2 need hashing"
 # ======================================================================
 
-cd test\cli\output\work_vv & rmdir /s /q .bit\cache
+cd test\cli\output\work_vv && rmdir /s /q .bit\cache
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /Checking cache\.\.\. 0 cached, 2 need hashing/
 >>>= 0
@@ -96,17 +96,17 @@ cd test\cli\output\work_vv & bit verify
 # TEST: Corrupted file — "Comparing against committed metadata..." + ERROR
 # ======================================================================
 
-cd test\cli\output\work_vv & echo corrupted> b.bin & rmdir /s /q .bit\cache
+cd test\cli\output\work_vv && echo corrupted> b.bin & rmdir /s /q .bit\cache
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /Comparing against committed metadata/
 >>>= 1
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /\[ERROR\] Metadata mismatch.*b\.bin/
 >>>= 1
@@ -116,12 +116,12 @@ cd test\cli\output\work_vv & bit verify
 # ======================================================================
 
 # Restore b.bin to committed content first, then delete a.txt
-cd test\cli\output\work_vv & echo data> b.bin & del a.txt
+cd test\cli\output\work_vv && echo data> b.bin & del a.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_vv & bit verify
+cd test\cli\output\work_vv && bit verify
 <<<
 >>>2 /\[ERROR\] Missing.*a\.txt/
 >>>= 1

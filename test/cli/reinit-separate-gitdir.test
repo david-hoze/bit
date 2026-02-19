@@ -28,32 +28,32 @@ mkdir test\cli\output\work_reinit_sgd
 # ======================================================================
 
 # ---- Init with separate-git-dir ----
-cd test\cli\output\work_reinit_sgd & bit init -q --separate-git-dir db1 repo1
+cd test\cli\output\work_reinit_sgd && bit init -q --separate-git-dir db1 repo1
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- .bit should be a file (bitlink), not a directory ----
-cd test\cli\output\work_reinit_sgd\repo1 & if exist .bit (if exist .bit\NUL (echo IS_DIR) else (echo IS_FILE)) else (echo NO_BIT)
+cd test\cli\output\work_reinit_sgd\repo1 && if exist .bit (if exist .bit\NUL (echo IS_DIR) else (echo IS_FILE)) else (echo NO_BIT)
 <<<
 >>>
 IS_FILE
 >>>= 0
 
 # ---- The separate gitdir should have git database files ----
-cd test\cli\output\work_reinit_sgd\db1 & if exist HEAD (echo HEAD_EXISTS) else (echo NO_HEAD)
+cd test\cli\output\work_reinit_sgd\db1 && if exist HEAD (echo HEAD_EXISTS) else (echo NO_HEAD)
 <<<
 >>>
 HEAD_EXISTS
 >>>= 0
 
 # ---- bit operations work with external gitdir ----
-cd test\cli\output\work_reinit_sgd\repo1 & echo test-content> sgdir-test.txt & bit add sgdir-test.txt & bit commit -m "External gitdir"
+cd test\cli\output\work_reinit_sgd\repo1 && echo test-content> sgdir-test.txt & bit add sgdir-test.txt & bit commit -m "External gitdir"
 <<<
 >>> /.*1 file.* changed.*/
 >>>= 0
 
-cd test\cli\output\work_reinit_sgd\repo1 & bit log --oneline
+cd test\cli\output\work_reinit_sgd\repo1 && bit log --oneline
 <<<
 >>> /External gitdir/
 >>>= 0
@@ -63,18 +63,18 @@ cd test\cli\output\work_reinit_sgd\repo1 & bit log --oneline
 # ======================================================================
 
 # ---- Plain re-init (no separate-git-dir) should succeed ----
-cd test\cli\output\work_reinit_sgd\repo1 & bit init -q
+cd test\cli\output\work_reinit_sgd\repo1 && bit init -q
 <<<
 >>> /.*[Rr]einitialized.*/
 >>>= 0
 
 # ---- bit still works after plain re-init ----
-cd test\cli\output\work_reinit_sgd\repo1 & bit log --oneline
+cd test\cli\output\work_reinit_sgd\repo1 && bit log --oneline
 <<<
 >>> /External gitdir/
 >>>= 0
 
-cd test\cli\output\work_reinit_sgd\repo1 & echo more> file2.txt & bit add file2.txt & bit commit -m "After re-init"
+cd test\cli\output\work_reinit_sgd\repo1 && echo more> file2.txt & bit add file2.txt & bit commit -m "After re-init"
 <<<
 >>> /.*1 file.* changed.*/
 >>>= 0

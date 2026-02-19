@@ -112,8 +112,28 @@ timeout /t 1 >nul & rmdir /s /q dir 2>nul
 Use backslashes for Windows paths in test commands:
 
 ```batch
-cd test\cli\output\work_mytest & bit init    # Correct
-cd test/cli/output/work_mytest & bit init    # May work but inconsistent
+cd test\cli\output\work_mytest && bit init    # Correct
+cd test/cli/output/work_mytest && bit init    # May work but inconsistent
+```
+
+### Use `&&` After `cd` (Not `&`)
+
+**CRITICAL**: In cmd.exe, `cd nonexistent & bit cmd` runs `bit cmd` even when `cd` fails — cmd prints an error to stderr but the `&` operator runs the next command unconditionally. This causes `bit` commands to execute in the **parent repo** (the bit project itself), contaminating its `.bit/index/.git/config` with test remotes.
+
+Always use `&&` after `cd` so the subsequent command only runs if the directory change succeeds:
+
+```batch
+# WRONG - bit runs even if cd fails, leaking into parent repo
+cd test\cli\output\work_mytest & bit remote add origin remote:path
+
+# CORRECT - bit only runs if cd succeeds
+cd test\cli\output\work_mytest && bit remote add origin remote:path
+```
+
+Note: only the first `&` (between `cd` and the first `bit` command) needs to be `&&`. Subsequent `&` separators in the same line are fine since they all run in the correct directory:
+
+```batch
+cd test\cli\output\work_mytest && echo hello> file.txt & bit add . & bit commit -m "msg"
 ```
 
 ### Error Suppression
@@ -125,7 +145,7 @@ Use `2>nul` only for cleanup commands where failure is acceptable. For actual te
 rmdir /s /q test\cli\output\work_mytest 2>nul
 
 # Test command - let errors show
-cd test\cli\output\work_mytest & bit init
+cd test\cli\output\work_mytest && bit init
 ```
 
 ## Output Matching
@@ -150,7 +170,7 @@ cd test\cli\output\work_mytest & bit init
 
 ```batch
 # Expect error on stderr
-cd test\cli\output\work_mytest & bit merge --abort
+cd test\cli\output\work_mytest && bit merge --abort
 <<<
 >>>2 /no merge in progress/
 >>>= 1
@@ -182,7 +202,7 @@ mkdir test\cli\output\work_mytest
 >>>
 >>>= 0
 
-cd test\cli\output\work_mytest & bit init
+cd test\cli\output\work_mytest && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -192,7 +212,7 @@ cd test\cli\output\work_mytest & bit init
 # ======================================================================
 
 # ---- Test case description ----
-cd test\cli\output\work_mytest & bit <command>
+cd test\cli\output\work_mytest && bit <command>
 <<<
 >>> /expected output/
 >>>= 0
@@ -213,7 +233,7 @@ cleanup done
 For commands that prompt for input, provide stdin:
 
 ```batch
-cd test\cli\output\work & bit pull
+cd test\cli\output\work && bit pull
 <<<
 l
 >>> /CONFLICT|Resolving conflicts/
@@ -223,7 +243,7 @@ l
 Or use non-interactive flags when available:
 
 ```batch
-cd test\cli\output\work & bit pull --accept-remote
+cd test\cli\output\work && bit pull --accept-remote
 <<<
 >>> /Accepting remote file state/
 >>>= 0

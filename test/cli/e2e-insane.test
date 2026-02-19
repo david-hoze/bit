@@ -25,32 +25,32 @@ mkdir test\cli\output\remote_e2e
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit init
+cd test\cli\output\work_e2e_laptop && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit config core.mode lite
+cd test\cli\output\work_e2e_laptop && bit config core.mode lite
 <<<
 >>> /[Mm]ode set to lite|lite/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit remote add origin ..\remote_e2e
+cd test\cli\output\work_e2e_laptop && bit remote add origin ..\remote_e2e
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & echo hello from laptop> doc.txt & echo bin1> a.bin & bit add doc.txt a.bin & bit commit -m "Laptop first"
+cd test\cli\output\work_e2e_laptop && echo hello from laptop> doc.txt & echo bin1> a.bin & bit add doc.txt a.bin & bit commit -m "Laptop first"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit verify
+cd test\cli\output\work_e2e_laptop && bit verify
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit push -u origin
+cd test\cli\output\work_e2e_laptop && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -64,32 +64,32 @@ mkdir test\cli\output\work_e2e_pc
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit init & bit config core.mode solid & bit remote add origin ..\remote_e2e
+cd test\cli\output\work_e2e_pc && bit init & bit config core.mode solid & bit remote add origin ..\remote_e2e
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit fetch & bit pull origin
+cd test\cli\output\work_e2e_pc && bit fetch & bit pull origin
 <<<
 >>> /first pull|Checking out|Syncing|Merge made|Pulling|Already up to date/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & findstr /C:"hello from laptop" doc.txt >nul
+cd test\cli\output\work_e2e_pc && findstr /C:"hello from laptop" doc.txt >nul
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit verify
+cd test\cli\output\work_e2e_pc && bit verify
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit --remote origin verify
+cd test\cli\output\work_e2e_pc && bit --remote origin verify
 <<<
 >>> /\[OK\] All [0-9]+ files match/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & echo from pc> pc.txt & echo bin2> b.bin & bit add pc.txt b.bin & bit commit -m "PC adds" & bit push origin
+cd test\cli\output\work_e2e_pc && echo from pc> pc.txt & echo bin2> b.bin & bit add pc.txt b.bin & bit commit -m "PC adds" & bit push origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -98,18 +98,18 @@ cd test\cli\output\work_e2e_pc & echo from pc> pc.txt & echo bin2> b.bin & bit a
 # 3. LAPTOP: pull again, verify, both sides have each other's files
 # ======================================================================
 
-cd test\cli\output\work_e2e_laptop & bit pull origin
+cd test\cli\output\work_e2e_laptop && bit pull origin
 <<<
 >>> /Merge made|Updating|Syncing|already up to date/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & if exist pc.txt (echo has_pc) else (echo no)
+cd test\cli\output\work_e2e_laptop && if exist pc.txt (echo has_pc) else (echo no)
 <<<
 >>>
 has_pc
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit verify
+cd test\cli\output\work_e2e_laptop && bit verify
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
@@ -118,12 +118,12 @@ cd test\cli\output\work_e2e_laptop & bit verify
 # 4. MODE SWITCH: laptop lite -> solid, add file, commit, push
 # ======================================================================
 
-cd test\cli\output\work_e2e_laptop & bit config core.mode solid
+cd test\cli\output\work_e2e_laptop && bit config core.mode solid
 <<<
 >>> /[Ss]olid|Mode set/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & echo solid-add> solid.bin & bit add solid.bin & bit commit -m "Laptop solid add" & bit push origin
+cd test\cli\output\work_e2e_laptop && echo solid-add> solid.bin & bit add solid.bin & bit commit -m "Laptop solid add" & bit push origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -132,17 +132,17 @@ cd test\cli\output\work_e2e_laptop & echo solid-add> solid.bin & bit add solid.b
 # 5. MODE SWITCH: PC solid -> lite, pull laptop's solid.bin, add file, push
 # ======================================================================
 
-cd test\cli\output\work_e2e_pc & bit pull origin
+cd test\cli\output\work_e2e_pc && bit pull origin
 <<<
 >>> /Merge made|Updating|Syncing|already up to date/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit config core.mode lite
+cd test\cli\output\work_e2e_pc && bit config core.mode lite
 <<<
 >>> /[Mm]ode set to lite|lite/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & echo lite-add> lite.txt & bit add lite.txt & bit commit -m "PC lite add" & bit push origin
+cd test\cli\output\work_e2e_pc && echo lite-add> lite.txt & bit add lite.txt & bit commit -m "PC lite add" & bit push origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -151,23 +151,23 @@ cd test\cli\output\work_e2e_pc & echo lite-add> lite.txt & bit add lite.txt & bi
 # 6. LAPTOP: pull (get lite-add), PC: pull (get solid.bin)
 # ======================================================================
 
-cd test\cli\output\work_e2e_laptop & bit pull origin
+cd test\cli\output\work_e2e_laptop && bit pull origin
 <<<
 >>> /Merge made|Updating|Syncing|already up to date/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit pull origin
+cd test\cli\output\work_e2e_pc && bit pull origin
 <<<
 >>> /Merge made|Updating|Syncing|already up to date/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & if exist lite.txt (echo has_lite) else (echo no)
+cd test\cli\output\work_e2e_laptop && if exist lite.txt (echo has_lite) else (echo no)
 <<<
 >>>
 has_lite
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & if exist solid.bin (echo has_solid) else (echo no)
+cd test\cli\output\work_e2e_pc && if exist solid.bin (echo has_solid) else (echo no)
 <<<
 >>>
 has_solid
@@ -177,17 +177,17 @@ has_solid
 # 7. REPAIR: corrupt binary on PC, repair from remote (origin)
 # ======================================================================
 
-cd test\cli\output\work_e2e_pc & echo corrupted> a.bin
+cd test\cli\output\work_e2e_pc && echo corrupted> a.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit repair
+cd test\cli\output\work_e2e_pc && bit repair
 <<<
 >>> /REPAIRED.*a\.bin/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit verify
+cd test\cli\output\work_e2e_pc && bit verify
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
@@ -196,18 +196,18 @@ cd test\cli\output\work_e2e_pc & bit verify
 # 8. MISSING FILE: delete b.bin, recover via restore (CAS has it in solid mode)
 # ======================================================================
 
-cd test\cli\output\work_e2e_pc & del b.bin
+cd test\cli\output\work_e2e_pc && del b.bin
 <<<
 >>>
 >>>= 0
 
 # In solid mode, CAS has the blob so verify/repair says OK (proof of possession).
 # Use bit restore to get the actual file back from CAS.
-cd test\cli\output\work_e2e_pc & bit restore b.bin
+cd test\cli\output\work_e2e_pc && bit restore b.bin
 <<<
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & findstr /C:"bin2" b.bin >nul
+cd test\cli\output\work_e2e_pc && findstr /C:"bin2" b.bin >nul
 <<<
 >>>
 >>>= 0
@@ -216,12 +216,12 @@ cd test\cli\output\work_e2e_pc & findstr /C:"bin2" b.bin >nul
 # 9. CAS BACKFILL: laptop was lite when a.bin was added; switch solid, backfill
 # ======================================================================
 
-cd test\cli\output\work_e2e_laptop & bit config core.mode solid
+cd test\cli\output\work_e2e_laptop && bit config core.mode solid
 <<<
 >>> /[Ss]olid|Mode set/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit cas backfill
+cd test\cli\output\work_e2e_laptop && bit cas backfill
 <<<
 >>> /Stored .* blob/
 >>>= 0
@@ -230,22 +230,22 @@ cd test\cli\output\work_e2e_laptop & bit cas backfill
 # 10. REMOTE VERIFY: corrupt file on remote, verify fails; repair fixes remote
 # ======================================================================
 
-cd test\cli\output\remote_e2e & echo bad> a.bin
+cd test\cli\output\remote_e2e && echo bad> a.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit --remote origin verify
+cd test\cli\output\work_e2e_laptop && bit --remote origin verify
 <<<
 >>>2 /\[ERROR\]|mismatch|Missing/
 >>>= 1
 
-cd test\cli\output\work_e2e_laptop & bit --remote origin repair
+cd test\cli\output\work_e2e_laptop && bit --remote origin repair
 <<<
 >>> /REPAIRED|Repairing|0 repaired, 0 failed/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit --remote origin verify
+cd test\cli\output\work_e2e_laptop && bit --remote origin verify
 <<<
 >>> /\[OK\] All [0-9]+ files match/
 >>>= 0
@@ -259,22 +259,22 @@ mkdir test\cli\output\work_e2e_repair
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_repair & bit init & bit config core.mode lite & bit remote add origin ..\remote_e2e
+cd test\cli\output\work_e2e_repair && bit init & bit config core.mode lite & bit remote add origin ..\remote_e2e
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_e2e_repair & echo never-pushed> local_only.bin & bit add local_only.bin & bit commit -m "Local only"
+cd test\cli\output\work_e2e_repair && echo never-pushed> local_only.bin & bit add local_only.bin & bit commit -m "Local only"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_e2e_repair & echo corrupted> local_only.bin
+cd test\cli\output\work_e2e_repair && echo corrupted> local_only.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_repair & bit repair
+cd test\cli\output\work_e2e_repair && bit repair
 <<<
 >>> /unrepairable|No repair sources/
 >>>= 1
@@ -288,27 +288,27 @@ mkdir test\cli\output\remote_e2e_2
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit remote add backup ..\remote_e2e_2
+cd test\cli\output\work_e2e_laptop && bit remote add backup ..\remote_e2e_2
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit push backup
+cd test\cli\output\work_e2e_laptop && bit push backup
 <<<
 >>> /Push complete|Remote is empty|Inspecting/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit remote add backup ..\remote_e2e_2
+cd test\cli\output\work_e2e_pc && bit remote add backup ..\remote_e2e_2
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & echo broken> solid.bin
+cd test\cli\output\work_e2e_pc && echo broken> solid.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit repair
+cd test\cli\output\work_e2e_pc && bit repair
 <<<
 >>> /REPAIRED.*\.(bin|txt)|Searching.*source/
 >>>= 0
@@ -317,17 +317,17 @@ cd test\cli\output\work_e2e_pc & bit repair
 # 13. PUSH VERIFICATION: delete tracked file, push must fail
 # ======================================================================
 
-cd test\cli\output\work_e2e_laptop & del doc.txt
+cd test\cli\output\work_e2e_laptop && del doc.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & bit push origin
+cd test\cli\output\work_e2e_laptop && bit push origin
 <<<
 >>>2 /Working tree does not match|Verifying/
 >>>= 1
 
-cd test\cli\output\work_e2e_laptop & bit restore doc.txt
+cd test\cli\output\work_e2e_laptop && bit restore doc.txt
 <<<
 >>>
 >>>= 0
@@ -336,12 +336,12 @@ cd test\cli\output\work_e2e_laptop & bit restore doc.txt
 # 14. SWITCH BACK: laptop solid -> lite, add again, push (no CAS write)
 # ======================================================================
 
-cd test\cli\output\work_e2e_laptop & bit config core.mode lite
+cd test\cli\output\work_e2e_laptop && bit config core.mode lite
 <<<
 >>> /[Mm]ode set to lite|lite/
 >>>= 0
 
-cd test\cli\output\work_e2e_laptop & echo back-to-lite> lite2.txt & bit add lite2.txt & bit commit -m "Back to lite" & bit push origin
+cd test\cli\output\work_e2e_laptop && echo back-to-lite> lite2.txt & bit add lite2.txt & bit commit -m "Back to lite" & bit push origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -350,17 +350,17 @@ cd test\cli\output\work_e2e_laptop & echo back-to-lite> lite2.txt & bit add lite
 # 15. DIVERGENCE: both edit, then pull --manual-merge
 # ======================================================================
 
-cd test\cli\output\work_e2e_laptop & echo laptop edit>> doc.txt & bit add doc.txt & bit commit -m "Laptop edit" & bit push origin
+cd test\cli\output\work_e2e_laptop && echo laptop edit>> doc.txt & bit add doc.txt & bit commit -m "Laptop edit" & bit push origin
 <<<
 >>> /Push complete/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & echo pc edit>> doc.txt & bit add doc.txt & bit commit -m "PC edit"
+cd test\cli\output\work_e2e_pc && echo pc edit>> doc.txt & bit add doc.txt & bit commit -m "PC edit"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit pull origin --manual-merge
+cd test\cli\output\work_e2e_pc && bit pull origin --manual-merge
 <<<
 >>> /Remote divergence|conflicts|No remote divergence|Proceeding with normal pull/
 >>>= 0
@@ -369,12 +369,12 @@ cd test\cli\output\work_e2e_pc & bit pull origin --manual-merge
 # 16. STATUS: both repos clean after all operations
 # ======================================================================
 
-cd test\cli\output\work_e2e_laptop & bit status
+cd test\cli\output\work_e2e_laptop && bit status
 <<<
 >>> /nothing to commit|On branch/
 >>>= 0
 
-cd test\cli\output\work_e2e_pc & bit status
+cd test\cli\output\work_e2e_pc && bit status
 <<<
 >>> /nothing to commit|On branch/
 >>>= 0

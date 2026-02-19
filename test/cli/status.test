@@ -5,7 +5,7 @@ rmdir /s /q test\cli\output\work_status 2>nul & mkdir test\cli\output\work_statu
 >>>= 0
 
 # Status should show untracked file
-cd test\cli\output\work_status & bit status
+cd test\cli\output\work_status && bit status
 <<<
 >>> /file\.bin/
 >>>= 0

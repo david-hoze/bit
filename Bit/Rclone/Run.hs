@@ -17,6 +17,7 @@ module Bit.Rclone.Run
     , TransportItem(..)
     , checkRemote
     , CheckResult(..)
+    , lsfRemote
     ) where
 
 import System.Process (readProcessWithExitCode, CreateProcess(..), StdStream(..), proc, waitForProcess, createProcess)
@@ -319,4 +320,9 @@ checkRemote localPath remote mCounter = do
                      ]
         in go
 
-
+-- | List files recursively under a remote path using rclone lsf.
+-- Returns (ExitCode, stdout lines, stderr).
+lsfRemote :: Remote -> FilePath -> IO (ExitCode, String, String)
+lsfRemote remote relPath =
+    let fullRemote = remoteFilePath remote relPath
+    in readProcessWithExitCode "rclone" ["lsf", "--recursive", fullRemote] ""

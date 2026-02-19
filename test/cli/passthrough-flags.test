@@ -25,7 +25,7 @@ mkdir test\cli\output\work_ptflags & cd test\cli\output\work_ptflags & bit init 
 >>>= 0
 
 # ---- Create a bare git repo for --git-dir tests ----
-cd test\cli\output\work_ptflags & git init --bare bare.git
+cd test\cli\output\work_ptflags && git init --bare bare.git
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -35,19 +35,19 @@ cd test\cli\output\work_ptflags & git init --bare bare.git
 # ======================================================================
 
 # ---- Set a config in the bare repo ----
-cd test\cli\output\work_ptflags & git config -f bare.git\config test.flagkey flagvalue
+cd test\cli\output\work_ptflags && git config -f bare.git\config test.flagkey flagvalue
 <<<
 >>>= 0
 
 # ---- --git-dir=bare.git should bypass bit and read from bare.git ----
-cd test\cli\output\work_ptflags & bit --git-dir=bare.git config test.flagkey
+cd test\cli\output\work_ptflags && bit --git-dir=bare.git config test.flagkey
 <<<
 >>>
 flagvalue
 >>>= 0
 
 # ---- --git-dir=bare.git rev-parse should return bare.git ----
-cd test\cli\output\work_ptflags & bit --git-dir=bare.git rev-parse --git-dir
+cd test\cli\output\work_ptflags && bit --git-dir=bare.git rev-parse --git-dir
 <<<
 >>> /bare\.git/
 >>>= 0
@@ -57,7 +57,7 @@ cd test\cli\output\work_ptflags & bit --git-dir=bare.git rev-parse --git-dir
 # ======================================================================
 
 # ---- --git-dir bare.git (space-separated) should also bypass ----
-cd test\cli\output\work_ptflags & bit --git-dir bare.git config test.flagkey
+cd test\cli\output\work_ptflags && bit --git-dir bare.git config test.flagkey
 <<<
 >>>
 flagvalue
@@ -68,13 +68,13 @@ flagvalue
 # ======================================================================
 
 # ---- --work-tree=. should bypass bit ----
-cd test\cli\output\work_ptflags & bit --git-dir=bare.git --work-tree=. rev-parse --show-toplevel
+cd test\cli\output\work_ptflags && bit --git-dir=bare.git --work-tree=. rev-parse --show-toplevel
 <<<
 >>> /work_ptflags/
 >>>= 0
 
 # ---- --work-tree <path> (space form) should also bypass ----
-cd test\cli\output\work_ptflags & bit --work-tree . --git-dir=bare.git rev-parse --show-toplevel
+cd test\cli\output\work_ptflags && bit --work-tree . --git-dir=bare.git rev-parse --show-toplevel
 <<<
 >>> /work_ptflags/
 >>>= 0
@@ -84,7 +84,7 @@ cd test\cli\output\work_ptflags & bit --work-tree . --git-dir=bare.git rev-parse
 # ======================================================================
 
 # ---- rev-parse --git-dir (flag after subcommand) should use bit's repo, not bare.git ----
-cd test\cli\output\work_ptflags & bit rev-parse --git-dir
+cd test\cli\output\work_ptflags && bit rev-parse --git-dir
 <<<
 >>> /\.git/
 >>>= 0
@@ -94,7 +94,7 @@ cd test\cli\output\work_ptflags & bit rev-parse --git-dir
 # ======================================================================
 
 # ---- -c key=val before --git-dir should still bypass ----
-cd test\cli\output\work_ptflags & bit -c color.ui=false --git-dir=bare.git config test.flagkey
+cd test\cli\output\work_ptflags && bit -c color.ui=false --git-dir=bare.git config test.flagkey
 <<<
 >>>
 flagvalue

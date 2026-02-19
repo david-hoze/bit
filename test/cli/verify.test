@@ -6,7 +6,7 @@ rmdir /s /q test\cli\output\work_verify 2>nul & mkdir test\cli\output\work_verif
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_verify & bit verify
+cd test\cli\output\work_verify && bit verify
 <<<
 >>> /All.*0.*files match/
 >>>= 0
@@ -17,7 +17,7 @@ rmdir /s /q test\cli\output\work_verify 2>nul & mkdir test\cli\output\work_verif
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_verify & bit verify
+cd test\cli\output\work_verify && bit verify
 <<<
 >>> /All.*files match/
 >>>= 0
@@ -28,22 +28,22 @@ rmdir /s /q test\cli\output\work_verify 2>nul & mkdir test\cli\output\work_verif
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_verify & echo corrupted> file.bin
+cd test\cli\output\work_verify && echo corrupted> file.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_verify & bit verify
+cd test\cli\output\work_verify && bit verify
 <<<
 >>> /issues found|hash mismatch|file\.bin/
 >>>= 1
 
 # --- verify detects corrupted file even after scan (stale metadata regression) ---
-cd test\cli\output\work_verify & bit status
+cd test\cli\output\work_verify && bit status
 <<<
 >>>= 0
 
-cd test\cli\output\work_verify & bit verify
+cd test\cli\output\work_verify && bit verify
 <<<
 >>> /issues found|hash mismatch|file\.bin/
 >>>= 1
@@ -59,7 +59,7 @@ del test\cli\output\work_verify\missing.txt
 >>>
 >>>= 0
 
-cd test\cli\output\work_verify & bit verify
+cd test\cli\output\work_verify && bit verify
 <<<
 >>> /issues found|missing|missing\.txt/
 >>>= 1

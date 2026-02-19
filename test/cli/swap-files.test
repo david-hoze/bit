@@ -22,34 +22,34 @@ mkdir test\cli\output\work_swap_a & mkdir test\cli\output\fs_remote_swap
 >>>
 >>>= 0
 
-cd test\cli\output\work_swap_a & bit init
+cd test\cli\output\work_swap_a && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_swap_a & bit remote add origin ..\fs_remote_swap
+cd test\cli\output\work_swap_a && bit remote add origin ..\fs_remote_swap
 <<<
 >>> /Remote 'origin' added/
 >>>= 0
 
 # Create two files with distinct content
-cd test\cli\output\work_swap_a & echo content-of-alpha> alpha.txt & echo content-of-beta> beta.txt & bit add alpha.txt beta.txt & bit commit -m "Add two files"
+cd test\cli\output\work_swap_a && echo content-of-alpha> alpha.txt & echo content-of-beta> beta.txt & bit add alpha.txt beta.txt & bit commit -m "Add two files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_swap_a & bit push -u origin
+cd test\cli\output\work_swap_a && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
 
 # Verify initial state at remote
-cd test\cli\output\fs_remote_swap & type alpha.txt
+cd test\cli\output\fs_remote_swap && type alpha.txt
 <<<
 >>> /content-of-alpha/
 >>>= 0
 
-cd test\cli\output\fs_remote_swap & type beta.txt
+cd test\cli\output\fs_remote_swap && type beta.txt
 <<<
 >>> /content-of-beta/
 >>>= 0
@@ -59,12 +59,12 @@ cd test\cli\output\fs_remote_swap & type beta.txt
 # ======================================================================
 
 # Swap alpha.txt <-> beta.txt using a temp file
-cd test\cli\output\work_swap_a & move alpha.txt tmp_swap.txt >nul & move beta.txt alpha.txt >nul & move tmp_swap.txt beta.txt >nul & bit add alpha.txt beta.txt & bit commit -m "Swap alpha and beta"
+cd test\cli\output\work_swap_a && move alpha.txt tmp_swap.txt >nul & move beta.txt alpha.txt >nul & move tmp_swap.txt beta.txt >nul & bit add alpha.txt beta.txt & bit commit -m "Swap alpha and beta"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_swap_a & bit push
+cd test\cli\output\work_swap_a && bit push
 <<<
 >>> /Push complete/
 >>>= 0
@@ -74,13 +74,13 @@ cd test\cli\output\work_swap_a & bit push
 # ======================================================================
 
 # alpha.txt should now have beta's original content
-cd test\cli\output\fs_remote_swap & type alpha.txt
+cd test\cli\output\fs_remote_swap && type alpha.txt
 <<<
 >>> /content-of-beta/
 >>>= 0
 
 # beta.txt should now have alpha's original content
-cd test\cli\output\fs_remote_swap & type beta.txt
+cd test\cli\output\fs_remote_swap && type beta.txt
 <<<
 >>> /content-of-alpha/
 >>>= 0
