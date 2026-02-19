@@ -365,6 +365,16 @@ The following git test files contain binary-related cases that have **no** bit t
 | `t8006-blame-textconv.sh` | `git blame --textconv` on binary | Blame with textconv filter |
 | `t8007-cat-file-textconv.sh` | `git cat-file --textconv` on binary | Cat-file with textconv |
 
+### Medium priority (continued)
+
+| Git test file | Binary-relevant cases | Why |
+|---|---|---|
+| `t4012-diff-binary.sh` | `diff --stat` with Unicode filenames + binary + large change count | Stat formatting with non-ASCII binary paths |
+| `t4103-apply-binary.sh` | `apply --check` without `--binary` rejects binary diff; truncated binary diff rejection | Apply validation edge cases |
+| `t1050-large.sh` | Large binary diff shows "Binary files differ" message | User-facing message for large binary diffs |
+| `t4209-log-pickaxe.sh` | `-G` vs `-S` binary search asymmetry; `-a` flag to force text search | Pickaxe semantics with binary content |
+| `t4048-diff-combined-binary.sh` | `diff --cc` on unresolved working-tree conflict + textconv | Combined diff edge case with binary conflict |
+
 ### Low priority (git-internal)
 
 | Git test file | Binary-relevant cases | Why |
@@ -375,3 +385,12 @@ The following git test files contain binary-related cases that have **no** bit t
 | `t3701-add-interactive.sh` | Interactive add with binary | Interactive mode |
 | `t4150-am.sh` | Binary blob in partial clone | Clone+filter edge case |
 | `t9300-fast-import.sh` | Binary blobs via fast-import | Not a bit operation |
+
+### Low priority (continued)
+
+| Git test file | Binary-relevant cases | Why |
+|---|---|---|
+| `t4011-diff-symlink.sh` | Symlink ignores binary attribute | Symlink-specific, not relevant to bit's binary handling |
+| `t4012-diff-binary.sh` | `diff --no-index` binary creation roundtrip | `--no-index` is git-internal diff mode |
+| `t4030-diff-textconv.sh` | Textconv doesn't act on symlinks | Symlink + textconv interaction |
+| `t7201-co.sh` | Custom merge driver `recursive=binary` | Custom merge driver configuration |

@@ -150,7 +150,7 @@ cd test\cli\output\work_mytest & bit remote add origin ..\remote_mirror
 
 **Purpose**: Verify bit's binary file handling — classification, metadata format, push/pull round-trips, merge, stash, verify, reset, cherry-pick, rebase, revert, grep, diff/rename, attributes, and format-patch/am.
 
-**Location**: `test/t/` — 14 bash test scripts, 222 tests total.
+**Location**: `test/t/` — 20 bash test scripts, 328 tests total.
 
 **Run**: `cd test/t && bash run-tests.sh`
 
