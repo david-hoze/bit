@@ -134,7 +134,8 @@ cloudPushMetadata remote = do
     code <- Git.createBundle bundleName
     case code of
         ExitSuccess -> uploadToRemote bundlePath remote
-        _ -> hPutStrLn stderr "Error creating bundle"
+        _ -> do hPutStrLn stderr "Error creating bundle"
+                exitWith (ExitFailure 1)
 
 -- ============================================================================
 -- Filesystem seam implementations
@@ -408,7 +409,8 @@ pushBundle remote = do
     code <- Git.createBundle bundleName
     case code of
         ExitSuccess -> uploadToRemote bundlePath remote
-        _ -> hPutStrLn stderr "Error creating bundle"
+        _ -> do hPutStrLn stderr "Error creating bundle"
+                exitWith (ExitFailure 1)
 
 -- | Upload a bundle file to the remote.
 uploadToRemote :: FilePath -> Remote -> IO ()
@@ -417,7 +419,8 @@ uploadToRemote src remote = do
     rCode <- Transport.copyToRemote src remote ".bit/bit.bundle"
     case rCode of
         ExitSuccess -> putStrLn "Metadata push complete."
-        _ -> hPutStrLn stderr "Error uploading bundle."
+        _ -> do hPutStrLn stderr "Error uploading bundle."
+                exitWith (ExitFailure 1)
 
 -- | Helper for cleanup that doesn't crash if the file was never made.
 cleanupTemp :: FilePath -> IO ()
