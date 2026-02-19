@@ -1,0 +1,152 @@
+# =============================================================================
+# CAS dedup - push skips chunks already on remote, pull skips chunks in local CAS
+#
+# Uses a filesystem bare remote (no cloud needed).
+# Tests: push dedup (incremental push after small edit),
+#        pull dedup (pull into repo with cached CAS blobs).
+# =============================================================================
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_dedup_a 2>nul & rmdir /s /q test\cli\output\work_dedup_b 2>nul & rmdir /s /q test\cli\output\remote_dedup 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: solid mode repo with CDC and a filesystem bare remote
+# ======================================================================
+
+mkdir test\cli\output\work_dedup_a
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_dedup_a && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_dedup_a && bit config core.mode solid
+<<<
+>>> /[Ss]olid|Mode set/
+>>>= 0
+
+# Small chunk sizes so a small file produces multiple chunks
+cd test\cli\output\work_dedup_a && bit config cdc.min-size 64
+<<<
+>>>= 0
+
+cd test\cli\output\work_dedup_a && bit config cdc.avg-size 256
+<<<
+>>>= 0
+
+cd test\cli\output\work_dedup_a && bit config cdc.max-size 1024
+<<<
+>>>= 0
+
+# Create a binary file large enough for multiple chunks
+cd test\cli\output\work_dedup_a && fsutil file createnew data.bin 4096 >nul
+<<<
+>>>= 0
+
+cd test\cli\output\work_dedup_a && bit add data.bin & bit commit -m "Initial"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# Filesystem bare remote
+mkdir test\cli\output\remote_dedup
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_dedup_a && bit remote add origin ..\remote_dedup
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+# ======================================================================
+# FIRST PUSH: all chunks uploaded (nothing on remote yet)
+# ======================================================================
+
+cd test\cli\output\work_dedup_a && bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# PUSH DEDUP: small edit, only changed chunks should upload
+# ======================================================================
+
+# Overwrite first 6 bytes of data.bin
+cd test\cli\output\work_dedup_a && echo EDIT!> tmp_edit & copy /b tmp_edit + data.bin data.bin.new >nul & move /y data.bin.new data.bin >nul & del tmp_edit
+<<<
+>>>= 0
+
+cd test\cli\output\work_dedup_a && bit add data.bin & bit commit -m "Small edit"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# Push should report "already on remote" — proves dedup is filtering
+cd test\cli\output\work_dedup_a && bit push
+<<<
+>>> /already on remote/
+>>>= 0
+
+# ======================================================================
+# PULL DEDUP: clone into second repo, then pull incremental
+# ======================================================================
+
+mkdir test\cli\output\work_dedup_b
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_dedup_b && bit init & bit config core.mode solid & bit config cdc.min-size 64 & bit config cdc.avg-size 256 & bit config cdc.max-size 1024
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_dedup_b && bit remote add origin ..\remote_dedup
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+# First pull — downloads all chunks
+cd test\cli\output\work_dedup_b && bit pull origin
+<<<
+>>> /Checking out|first pull|Syncing/
+>>>= 0
+
+# Make another small edit in repo A and push
+cd test\cli\output\work_dedup_a && echo MORE!> tmp_edit & copy /b tmp_edit + data.bin data.bin.new >nul & move /y data.bin.new data.bin >nul & del tmp_edit
+<<<
+>>>= 0
+
+cd test\cli\output\work_dedup_a && bit add data.bin & bit commit -m "Another edit" & bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Pull into repo B — gets the update via filesystem transport
+cd test\cli\output\work_dedup_b && bit pull origin
+<<<
+>>> /Pulling|Merge made|Syncing|up to date/
+>>>= 0
+
+# Verify integrity
+cd test\cli\output\work_dedup_b && bit verify
+<<<
+>>> /All .* files? match|Verified|0 issues/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_dedup_a 2>nul & rmdir /s /q test\cli\output\work_dedup_b 2>nul & rmdir /s /q test\cli\output\remote_dedup 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

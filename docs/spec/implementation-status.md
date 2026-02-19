@@ -68,6 +68,7 @@
 | `Bit/Types.hs` | Core types: Hash, FileEntry, BitEnv (with `envPrefix`), BitM |
 | `Bit/Path.hs` | `RemotePath` newtype for remote filesystem paths |
 | `Bit/Remote.hs` | Remote type, resolution, RemoteState, FetchResult |
+| `Bit/Remote/ChunkIndex.hs` | `queryRemoteBlobs`: list CAS blobs on remote via `rclone lsf` for push dedup |
 | `Bit/Utils.hs` | Path utilities, filtering, atomic write re-exports |
 | `Bit/Domain/Plan.hs` | `RcloneAction` type and `resolveSwaps` |
 | `Bit/Scan/Local.hs` | Working directory scanning, hash computation, bandwidth-aware scanning, parallel metadata writing |
@@ -125,7 +126,7 @@
 - Concurrent file scanning with bounded parallelism and progress reporting
 - HLint enforcement of IO safety rules
 - Proof of possession verification for push and pull
-- CDC (content-defined chunking) -- enabled by default in solid mode; FastCDC with gear hash; batch CAS upload/download via `rclone --files-from`; manifest-based reassembly on pull
+- CDC (content-defined chunking) -- enabled by default in solid mode; FastCDC with gear hash; batch CAS upload/download via `rclone --files-from`; manifest-based reassembly on pull; push dedup via `queryRemoteBlobs` (skips chunks already on remote); pull dedup via `hasBlobInCas` (skips chunks already in local CAS)
 
 ---
 
