@@ -146,6 +146,18 @@ cd test\cli\output\work_mytest & bit remote add origin "%CD%\test\cli\output\rem
 cd test\cli\output\work_mytest & bit remote add origin ..\remote_mirror
 ```
 
+### Binary File Test Suite
+
+**Purpose**: Verify bit's binary file handling — classification, metadata format, push/pull round-trips, merge, stash, verify, reset, cherry-pick, rebase, revert, grep, diff/rename, attributes, and format-patch/am.
+
+**Location**: `test/t/` — 14 bash test scripts, 222 tests total.
+
+**Run**: `cd test/t && bash run-tests.sh`
+
+**Framework**: `test/t/test-lib.sh` — minimal git-style test framework with `test_expect_success`, binary helpers (`q_to_nul`, `generate_binary`), and bit-specific assertions (`verify_binary_metadata`, `get_metadata_hash`).
+
+**Details**: See [Binary File Test Suite](../binary-test-suite.md).
+
 ---
 
 ## Conformance

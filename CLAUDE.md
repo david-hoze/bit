@@ -133,6 +133,15 @@ shelltest test/cli/specific.test --debug                       # Single test
 powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # Full suite (parallel, including cloud)
 ```
 
+### Binary File Test Suite
+- Tests bit's binary file handling: classification, metadata, push/pull, merge, stash, verify, reset, cherry-pick, rebase, revert, grep, diff/rename, attributes, format-patch/am
+- Location: `test/t/` — 14 bash scripts, 222 tests
+- Consult `docs/binary-test-suite.md` for details and how to add new tests
+```bash
+cd test/t && bash run-tests.sh                                 # Full binary test suite
+cd test/t && bash t0001-binary-add-commit.sh                   # Single test script
+```
+
 ### Git Test Suite
 - Consult `docs/git-test-suite.md` for setup, environment variables, and how the shim works
 - One-time setup: `extern/git-shim/setup.sh`
