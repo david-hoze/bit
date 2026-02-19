@@ -127,7 +127,7 @@ Everything else is shared: `classifyRemoteState`, `syncRemoteFiles`, ancestry ch
 **Git seam** (`mkGitSeam`): For `RemoteGit` and metadata-only remotes. Uses native `git fetch`/`git push` directly. No bundles, no rclone. File sync skipped entirely.
 
 **Push flow** (all transports):
-1. **Verify local** (proof of possession -- full-layout remotes only; skipped for bare and metadata-only)
+1. **Verify local** (proof of possession -- full-layout remotes only; skipped for bare and metadata-only). Working tree must match committed metadata; CAS is not consulted (run `bit repair` first if files are corrupted).
 2. **First-push detection** (filesystem only): Create and initialize remote `.bit/` if needed
 3. **Classify remote state** via rclone
 4. **Fetch remote history** via seam

@@ -41,7 +41,7 @@ Existing CAS data is preserved.
 **What the mode controls:** A single behavior -- whether `bit add` copies file content into `.bit/cas/` in addition to writing metadata to `.bit/index/`.
 
 - **lite**: `bit add` writes metadata only. No CAS writes.
-- **solid**: `bit add` writes metadata AND copies the blob (keyed by its hash) into `.bit/cas/`. When verifying for full-layout remotes, CAS blobs can satisfy proof of possession even if the working tree file is missing.
+- **solid**: `bit add` writes metadata AND copies the blob (keyed by its hash) into `.bit/cas/`. CAS blobs serve as repair sources (via `bit repair`) and enable push even after the working tree file has been repaired from CAS.
 
 ### Switching Modes
 

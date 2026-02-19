@@ -19,19 +19,18 @@ Metadata          Not needed (no content)  Not needed (no content)
 
 **Bare remotes are exempt** because CAS blobs are self-verifying by construction -- the blob filename *is* the content hash.
 
-**Verification consults both working tree and CAS.** When verifying for a full-layout remote, bit checks whether each file's content can be substantiated from *either* the working tree *or* the local CAS. If the working tree file is missing but the blob exists in `.bit/cas/`, possession is still proven.
+**Verification checks the working tree only.** When verifying, bit compares the actual working tree files against committed metadata. If a file is corrupted or missing, it is reported as an issue -- even if the correct blob exists in `.bit/cas/`. CAS is a *repair source*, not a verification shortcut. This ensures corruption is always surfaced rather than silently ignored.
 
 ```
-Verification check order (push to full remote):
-  1. Does the working tree file match the metadata hash? → verified
-  2. Does .bit/cas/ contain a blob for that hash?       → verified
-  3. Neither?                                            → verification fails
+Verification check:
+  1. Does the working tree file match the committed metadata hash? → verified
+  2. Otherwise?                                                    → issue reported
 ```
 
 ### Push Verification
 
-1. Verify local -- every binary file must be substantiated (working tree or CAS)
-2. If verification fails, refuse to push
+1. Verify local -- every binary file in the working tree must match committed metadata
+2. If verification fails, refuse to push (suggest `bit repair` to fix corrupted files first)
 3. If verified, upload to remote CAS and sync readable paths, then push metadata
 
 ### Pull Verification
