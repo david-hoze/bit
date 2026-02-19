@@ -16,16 +16,7 @@ bit push
 
 ## Why `bit`?
 
-The binary file versioning landscape is fragmented because every existing tool makes trade-offs that hurt in practice.
-
-- **git-lfs** — no delta compression; every modification re-uploads the entire file.
-- **git-annex** — genuinely powerful, but 50+ subcommands and a steep learning curve.
-- **DVC** — built for ML pipelines, not pure binary versioning; slow uploads, no delta transfer.
-- **Perforce** — excellent binary handling, but requires a dedicated server and per-seat licensing.
-- **Dropbox / Google Drive** — convenient sync, but no commits, no branches, no integrity checks.
-- **rclone / rsync** — fast file movers, but no versioning, no rename detection, no conflict awareness.
-
-bit is designed around the gaps they leave.
+The binary file versioning landscape is fragmented because every existing tool makes trade-offs that hurt in practice. bit is designed around the gaps they leave.
 
 ### It's just like Git
 
