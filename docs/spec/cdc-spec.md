@@ -1028,5 +1028,6 @@ On localhost MinIO (<1ms RTT), the improvement is modest because transfers are b
 
 ### Scripts
 
-- `test-minio-transfers.sh [remote]` — A/B comparison: same chunks, `--transfers 4` vs `--transfers 32`
-- `test-minio-e2e-timing.sh [remote]` — Full lifecycle: first push, incremental push, clone, incremental pull, verify
+- `test/single-workflows/test-minio-transfers.sh [remote]` — A/B comparison: same chunks, `--transfers 4` vs `--transfers 32`
+- `test/single-workflows/test-minio-e2e-timing.sh [remote]` — Full lifecycle: first push, incremental push, clone, incremental pull, verify
+- `test/single-workflows/test-minio-push-pull.sh` — Basic push/pull round-trip with CDC
