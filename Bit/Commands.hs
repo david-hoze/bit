@@ -679,17 +679,11 @@ runCommand args = do
             pure $ BitEnv cwd bitDir prefix mRemote forceMode
 
     -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
-    -- Skip in junction mode (BIT_GIT_JUNCTION=1): bit is just routing git commands,
-    -- and scanning would pollute the working tree with copies of CWD files in .bit/index/.
     let scanAndWrite = do
-            junctionMode <- lookupEnv "BIT_GIT_JUNCTION"
-            case junctionMode of
-              Just "1" -> pure ()
-              _ -> do
-                syncBitignoreToIndex cwd bitDir
-                localFiles <- Scan.scanWorkingDir cwd concurrency
-                Scan.writeMetadataFiles cwd localFiles
-                syncGitattributesToIndex cwd bitDir
+            syncBitignoreToIndex cwd bitDir
+            localFiles <- Scan.scanWorkingDir cwd concurrency
+            Scan.writeMetadataFiles cwd localFiles
+            syncGitattributesToIndex cwd bitDir
 
     -- Helper functions for running commands
     let runScanned action = do { scanAndWrite; env <- baseEnv; runBitM env action }
@@ -711,6 +705,15 @@ runCommand args = do
     let optsManualMerge = Bit.PullOptions Bit.PullManualMerge
     let isPush ("push":_) = True
         isPush _ = False
+
+    -- In junction mode (BIT_GIT_JUNCTION=1), bit is just a git router.
+    -- Run git from CWD (where the .git junction lives) instead of .bit/index/.
+    -- Without this, commands like 'git add' would look for files in
+    -- .bit/index/ instead of the actual working directory.
+    junctionMode <- lookupEnv "BIT_GIT_JUNCTION"
+    case junctionMode of
+      Just "1" -> Git.runGitHere cmd >>= exitWith
+      _ -> pure ()
 
     case cmd of
         -- ── No env needed ────────────────────────────────────
