@@ -16,6 +16,7 @@ module Bit.Core
     , lsFiles
     , restore
     , checkout
+    , revert
     , status
     , reset
     , rm
@@ -81,6 +82,7 @@ import Bit.Git.Passthrough
     , lsFiles
     , restore
     , checkout
+    , revert
     , status
     , reset
     , rm

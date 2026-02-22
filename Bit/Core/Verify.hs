@@ -35,6 +35,8 @@ import Bit.IO.Concurrency (Concurrency(..))
 import qualified Bit.Scan.Verify as Verify
 import qualified Bit.Scan.Local as Scan
 import Bit.CAS (hasBlobInCas, writeBlobToCas)
+import Bit.CDC.Manifest (readManifestFromCas)
+import Data.Maybe (isNothing)
 import qualified Bit.Scan.Fsck as Fsck
 import Bit.Config.Paths (bundleForRemote, bitIndexPath)
 import Bit.Progress.Report (reportProgress, clearProgress)
@@ -586,7 +588,11 @@ casBackfill cwd = do
     Verify.loadMetadata (Verify.FromCommit (filter (not . isSpace) rev)) Sequential
   let allHashes = Set.fromList [h | entries <- allEntries, Verify.BinaryEntry _ h _ <- entries]
   -- Filter to hashes not already in CAS
-  toBackfill <- filterM (\h -> fmap not (hasBlobInCas casDir h)) (Set.toList allHashes)
+  toBackfill <- filterM (\h -> do
+    hasBlob <- hasBlobInCas casDir h
+    if hasBlob then pure False
+    else isNothing <$> readManifestFromCas casDir h
+    ) (Set.toList allHashes)
   -- Scan working tree to get hash -> path (first path per hash)
   -- TODO: For large repos, read hashes from .bit/index metadata and only hash files in toBackfill instead of full scan.
   entries <- Scan.scanWorkingDir cwd Sequential

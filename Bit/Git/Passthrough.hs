@@ -11,13 +11,14 @@ module Bit.Git.Passthrough
     , lsFiles
     , restore
     , checkout
+    , revert
     , status
     , reset
     , rm
     , mv
     , branch
     , merge
-      -- Merge/branch management  
+      -- Merge/branch management
     , mergeContinue
     , mergeAbort
     , doMergeAbort
@@ -46,6 +47,8 @@ import System.Environment (lookupEnv)
 import qualified Bit.Core.Conflict as Conflict
 import Bit.Config.Metadata (parseMetadata, MetaContent(..), validateMetadataDir)
 import Bit.CAS (copyBlobFromCasTo)
+import Bit.CDC.Manifest (readManifestFromCas)
+import Bit.CDC.Reassemble (reassembleFile)
 import Bit.Remote (remoteName)
 import qualified Bit.Rclone.Sync as Transport
 import Bit.Core.Helpers
@@ -149,6 +152,25 @@ restore = doRestore
 
 checkout :: [String] -> BitM ExitCode
 checkout = doCheckout
+
+-- | Revert a commit, then sync changed binary files from CAS to working tree.
+revert :: [String] -> BitM ExitCode
+revert args = do
+    prefix <- asks envPrefix
+    code <- lift $ Git.runGitRawIn prefix ("revert" : args)
+    when (code == ExitSuccess) $ do
+        cwd <- asks envCwd
+        -- After revert creates a new commit, get the files it changed
+        changes <- lift $ Git.getDiffNameStatus "HEAD~1" "HEAD"
+        let changedPaths = concatMap changedFilePaths changes
+        syncTextFilesFromIndex cwd changedPaths
+    pure code
+  where
+    changedFilePaths (Git.Added p)      = [p]
+    changedFilePaths (Git.Modified p)   = [p]
+    changedFilePaths (Git.Deleted _)    = []
+    changedFilePaths (Git.Renamed _ p)  = [p]
+    changedFilePaths (Git.Copied _ p)   = [p]
 
 -- ============================================================================
 -- Merge/branch management
@@ -299,9 +321,14 @@ syncTextFilesFromIndex cwd rawPaths = do
                         Just content -> do
                             case parseMetadata content of
                                 Just mc -> do
-                                    ok <- lift $ copyBlobFromCasTo casDir (metaHash mc) workPath
-                                    unless ok $ lift $ do
-                                        hPutStrLn stderr ("warning: " ++ filePath ++ " — no content in CAS (e.g. lite mode); restore skipped. Use solid mode or pull from remote to get content.")
+                                    -- Try CDC manifest first (chunked files), fall back to whole blob
+                                    mManifest <- lift $ readManifestFromCas casDir (metaHash mc)
+                                    case mManifest of
+                                        Just manifest -> void $ lift $ reassembleFile casDir manifest workPath
+                                        Nothing -> do
+                                            ok <- lift $ copyBlobFromCasTo casDir (metaHash mc) workPath
+                                            unless ok $ lift $ do
+                                                hPutStrLn stderr ("warning: " ++ filePath ++ " — no content in CAS (e.g. lite mode); restore skipped. Use solid mode or pull from remote to get content.")
                                 Nothing -> lift $ do
                                     hPutStrLn stderr ("warning: invalid metadata for " ++ filePath ++ ", skipping restore")
                         Nothing -> pure ()

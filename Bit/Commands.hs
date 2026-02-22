@@ -222,7 +222,7 @@ isKnownCommand name = root `elem` knownRoots
     root = takeWhile (/= ' ') name
     knownRoots =
         [ "init", "import", "export", "add", "commit", "diff", "status", "log", "ls-files"
-        , "rm", "mv", "reset", "restore", "checkout", "branch", "merge"
+        , "rm", "mv", "reset", "restore", "checkout", "revert", "branch", "merge"
         , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
         , "cas", "submodule"
         , "help", "become-git", "become-bit"
@@ -762,6 +762,7 @@ runCommand args = do
         ("status":rest)                 -> runScanned (Bit.status rest) >>= exitWith
         ("restore":rest)                -> runScanned (Bit.restore rest) >>= exitWith
         ("checkout":rest)               -> runScanned (Bit.checkout rest) >>= exitWith
+        ("revert":rest)                 -> runScanned (Bit.revert rest) >>= exitWith
         
         -- push (no scan needed — uses git metadata diff; requires upstream)
         -- Filter -f from push args (it means --force for push, detected via forceMode)
