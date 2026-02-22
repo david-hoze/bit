@@ -2,7 +2,7 @@
 
 **Date:** 2026-02-22
 **Baseline:** 434 pass / 589 fail (1024 test scripts)
-**Commits:** 9eab86f, d657bff, c57340b, (pending: junction early-exit + error suppression)
+**Commits:** 9eab86f, d657bff, c57340b, 827053a, 86baba0, 0807389
 
 ## Changes Made
 
@@ -26,7 +26,7 @@
 
 **Files:** `Bit/Git/Run.hs`
 
-### 3. Junction-mode early-exit in command dispatch (pending commit)
+### 3. Junction-mode early-exit in command dispatch (827053a, superseded by #7)
 
 **Problem:** Even with `runGitRaw`/`runGitRawIn` delegating to `runGitHere` in junction mode, `scanAndWrite` still ran before command dispatch. This copied all CWD text files into `.bit/index/`, creating untracked files that blocked subsequent git operations (merge sees dirty working tree, checkout refuses to overwrite). Selectively removing `scanAndWrite` from individual commands (reset, mv, checkout, etc.) was fragile — it broke commands that still used `runGitRawIn` internally.
 
@@ -73,7 +73,45 @@ This bypasses ALL of bit's command handling in junction mode — no scanning, no
 
 **Files:** `Bit/Commands.hs`
 
-### 6. Multi-agent coordination (9eab86f, d657bff)
+### 6. Gitfile instead of NTFS junction (86baba0)
+
+**Problem:** In junction mode, `createGitJunction` created an NTFS directory junction (`mklink /j`) from `.git` to `.bit/index/.git/`. This caused `git stash` and other commands that create temporary index files (e.g., `GIT_INDEX_FILE=.git/index.stash.XXXX`) to fail with "not a valid object" errors. The root cause: git's internal object store lookups break when `.git` is an NTFS junction on Windows — objects written by child processes through the junction are not visible to the parent process.
+
+**Fix:** Changed `createGitJunction` to write a gitfile (`gitdir: <path>`) instead of creating a junction. Git natively supports gitfiles for linked worktrees and `--separate-git-dir`, and they work correctly with all git operations including stash.
+
+**Note:** With the junction early-exit moved to the top of `runCommand` (change #7), `createGitJunction` is no longer called in junction mode (git init goes directly to real git). The gitfile fix remains for any non-test-suite usage of junction mode.
+
+**Files:** `Bit/Core/Init.hs`
+
+### 7. Junction early-exit at top of runCommand (86baba0)
+
+**Problem:** The previous junction early-exit was placed after repo discovery, CWD changes, alias expansion, and help interception. This caused: (a) `setCurrentDirectory root` broke relative paths for commands run from subdirectories, (b) unknown commands like `stash` went through `tryAlias`/`passthrough` instead of the clean early-exit path, (c) help interception (`-h`, `--help`) produced bit's help text instead of git's native exit code 129.
+
+**Fix:** Moved the junction early-exit to the very top of `runCommand`, before any repo discovery, flag parsing, or CWD changes. In junction mode, ALL commands (known and unknown) now go directly to `runGitHere` from the user's original CWD.
+
+**Impact:** t3903-stash went from 19/142 to 140/142. t7102-reset remains at 38/38.
+
+**Files:** `Bit/Commands.hs`
+
+### 8. --work-tree in gitfile passthrough (86baba0)
+
+**Problem:** The `passthrough` function in `tryAlias` handled gitfiles by passing `--git-dir` to git but not `--work-tree`. Without `--work-tree`, git uses CWD as the worktree, causing relative paths to resolve incorrectly from subdirectories.
+
+**Fix:** Added `--work-tree=<root>` alongside `--git-dir` in the gitfile passthrough path.
+
+**Files:** `Bit/Commands.hs`
+
+### 9. Fix runGitRawAt dropping directory in junction mode (0807389)
+
+**Problem:** `runGitRawAt dir args` in junction mode called `runGitHere args`, completely ignoring the `dir` parameter. This broke `git -C <dir>` for directories that don't have a `.bit` folder (worktree dirs, bare repos, sub-repos). Most damaging: t3200 test 50 ran `git -C bare_repo config core.bare true`, which was applied to the main test repo instead, cascading 20+ subsequent failures.
+
+**Fix:** Changed `runGitHere args` to `runGitHere (["-C", dir] ++ args)` so the target directory is passed to real git.
+
+**Impact:** t3200-branch went from 132/167 to 167/167.
+
+**Files:** `Bit/Git/Run.hs`
+
+### 10. Multi-agent coordination (9eab86f, d657bff)
 
 - Split single `test` resource into `test-cli`, `test-binary`, `test-git`
 - Removed `install` resource (redundant with `dev-bin/` workflow)
@@ -95,9 +133,9 @@ Tests verified with the latest binary (post-c57340b + junction early-exit):
 | t1005-read-tree-reset | FAIL | PASS | Junction mode |
 | t2022-checkout-paths | FAIL | PASS | Junction mode |
 | t2012-checkout-last | FAIL | PASS | Junction mode |
-| t7600-merge | 17/83 | 17/83 | 2 true failures (tests 3, 15); test 15 cascades to 64 more |
-| t3903-stash | 19/142 | 19/142 | Cascade from early setup failure |
-| t3200-branch | FAIL | FAIL | Needs investigation |
+| t7600-merge | 17/83 | **83/83** | Junction early-exit at top fixes `-h` exit code and cascade |
+| t3903-stash | 19/142 | **140/142** | Gitfile fix + early-exit at top; 2 remaining are upstream known breakage |
+| t3200-branch | 132/167 | **167/167** | `runGitRawAt` dir fix + early-exit at top |
 | t3400-rebase | FAIL | FAIL | Needs investigation |
 
 ## Remaining Failure Categories
@@ -115,11 +153,12 @@ Tests reuse the trash directory from previous runs. If a prior run left the repo
 Switching to handle inheritance means `rewriteGitHints` no longer filters git hints in passthrough commands. Users will see raw git hints (e.g. "hint: Using 'master' as the name..."). This is cosmetic, not functional. A binary-safe hint filter could be added later.
 
 ### 5. Cascade failures from domino tests
-Some test suites (t7600, t3903) have a single test that fails and leaves the repo in a dirty state, causing all subsequent tests to cascade-fail. For example, t7600 test 15 (`merge --squash --autostash`) fails due to git version mismatch (v2.47 test expects v2.52 behavior), and the 64 tests after it all fail because the repo state is corrupted.
+Some test suites (t7600) have a single test that fails and leaves the repo in a dirty state, causing all subsequent tests to cascade-fail. For example, t7600 test 15 (`merge --squash --autostash`) fails due to git version mismatch (v2.47 test expects v2.52 behavior), and the 64 tests after it all fail because the repo state is corrupted.
+
+**t3903-stash** cascade is now fixed — was caused by NTFS junctions breaking `git stash` (see change #6/#7).
 
 ## Next Steps
 
 1. **Full test suite run** with latest binary to get accurate pass/fail count
-2. **Investigate t3200-branch** failures
-3. **Investigate t3903-stash** cascade — identify the domino test
-4. **Consider binary-safe hint rewriting** for passthrough commands
+2. **Investigate t3400-rebase** failures
+3. **Consider binary-safe hint rewriting** for passthrough commands
