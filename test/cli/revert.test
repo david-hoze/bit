@@ -1,0 +1,109 @@
+# =============================================================================
+# Revert command: revert a commit and verify working tree is updated
+#
+# Tests: text file revert, binary (CDC-chunked) file revert with CAS reassembly,
+#        verify passes after revert.
+# =============================================================================
+
+# ---- CLEANUP ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_revert 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: solid mode repo with CDC (small chunk sizes for test binary)
+# ======================================================================
+
+mkdir test\cli\output\work_revert
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_revert && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_revert && bit config core.mode solid
+<<<
+>>> /[Ss]olid|Mode set/
+>>>= 0
+
+cd test\cli\output\work_revert && bit config cdc.min-size 64
+<<<
+>>>= 0
+
+cd test\cli\output\work_revert && bit config cdc.avg-size 256
+<<<
+>>>= 0
+
+cd test\cli\output\work_revert && bit config cdc.max-size 1024
+<<<
+>>>= 0
+
+# ======================================================================
+# COMMIT 1: text file + binary file (large enough for CDC chunking)
+# ======================================================================
+
+cd test\cli\output\work_revert && echo original text content> text.txt
+<<<
+>>>= 0
+
+cd test\cli\output\work_revert && fsutil file createnew data.bin 4096 >nul
+<<<
+>>>= 0
+
+cd test\cli\output\work_revert && bit add . && bit commit -m "v1: original files"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# ======================================================================
+# COMMIT 2: modify both files
+# ======================================================================
+
+cd test\cli\output\work_revert && echo modified text content> text.txt
+<<<
+>>>= 0
+
+# Overwrite first bytes of binary
+cd test\cli\output\work_revert && echo EDIT!> tmp_edit & copy /b tmp_edit + data.bin data.bin.new >nul & move /y data.bin.new data.bin >nul & del tmp_edit
+<<<
+>>>= 0
+
+cd test\cli\output\work_revert && bit add . && bit commit -m "v2: bad changes"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# ======================================================================
+# REVERT: undo the bad commit
+# ======================================================================
+
+cd test\cli\output\work_revert && bit revert HEAD --no-edit
+<<<
+>>> /Revert/
+>>>= 0
+
+# Text file should be restored to original content
+findstr /C:"original text content" test\cli\output\work_revert\text.txt >nul
+<<<
+>>>
+>>>= 0
+
+# Binary file should pass verify (content matches metadata)
+cd test\cli\output\work_revert && bit verify
+<<<
+>>> /All .* files? match|Verified|0 issues/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_revert 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

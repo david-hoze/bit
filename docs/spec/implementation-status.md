@@ -50,7 +50,7 @@
 | `Bit/Core/Config.hs` | `bit config` command: get/set/list for `.bit/config`; per-key validation |
 | `Bit/Core/Conflict.hs` | Conflict resolution: Resolution, DeletedSide, ConflictInfo, resolveAll |
 | `Bit/Git/Run.hs` | Git command wrapper; prefix-aware dispatch; `AncestorQuery`; `spawnGit` respects `BIT_REAL_GIT`; `indexPathRef` IORef for dynamic base flags |
-| `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, etc.); IO functions take prefix |
+| `Bit/Git/Passthrough.hs` | Git command passthrough (add, commit, diff, log, merge, revert, etc.); `syncTextFilesFromIndex` restores binaries from CAS (whole blob or CDC reassembly) |
 | `Bit/Rclone/Run.hs` | Rclone command wrapper; `remoteFilePath` for trailing-slash-safe path construction |
 | `Bit/Rclone/Sync.hs` | Shared action derivation + working-tree sync |
 | `Bit/Rclone/Progress.hs` | Progress tracking for file copy operations |
@@ -95,8 +95,8 @@
 - `bit add` -- scans files, computes MD5 hashes, writes metadata, stages in Git; solid mode populates CAS
 - `bit config` -- get/set/list `.bit/config`; `core.mode` gates CAS writes
 - `bit cas backfill` -- walk historical commits, store blobs into CAS
-- CAS -- `.bit/cas/<prefix>/<hash>`; restore/checkout copy from CAS; verification consults CAS
-- `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `reset`, `rm`, `mv`, `branch`, `merge` -- delegate to Git
+- CAS -- `.bit/cas/<prefix>/<hash>`; restore/checkout/revert copy from CAS (whole blob or CDC reassembly); verification consults CAS
+- `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `revert`, `reset`, `rm`, `mv`, `branch`, `merge` -- delegate to Git; restore/checkout/revert sync binary files from CAS after git updates metadata
 - `bit remote add/show` -- named remotes with device-aware resolution
 - `bit push` -- Cloud: diff-based file sync + metadata bundle. Filesystem: fetch+merge + file sync
 - `bit pull` -- Cloud: fetch bundle + diff-based sync. Filesystem: fetch from remote + merge + sync
