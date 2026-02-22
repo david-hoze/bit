@@ -14,8 +14,38 @@
         "Bash(tee:*)",
         "Bash(test:*)",
         "Bash(ghc -e:*)",
-        "Bash(rclone lsjson:*)"
+        "Bash(rclone lsjson:*)",
+        "Bash(claude-collab:*)"
+      ]
+    },
+    "env": {
+      "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    },
+    "hooks": {
+      "PreToolUse": [
+        {
+          "matcher": "Edit|Write",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-edit-claim.sh\"",
+              "timeout": 10,
+              "statusMessage": "Claiming file..."
+            }
+          ]
+        }
+      ],
+      "SessionEnd": [
+        {
+          "matcher": "",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-end-cleanup.sh\"",
+              "timeout": 10
+            }
+          ]
+        }
       ]
     }
-  }
-  
+}
