@@ -29,24 +29,27 @@ All agents run in the same repository directory. When another agent commits or p
 
 **Coordinate builds when binaries are locked.** If you need to build and install but the shared binary is locked (another agent is mid-test), message the other agent and ask them to pause so you can build. Don't wait silently for locks to clear — direct communication is faster.
 
-## The two rules
+## Hooks — automatic claim and cleanup
 
-1. **Claim before editing.** Run `claude-collab files claim $HASH <file>` before editing any file. NEVER use the Edit or Write tool on a file you haven't claimed. Not even "just a quick fix." Claim first, always.
-2. **Commit through the tool.** Run `claude-collab commit $HASH -m "message"` instead of raw git. NEVER run `git add`, `git commit`, or `git checkout` directly.
+Two hooks in `.claude/hooks/` automate the claim-edit-commit workflow:
 
-**IMPORTANT — Edit/Write gate:** Every time you are about to call the Edit or Write tool on any file, stop and ask yourself: "Have I already run `claude-collab files claim` on this file in this session?" If not, you must run the claim command BEFORE the edit. This applies from the moment you run `claude-collab init` — not just when you "feel like" you're collaborating. Initializing means you are in collaboration mode for the rest of the session, and every file edit must go through the claim-edit-commit workflow. There are no exceptions, no "quick fixes," and no "I'll claim it later."
+- **`pre-edit-claim.sh`** (PreToolUse on Edit|Write) — automatically runs `claude-collab files claim` before every file edit. You do NOT need to manually claim files.
+- **`session-end-cleanup.sh`** (SessionEnd) — automatically runs `claude-collab cleanup` when your session ends. You do NOT need to manually clean up.
 
-## The workflow: claim → edit → commit
+**What you still do manually:**
+- `claude-collab init --name <name>` at session start (the hooks need an agent registered to work)
+- `claude-collab commit $HASH -m "message"` when you're done with your feature — commit deliberately, not after every edit
 
-**This order is strict. Do not skip or reorder steps.**
+## The one rule
+
+**Commit through the tool.** Run `claude-collab commit $HASH -m "message"` instead of raw git. NEVER run `git add`, `git commit`, or `git checkout` directly.
+
+## The workflow: edit → commit
 
 ```
-claude-collab files claim $HASH <file>       # 1. Claim FIRST
-# ... edit the file ...                       # 2. Edit ONLY AFTER claiming
-claude-collab commit $HASH -m "message"       # 3. Commit (stages, commits, and unclaims)
+# ... edit files ...                          # 1. Edit (claim is automatic via hook)
+claude-collab commit $HASH -m "message"       # 2. Commit when feature is done (stages, commits, and unclaims)
 ```
-
-**Common mistake:** editing a file first, then claiming it right before commit. This is wrong — another agent may have been editing the same file concurrently. The claim must happen BEFORE the first edit, not before the commit.
 
 `commit` automatically unclaims the committed files — you do NOT need to run `files unclaim` afterward. Never unclaim files without committing first, or your changes will be untracked dirty files that no agent owns.
 
