@@ -136,7 +136,29 @@ Tests verified with the latest binary (post-c57340b + junction early-exit):
 | t7600-merge | 17/83 | **83/83** | Junction early-exit at top fixes `-h` exit code and cascade |
 | t3903-stash | 19/142 | **140/142** | Gitfile fix + early-exit at top; 2 remaining are upstream known breakage |
 | t3200-branch | 132/167 | **167/167** | `runGitRawAt` dir fix + early-exit at top |
-| t3400-rebase | FAIL | FAIL | Needs investigation |
+| t3400-rebase | FAIL | **39/39** | All pass |
+
+### Batch 2 — Additional test scripts (2026-02-22)
+
+| Test | Result | Tests | Notes |
+|------|--------|-------|-------|
+| t1303-wacky-config | **PASS** | 11/11 | Config edge cases |
+| t2012-checkout-last | **PASS** | 22/22 | checkout `-` / `@{-N}` |
+| t2020-checkout-detach | **PASS** | 26/26 | Detached HEAD checkout |
+| t2400-worktree-add | **PASS** | 232/232 | Worktree add/management |
+| t3404-rebase-interactive | **PASS** | 132/132 | Interactive rebase |
+| t4001-diff-rename | **PASS** | 23/23 | Diff rename detection |
+| t4017-diff-retval | **PASS** | 38/38 | Diff return values |
+| t5503-tagfollow | **PASS** | 12/12 | Tag following on fetch |
+| t5505-remote | **PASS** | 129/130 | 1 known breakage (stale negative refspecs) |
+| t7004-tag | **PASS** | 230/230 | Tag operations |
+| t7005-editor | **PASS** | 12/12 | Editor/commit integration |
+| t7060-wtstatus | **PASS** | 17/17 | Working tree status |
+| t7201-co | **PASS** | 46/46 | Checkout operations |
+| t7508-status | **PASS** | 126/126 | git status |
+| t7512-status-help | **PASS** | 46/46 | Status help messages |
+
+**Total: 1102 tests across 15 scripts, 0 bit bugs found.** One known breakage in t5505 (upstream git test issue, not bit).
 
 ## Remaining Failure Categories
 
@@ -160,5 +182,5 @@ Some test suites (t7600) have a single test that fails and leaves the repo in a 
 ## Next Steps
 
 1. **Full test suite run** with latest binary to get accurate pass/fail count
-2. **Investigate t3400-rebase** failures
+2. ~~**Investigate t3400-rebase** failures~~ — DONE, all 39 pass
 3. **Consider binary-safe hint rewriting** for passthrough commands

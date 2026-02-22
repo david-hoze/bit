@@ -626,12 +626,19 @@ runGitAt indexPath args = spawnGit (["-C", indexPath] ++ args)
 runGitHere :: [String] -> IO ExitCode
 runGitHere args = do
   bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
-  noColor <- lookupEnv "BIT_NO_COLOR"
-  let colorFlag = case noColor of
-        Just "1" -> "never"
-        Just "true" -> "never"
-        _ -> "auto"
-  let fullArgs = ["-c", "color.ui=" ++ colorFlag] ++ args
+  junction <- lookupEnv "BIT_GIT_JUNCTION"
+  -- In junction mode, be fully transparent — don't inject -c flags.
+  -- Adding -c color.ui=auto causes git to propagate GIT_CONFIG_PARAMETERS
+  -- to alias subprocesses, which breaks tests that check env cleanliness.
+  fullArgs <- if junction == Just "1"
+    then pure args
+    else do
+      noColor <- lookupEnv "BIT_NO_COLOR"
+      let colorFlag = case noColor of
+            Just "1" -> "never"
+            Just "true" -> "never"
+            _ -> "auto"
+      pure $ ["-c", "color.ui=" ++ colorFlag] ++ args
   -- Inherit all handles so git writes directly to terminal.
   -- This avoids encoding issues (binary data re-encoded as UTF-8).
   (_, _, _, ph) <- createProcess (proc bin fullArgs)
@@ -639,7 +646,6 @@ runGitHere args = do
   code <- waitForProcess ph
   -- In junction mode, be completely transparent — don't print any extra
   -- messages to stderr, as tests check stderr content.
-  junction <- lookupEnv "BIT_GIT_JUNCTION"
   case (junction, code) of
     (Just "1", _)       -> pure ()
     (_, ExitSuccess)    -> pure ()
