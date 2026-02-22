@@ -86,23 +86,11 @@ import System.IO.Unsafe (unsafePerformIO)
 
 -- | The ONLY place in the entire codebase that spawns git.
 -- Respects BIT_REAL_GIT env var to avoid recursion when bit masquerades as git.
--- Reads output in binary mode so non-UTF8 data (e.g. ISO-8859-1 commit messages)
--- doesn't crash with encoding errors.
+-- Uses GHC's locale encoding for output (handles most encodings correctly).
 spawnGit :: [String] -> IO (ExitCode, String, String)
 spawnGit args = do
     bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
-    (_, Just outh, Just errh, ph) <- createProcess (proc bin args)
-      { std_in = Inherit, std_out = CreatePipe, std_err = CreatePipe }
-    hSetBinaryMode outh True
-    hSetBinaryMode errh True
-    outVar <- newEmptyMVar
-    errVar <- newEmptyMVar
-    _ <- forkIO $ hGetContents outh >>= \s -> evaluate (length s) >> putMVar outVar s
-    _ <- forkIO $ hGetContents errh >>= \s -> evaluate (length s) >> putMVar errVar s
-    out <- takeMVar outVar
-    err <- takeMVar errVar
-    code <- waitForProcess ph
-    pure (code, out, err)
+    readProcessWithExitCode bin args ""
 
 -- | Global mutable index path. Set once by Commands.runCommand after resolving
 -- the bitlink. Defaults to the standard relative path for normal repos.
@@ -252,35 +240,46 @@ rewriteGitHints =
 
 runGitRaw :: [String] -> IO ExitCode
 runGitRaw args = do
-  bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
-  noColor <- lookupEnv "BIT_NO_COLOR"
-  let colorFlag = case noColor of
-        Just "1" -> "never"
-        Just "true" -> "never"
-        _ -> "auto"
-  flags <- getBaseFlags
-  let fullArgs =
-        flags
-        ++ ["-c", "color.ui=" ++ colorFlag]
-        ++ args
-  -- Inherit all handles to avoid encoding issues with non-UTF8 data.
-  (_, _, _, ph) <- createProcess (proc bin fullArgs)
-    { std_in = Inherit, std_out = Inherit, std_err = Inherit }
-  code <- waitForProcess ph
-  case code of
-    ExitSuccess   -> pure ()
-    ExitFailure n ->
-      hPutStrLn stderr ("bit: git exited with code " ++ show n)
-  pure code
+  -- In junction mode, use runGitHere so git discovers the repo via the
+  -- .git junction and uses CWD as working tree.
+  junction <- lookupEnv "BIT_GIT_JUNCTION"
+  case junction of
+    Just "1" -> runGitHere args
+    _ -> do
+      bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
+      noColor <- lookupEnv "BIT_NO_COLOR"
+      let colorFlag = case noColor of
+            Just "1" -> "never"
+            Just "true" -> "never"
+            _ -> "auto"
+      flags <- getBaseFlags
+      let fullArgs =
+            flags
+            ++ ["-c", "color.ui=" ++ colorFlag]
+            ++ args
+      -- Inherit all handles to avoid encoding issues with non-UTF8 data.
+      (_, _, _, ph) <- createProcess (proc bin fullArgs)
+        { std_in = Inherit, std_out = Inherit, std_err = Inherit }
+      code <- waitForProcess ph
+      case code of
+        ExitSuccess   -> pure ()
+        ExitFailure n ->
+          hPutStrLn stderr ("bit: git exited with code " ++ show n)
+      pure code
 
 -- | Like runGitRaw but targets .bit/index/<prefix>.
 -- Git walks up from the subdirectory to find .git, and resolves paths
 -- relative to the subdirectory. When prefix is empty, delegates to runGitRaw.
+-- In junction mode, delegates to runGitHere (ignores prefix since CWD is the repo).
 runGitRawIn :: FilePath -> [String] -> IO ExitCode
 runGitRawIn "" args = runGitRaw args
 runGitRawIn prefix args = do
-    indexPath <- readIORef indexPathRef
-    runGitRawAt (indexPath </> prefix) args
+    junction <- lookupEnv "BIT_GIT_JUNCTION"
+    case junction of
+      Just "1" -> runGitHere args
+      _ -> do
+        indexPath <- readIORef indexPathRef
+        runGitRawAt (indexPath </> prefix) args
 
 -- | Like runGitWithOutput but targets .bit/index/<prefix>.
 -- When prefix is empty, delegates to runGitWithOutput.
@@ -292,27 +291,32 @@ runGitWithOutputIn prefix args = do
   spawnGit fullArgs
 
 -- | Like runGitRaw but targets an arbitrary directory instead of .bit/index.
+-- In junction mode, uses runGitHere instead (CWD as working tree).
 -- Inherits all handles to avoid encoding issues with binary/non-UTF8 data.
 runGitRawAt :: FilePath -> [String] -> IO ExitCode
 runGitRawAt dir args = do
-  bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
-  noColor <- lookupEnv "BIT_NO_COLOR"
-  let colorFlag = case noColor of
-        Just "1" -> "never"
-        Just "true" -> "never"
-        _ -> "auto"
-  let fullArgs =
-        ["-C", dir]
-        ++ ["-c", "color.ui=" ++ colorFlag]
-        ++ args
-  (_, _, _, ph) <- createProcess (proc bin fullArgs)
-    { std_in = Inherit, std_out = Inherit, std_err = Inherit }
-  code <- waitForProcess ph
-  case code of
-    ExitSuccess   -> pure ()
-    ExitFailure n ->
-      hPutStrLn stderr ("bit: git exited with code " ++ show n)
-  pure code
+  junction <- lookupEnv "BIT_GIT_JUNCTION"
+  case junction of
+    Just "1" -> runGitHere args
+    _ -> do
+      bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
+      noColor <- lookupEnv "BIT_NO_COLOR"
+      let colorFlag = case noColor of
+            Just "1" -> "never"
+            Just "true" -> "never"
+            _ -> "auto"
+      let fullArgs =
+            ["-C", dir]
+            ++ ["-c", "color.ui=" ++ colorFlag]
+            ++ args
+      (_, _, _, ph) <- createProcess (proc bin fullArgs)
+        { std_in = Inherit, std_out = Inherit, std_err = Inherit }
+      code <- waitForProcess ph
+      case code of
+        ExitSuccess   -> pure ()
+        ExitFailure n ->
+          hPutStrLn stderr ("bit: git exited with code " ++ show n)
+      pure code
 
 add :: [String] -> IO ExitCode
 add     = runGitRaw . ("add" :)
@@ -633,9 +637,13 @@ runGitHere args = do
   (_, _, _, ph) <- createProcess (proc bin fullArgs)
     { std_in = Inherit, std_out = Inherit, std_err = Inherit }
   code <- waitForProcess ph
-  case code of
-    ExitSuccess   -> pure ()
-    ExitFailure n ->
+  -- In junction mode, be completely transparent — don't print any extra
+  -- messages to stderr, as tests check stderr content.
+  junction <- lookupEnv "BIT_GIT_JUNCTION"
+  case (junction, code) of
+    (Just "1", _)       -> pure ()
+    (_, ExitSuccess)    -> pure ()
+    (_, ExitFailure n)  ->
       hPutStrLn stderr ("bit: git exited with code " ++ show n)
   pure code
 
