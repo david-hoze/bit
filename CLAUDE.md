@@ -91,6 +91,8 @@ Save as `C:\Users\natanh\run.bat` and invoke via `cmd //c "C:\Users\natanh\run.b
 
 ### Working with multiple agents (parallel workers)
 
+When multiple Claude Code agents are working in this repo, follow `CLAUDE_COLLAB.md` for coordination — file claims, shared commits, resource reservations, and messaging.
+
 When another worker is also modifying code and using the global `bit.exe`, avoid interfering by building into a local `dev-bin/` directory and prepending it to PATH:
 
 ```bash

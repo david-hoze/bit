@@ -5,6 +5,8 @@ module Bit.Commands (run) where
 
 import qualified Bit.Core as Bit
 import Bit.Types (BitEnv(..), ForceMode(..), runBitM)
+import Bit.Core.Helpers (getLocalHeadE)
+import Control.Monad.IO.Class (liftIO)
 import qualified Bit.Scan.Local as Scan  -- Only for the pre-scan in runCommand
 import qualified Bit.Core.Submodule as Submodule
 import Bit.Remote (getDefaultRemote, getUpstreamRemote, resolveRemote)
@@ -749,20 +751,14 @@ runCommand args = do
         ("diff":rest)                   -> do
             scanAndWrite
             Bit.diff prefix rest >>= exitWith
-        ("mv":rest)                     -> do
-            scanAndWrite
-            Bit.mv prefix rest >>= exitWith
-        ("reset":rest)                  -> do
-            scanAndWrite
-            Bit.reset prefix rest >>= exitWith
+        ("mv":rest)                     -> runBase (Bit.mv rest) >>= exitWith
+        ("reset":rest)                  -> runBase (Bit.reset rest) >>= exitWith
         ["merge", "--continue"]         -> runScanned Bit.mergeContinue
-        ("merge":rest)                  -> do
-            scanAndWrite
-            Bit.merge prefix rest >>= exitWith
+        ("merge":rest)                  -> Bit.merge prefix rest >>= exitWith
         ("status":rest)                 -> runScanned (Bit.status rest) >>= exitWith
-        ("restore":rest)                -> runScanned (Bit.restore rest) >>= exitWith
-        ("checkout":rest)               -> runScanned (Bit.checkout rest) >>= exitWith
-        ("revert":rest)                 -> runScanned (Bit.revert rest) >>= exitWith
+        ("restore":rest)                -> runBase (Bit.restore rest) >>= exitWith
+        ("checkout":rest)               -> runBase (Bit.checkout rest) >>= exitWith
+        ("revert":rest)                 -> runBase (Bit.revert rest) >>= exitWith
         
         -- push (no scan needed — uses git metadata diff; requires upstream)
         -- Filter -f from push args (it means --force for push, detected via forceMode)
@@ -789,7 +785,23 @@ runCommand args = do
         -- fetch (falls back to "origin" like git fetch)
         ["fetch"]                       -> runScanned Bit.fetch
         ["fetch", name]                 -> runScannedWithRemote name Bit.fetch
-        
-        _                               -> do
-            hPutStrLn stderr $ "bit: '" ++ unwords cmd ++ "' is not a bit command. See 'bit help'."
-            exitWith (ExitFailure 1)
+
+        -- Catch-all for fetch with extra flags (e.g. fetch --all, fetch origin main)
+        ("fetch":_)                     -> Git.runGitRawAt (bitDir </> "index") ("fetch" : filter (/= "-f") (drop 1 cmd)) >>= exitWith
+
+        -- pull with extra flags (e.g. pull --rebase, pull --ff-only)
+        -- Needs working tree sync since pull can change HEAD
+        ("pull":_rest)                  -> do
+            scanAndWrite
+            env <- baseEnv
+            let pullAction = do
+                    oldHead <- liftIO getLocalHeadE
+                    code <- liftIO $ Git.runGitRawIn prefix ("pull" : drop 1 cmd)
+                    when (code == ExitSuccess) $
+                        Bit.syncWorkingTreeFromDiff oldHead
+                    pure code
+            runBitM env pullAction >>= exitWith
+
+        -- Catch-all: passthrough to git in .bit/index/ for known commands
+        -- with unmatched arg patterns (e.g. push -v, remote -v, remote rename)
+        _                               -> Git.runGitRawAt (bitDir </> "index") cmd >>= exitWith

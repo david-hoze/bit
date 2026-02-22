@@ -23,6 +23,7 @@ module Bit.Core
     , mv
     , branch
     , merge
+    , syncWorkingTreeFromDiff
 
       -- Core sync operations
     , push
@@ -92,6 +93,7 @@ import Bit.Git.Passthrough
     , mergeContinue
     , mergeAbort
     , unsetUpstream
+    , syncWorkingTreeFromDiff
     )
 import Bit.Core.Push (push)
 import Bit.Core.Pull (pull)

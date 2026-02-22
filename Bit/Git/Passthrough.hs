@@ -26,6 +26,8 @@ module Bit.Git.Passthrough
       -- Restore/checkout helpers
     , doRestore
     , doCheckout
+      -- Working tree sync
+    , syncWorkingTreeFromDiff
     ) where
 
 import Prelude hiding (log)
@@ -93,8 +95,25 @@ lsFiles prefix args = do
             resolved <- resolveExcludeFilePaths args
             Git.runGitRawIn prefix ("ls-files" : resolved)
 
-reset :: FilePath -> [String] -> IO ExitCode
-reset prefix args = Git.runGitRawIn prefix ("reset" : args)
+reset :: [String] -> BitM ExitCode
+reset args = do
+    prefix <- asks envPrefix
+    junction <- liftIO $ lookupEnv "BIT_GIT_JUNCTION"
+    let hasHard = "--hard" `elem` args
+    case junction of
+        Just "1" | hasHard -> do
+            -- Junction mode --hard: run via junction so git uses CWD as work tree
+            liftIO $ Git.runGitHere ("reset" : args)
+        _ | hasHard -> do
+            -- Normal mode --hard: need to sync working tree after reset
+            oldHead <- liftIO getLocalHeadE
+            code <- liftIO $ Git.runGitRawIn prefix ("reset" : args)
+            when (code == ExitSuccess) $
+                syncWorkingTreeFromDiff oldHead
+            pure code
+        _ ->
+            -- --soft or --mixed (default): no working tree sync needed
+            liftIO $ Git.runGitRawIn prefix ("reset" : args)
 
 rm :: [String] -> BitM ExitCode
 rm args = do
@@ -129,14 +148,33 @@ rm args = do
 
     pure code
 
-mv :: FilePath -> [String] -> IO ExitCode
-mv prefix args = Git.runGitRawIn prefix ("mv" : args)
+mv :: [String] -> BitM ExitCode
+mv args = do
+    cwd <- asks envCwd
+    prefix <- asks envPrefix
+    -- Parse move pairs from args before running (git mv produces no parseable output)
+    moves <- liftIO $ parseMvArgs cwd args
+    code <- liftIO $ Git.runGitRawIn prefix ("mv" : args)
+    when (code == ExitSuccess) $ liftIO $ do
+        forM_ moves $ \(old, new) -> do
+            let oldWork = cwd </> old
+                newWork = cwd </> new
+            oldExists <- Dir.doesFileExist oldWork
+            when oldExists $ do
+                Dir.createDirectoryIfMissing True (takeDirectory newWork)
+                Dir.renameFile oldWork newWork
+                removeEmptyParents cwd (takeDirectory oldWork)
+    pure code
 
 branch :: FilePath -> [String] -> IO ExitCode
 branch prefix args = Git.runGitRawIn prefix ("branch" : args)
 
 merge :: FilePath -> [String] -> IO ExitCode
-merge prefix args = Git.runGitRawIn prefix ("merge" : args)
+merge prefix args = do
+    junction <- lookupEnv "BIT_GIT_JUNCTION"
+    case junction of
+        Just "1" -> Git.runGitHere ("merge" : args)
+        _ -> Git.runGitRawIn prefix ("merge" : args)
 
 -- ============================================================================
 -- Stateful passthrough (needs BitEnv)
@@ -273,32 +311,53 @@ doRestore :: [String] -> BitM ExitCode
 doRestore args = do
     cwd <- asks envCwd
     prefix <- asks envPrefix
-    code <- lift $ Git.runGitRawIn prefix ("restore" : args)
-    when (code == ExitSuccess) $ do
-        let stagedOnly = ("--staged" `elem` args || "-S" `elem` args) &&
-                         not ("--worktree" `elem` args || "-W" `elem` args)
-        unless stagedOnly $ do
-            let rawPaths = restoreCheckoutPaths args
-                adjustedPaths = if null prefix then rawPaths
-                                else map (prefix </>) rawPaths
-            syncTextFilesFromIndex cwd adjustedPaths
-    pure code
+    junction <- liftIO $ lookupEnv "BIT_GIT_JUNCTION"
+    let stagedOnly = ("--staged" `elem` args || "-S" `elem` args) &&
+                     not ("--worktree" `elem` args || "-W" `elem` args)
+    case junction of
+        Just "1" | not stagedOnly -> do
+            -- Junction mode with worktree changes: run through junction
+            liftIO $ Git.runGitHere ("restore" : args)
+        _ -> do
+            code <- lift $ Git.runGitRawIn prefix ("restore" : args)
+            when (code == ExitSuccess) $
+                unless stagedOnly $ do
+                    let rawPaths = restoreCheckoutPaths args
+                        adjustedPaths = if null prefix then rawPaths
+                                        else map (prefix </>) rawPaths
+                    syncTextFilesFromIndex cwd adjustedPaths
+            pure code
 
 doCheckout :: [String] -> BitM ExitCode
 doCheckout args = do
     prefix <- asks envPrefix
-    -- Pass args through to git as-is. Git handles branch vs path
-    -- disambiguation naturally; inserting -- would force path interpretation
-    -- and break branch switching (e.g. "checkout <branch>").
-    let args' = args
-    code <- lift $ Git.runGitRawIn prefix ("checkout" : args')
-    when (code == ExitSuccess) $ do
-        cwd <- asks envCwd
-        let rawPaths = restoreCheckoutPaths args'
-            adjustedPaths = if null prefix then rawPaths
-                            else map (prefix </>) rawPaths
-        syncTextFilesFromIndex cwd adjustedPaths
-    pure code
+    junction <- liftIO $ lookupEnv "BIT_GIT_JUNCTION"
+    let isBranchSwitch = not (hasDashDash args) && not (hasPathCheckoutFlags args)
+    case junction of
+        Just "1" | isBranchSwitch -> do
+            -- Junction mode branch switch: run through junction so git uses CWD as work tree
+            liftIO $ Git.runGitHere ("checkout" : args)
+        _ | isBranchSwitch -> do
+            -- Normal mode branch switch: use diff-based sync
+            oldHead <- liftIO getLocalHeadE
+            code <- lift $ Git.runGitRawIn prefix ("checkout" : args)
+            when (code == ExitSuccess) $
+                syncWorkingTreeFromDiff oldHead
+            pure code
+        _ -> do
+            -- Path checkout: use path-based sync (existing behavior)
+            code <- lift $ Git.runGitRawIn prefix ("checkout" : args)
+            when (code == ExitSuccess) $ do
+                cwd <- asks envCwd
+                let rawPaths = restoreCheckoutPaths args
+                    adjustedPaths = if null prefix then rawPaths
+                                    else map (prefix </>) rawPaths
+                syncTextFilesFromIndex cwd adjustedPaths
+            pure code
+  where
+    hasDashDash = elem "--"
+    -- Flags that indicate path checkout (not branch switch)
+    hasPathCheckoutFlags as = any (`elem` as) ["--ours", "--theirs", "--merge", "-p", "--patch"]
 
 -- | After a successful restore/checkout, sync .bit/index/ to working directory:
 -- text files: copy content from index. Binary metadata: copy blob from CAS to work path.
@@ -385,6 +444,44 @@ parseRmOutput out =
     , not (null path)
     ]
 
+-- | Parse mv source→dest pairs from the args (git mv doesn't output pairs, so we parse args).
+-- Supports: git mv <source> <dest>, git mv <source>... <dest-dir>
+parseMvOutput :: String -> [(FilePath, FilePath)]
+parseMvOutput _ = []
+-- Note: git mv produces no parseable output. Instead, we parse the args directly.
+
+-- | Extract mv source→dest pairs from command args.
+-- git mv <source> <dest> → [(source, dest)]
+-- git mv <source>... <dir> → [(source, dir/basename source)]
+-- We skip flags (starting with -)
+parseMvArgs :: FilePath -> [String] -> IO [(FilePath, FilePath)]
+parseMvArgs _ [] = pure []
+parseMvArgs _ [_] = pure []
+parseMvArgs cwd args = do
+    let nonFlags = filter (\a -> not ("-" `isPrefixOf` a) && a /= "--") args
+    case nonFlags of
+        [] -> pure []
+        [_] -> pure []
+        paths -> do
+            let dest = last paths
+                sources = Prelude.init paths
+                destPath = cwd </> dest
+            isDir <- Dir.doesDirectoryExist destPath
+            if isDir
+                then pure [(s, dest </> takeBaseName' s) | s <- sources]
+                else case sources of
+                    [src] -> pure [(src, dest)]
+                    _ -> pure []  -- multiple sources to non-dir is an error
+  where
+    takeBaseName' p = case reverse (splitPath' p) of
+        (x:_) -> x
+        [] -> p
+    splitPath' = filter (not . null) . go
+      where go [] = []
+            go s = let (w, rest) = break (== '/') s
+                       rest' = drop 1 rest
+                   in w : go rest'
+
 -- | Resolve file path arguments for flags that take a file path (-X, --exclude-from).
 -- When git runs with -C .bit/index, relative paths resolve from the wrong directory.
 -- This makes them absolute so they resolve correctly regardless of -C.
@@ -399,6 +496,57 @@ resolveExcludeFilePaths (flag:path:rest)
     | otherwise = do
         resolved <- resolveExcludeFilePaths (path:rest)
         pure (flag : resolved)
+
+-- ============================================================================
+-- Diff-based working tree sync
+-- ============================================================================
+
+-- | After a git operation that changes HEAD in .bit/index/, diff old vs new HEAD
+-- and sync the working tree accordingly. Handles add/modify/delete/rename.
+-- When oldHead is Nothing (e.g. unborn branch), treats all files at new HEAD as added.
+syncWorkingTreeFromDiff :: Maybe String -> BitM ()
+syncWorkingTreeFromDiff oldHead = do
+    cwd <- asks envCwd
+    bitDir <- asks envBitDir
+    newHead <- liftIO getLocalHeadE
+    case newHead of
+        Nothing -> pure ()  -- no HEAD after operation (shouldn't happen)
+        Just new -> do
+            changes <- case oldHead of
+                Just old | old /= new ->
+                    liftIO $ Git.getDiffNameStatus old new
+                Just _ -> pure []  -- same commit, no changes
+                Nothing -> do
+                    -- No old HEAD (unborn branch) — treat all files as Added
+                    files <- liftIO $ Git.getFilesAtCommit new
+                    pure $ map Git.Added files
+            let indexDir = bitDir </> "index"
+            liftIO $ forM_ changes $ \change -> case change of
+                Git.Added p -> syncFileFromIndex indexDir cwd p
+                Git.Modified p -> syncFileFromIndex indexDir cwd p
+                Git.Renamed old new' -> do
+                    let oldWork = cwd </> old
+                    oldExists <- Dir.doesFileExist oldWork
+                    when oldExists $ do
+                        Dir.removeFile oldWork
+                        removeEmptyParents cwd (takeDirectory oldWork)
+                    syncFileFromIndex indexDir cwd new'
+                Git.Copied _ new' -> syncFileFromIndex indexDir cwd new'
+                Git.Deleted p -> do
+                    let workPath = cwd </> p
+                    exists <- Dir.doesFileExist workPath
+                    when exists $ do
+                        Dir.removeFile workPath
+                        removeEmptyParents cwd (takeDirectory workPath)
+  where
+    syncFileFromIndex :: FilePath -> FilePath -> FilePath -> IO ()
+    syncFileFromIndex indexDir cwd path = do
+        let src = indexDir </> path
+            dst = cwd </> path
+        srcExists <- Dir.doesFileExist src
+        when srcExists $ do
+            Dir.createDirectoryIfMissing True (takeDirectory dst)
+            Dir.copyFile src dst
 
 -- | Remove empty parent directories up to (but not including) @stopAt@.
 removeEmptyParents :: FilePath -> FilePath -> IO ()
