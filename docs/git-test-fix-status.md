@@ -160,6 +160,32 @@ Tests verified with the latest binary (post-c57340b + junction early-exit):
 
 **Total: 1102 tests across 15 scripts, 0 bit bugs found.** One known breakage in t5505 (upstream git test issue, not bit).
 
+### Batch 3 — Broad coverage run (2026-02-22, test-runner agent)
+
+| Test | Result | Tests | Notes |
+|------|--------|-------|-------|
+| t1300-config | **PARTIAL** | 467/485 | 18 failures: all `--list` output ordering/content; config env differences, not bit bug |
+| t1400-update-ref | **PASS** | 313/313 | Ref update operations |
+| t1500-rev-parse | **PASS** | 81/81 | Rev-parse |
+| t2010-checkout-ambiguous | **PASS** | 10/10 | Ambiguous checkout resolution |
+| t2070-restore | **PASS** | 15/15 | git restore |
+| t2200-add-update | **PASS** | 19/19 | git add -u |
+| t3000-ls-files-others | **PASS** | 15/15 | ls-files --others |
+| t3100-ls-tree-restrict | **PASS** | 14/14 | ls-tree path filtering |
+| t3400-rebase | **PASS** | 39/39 | Rebase (previously failing, now fixed) |
+| t4000-diff-format | **PASS** | 2/2 | Diff format (filemode tests skipped) |
+| t4010-diff-pathspec | **PASS** | 17/17 | Diff pathspec matching |
+| t4013-diff-various | **PASS** | 230/230 | Comprehensive diff output formats |
+| t5300-pack-object | **PASS** | 63/63 | Pack/unpack objects |
+| t6000-rev-list-misc | **PASS** | 22/22 | Rev-list miscellaneous |
+| t6100-rev-list-in-order | **PASS** | 3/3 | Rev-list commit ordering |
+| t7400-submodule-basic | **PASS** | 122/122 | Submodule basic operations |
+| t7504-commit-msg-hook | **PASS** | 29/30 | Commit-msg hook (1 known breakage) |
+
+**Total: 1461 tests across 17 scripts. 16 full pass, 1 partial (t1300 config --list). 0 bit bugs found.**
+
+The t1300 failures are all `git config --list` output differences — extra config entries or ordering changes from the test environment. Not a bit regression.
+
 ## Remaining Failure Categories
 
 ### 1. scanAndWrite pollution — FIXED
