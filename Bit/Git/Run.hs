@@ -291,13 +291,13 @@ runGitWithOutputIn prefix args = do
   spawnGit fullArgs
 
 -- | Like runGitRaw but targets an arbitrary directory instead of .bit/index.
--- In junction mode, uses runGitHere instead (CWD as working tree).
+-- In junction mode, passes -C dir to git so the directory is respected.
 -- Inherits all handles to avoid encoding issues with binary/non-UTF8 data.
 runGitRawAt :: FilePath -> [String] -> IO ExitCode
 runGitRawAt dir args = do
   junction <- lookupEnv "BIT_GIT_JUNCTION"
   case junction of
-    Just "1" -> runGitHere args
+    Just "1" -> runGitHere (["-C", dir] ++ args)
     _ -> do
       bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
       noColor <- lookupEnv "BIT_NO_COLOR"
