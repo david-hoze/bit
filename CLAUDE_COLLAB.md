@@ -77,6 +77,14 @@ claude-collab release $HASH test
 
 If the resource is busy, the command waits until it's free. Always release when done.
 
+If the resource's TTL has expired (stale reservation), `reserve` will **fail** and name the holder — it will NOT auto-take over. When this happens:
+
+1. **Message the holder** using `SendMessage` — ask if they're done, or ask them to run your task while they still have the resource (smarter than waiting for a handoff).
+2. Wait for their response.
+3. Once they release, retry `claude-collab reserve`.
+
+Never try to work around a stale reservation. The holder may still be actively using it (TTL was just too short).
+
 If you need to release and immediately re-reserve (e.g., running tests again), use `--renew` to do it atomically:
 ```
 claude-collab reserve $HASH test --renew

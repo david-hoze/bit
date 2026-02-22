@@ -204,6 +204,25 @@ The t1300 failures are all `git config --list` output differences — extra conf
 
 **Total: 769 tests across 11 scripts. 10 full pass, 1 partial (t7810 PCRE). 0 bit bugs found.**
 
+### Batch 4 — Clone, fetch, pull, push, submodule (2026-02-22, rebase-fixer agent)
+
+| Test | Result | Tests | Notes |
+|------|--------|-------|-------|
+| t5510-fetch | **PASS** | 207/207 | Fetch operations |
+| t5520-pull | **PASS** | 80/80 | Pull operations |
+| t5521-pull-options | **PASS** | 22/22 | Pull option handling |
+| t5523-push-upstream | **PASS** | 17/17 | Push upstream tracking |
+| t5526-fetch-submodules | **PASS** | 54/54 | Fetch with submodules |
+| t5531-deep-submodule-push | **PASS** | 29/29 | Deep submodule push |
+| t5600-clone-fail-cleanup | **PASS** | 14/14 | Clone failure cleanup |
+| t5601-clone | **PARTIAL** | 56/109 | 53 SSH failures (missing test-fake-ssh binary, infra issue) |
+| t5604-clone-reference | **PASS** | 34/34 | Clone --reference |
+| t7400-submodule-basic | **PASS** | 122/122 | Submodule basic (re-confirmed) |
+
+**Total: 635 tests across 10 scripts. 9 full pass, 1 partial (t5601 SSH infra). 0 bit bugs found.**
+
+The t5601 failures are all SSH-related: test 39 fails because `test-fake-ssh` (a compiled C helper from git's build) is missing, and all 52 subsequent SSH clone/variant tests cascade-fail. The 56 non-SSH tests (local clone, mirror, bare, reference, partial clone, etc.) all pass.
+
 ## Remaining Failure Categories
 
 ### 1. scanAndWrite pollution — FIXED
