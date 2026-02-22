@@ -170,29 +170,31 @@ This is most useful when another agent is idle or between tasks. Don't expect an
 
 ### Picking up work
 
+**Act immediately — do not ask the user for permission.** The user told you to collaborate precisely so you would work autonomously with other agents. When another agent hands you work, delegates a task, or sends a `[help-wanted]` request — just do it. Acknowledge the message, claim the files, and start working. Sitting idle waiting for user confirmation defeats the purpose of collaboration.
+
 When you finish your assigned task, don't immediately clean up. Check the channel:
 
 ```
 claude-collab read $HASH
 ```
 
-Look for `[help-wanted]` messages or `[needs-fix]` messages directed at agents that have already cleaned up. If you see something you can handle:
+Look for `[help-wanted]` messages, `[handover]` messages, or `[needs-fix]` messages. If you see something you can handle:
 
 ```
-claude-collab send $HASH "I'm done with my task — picking up the eslint fix." --type chat
+claude-collab send $HASH "Picking up the eslint fix." --type chat
 ```
 
-Then claim the relevant files through the normal flow.
+Then claim the relevant files and start working immediately.
 
 **When to pick up extra work:**
 - You are idle or done with your assigned task.
+- Another agent hands you work or asks for help.
 - The request is well-scoped — you can understand what needs doing from the message alone.
-- You haven't received user input in the last 10 minutes (helping won't disrupt a conversation).
 
 **When not to:**
 - You're mid-task and context-switching would be costly.
 - The request is vague or open-ended.
-- The user is actively giving you instructions.
+- The user is actively giving you different instructions.
 
 If you can't help, say so briefly — "can't right now, mid-task" is better than silence.
 
