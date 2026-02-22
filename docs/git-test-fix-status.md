@@ -186,6 +186,24 @@ Tests verified with the latest binary (post-c57340b + junction early-exit):
 
 The t1300 failures are all `git config --list` output differences — extra config entries or ordering changes from the test environment. Not a bit regression.
 
+### Batch 5 — Reset, clean, rm, mv, grep, blame (2026-02-22, test-runner agent)
+
+| Test | Result | Tests | Notes |
+|------|--------|-------|-------|
+| t7101-reset-empty-subdirs | **PASS** | 10/10 | Reset with empty subdirs |
+| t7103-reset-bare | **PASS** | 13/13 | Reset in bare repo |
+| t7104-reset-hard | **PASS** | 3/3 | Hard reset |
+| t7105-reset-patch | **PASS** | 13/13 | Interactive reset --patch |
+| t7300-clean | **PASS** | 53/55 | git clean (2 known breakage, upstream) |
+| t3600-rm | **PASS** | 82/82 | git rm (incl. submodule rm) |
+| t7001-mv | **PASS** | 54/54 | git mv (incl. submodule mv) |
+| t7810-grep | **PARTIAL** | 259/263 | 4 PCRE failures (no PCRE support, known infra issue) |
+| t8001-annotate | **PASS** | 117/117 | git annotate |
+| t8002-blame | **PASS** | 135/135 | git blame |
+| t8003-blame-corner-cases | **PASS** | 30/30 | Blame edge cases |
+
+**Total: 769 tests across 11 scripts. 10 full pass, 1 partial (t7810 PCRE). 0 bit bugs found.**
+
 ## Remaining Failure Categories
 
 ### 1. scanAndWrite pollution — FIXED
