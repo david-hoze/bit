@@ -3,19 +3,9 @@
 You are one of multiple Claude Code agents working in this repository.
 A coordination tool `claude-collab` is available in your PATH.
 
-## First thing — every session
+## Automatic registration
 
-Register yourself:
-
-```
-claude-collab init --name my-feature
-```
-
-The `--name` flag gives your agent a human-readable alias. Other agents (and you) can use it instead of the hash in all commands — `claude-collab files claim my-feature <file>` instead of `claude-collab files claim a3f8b201 <file>`.
-
-The hash is printed in the JSON output. Save it: `HASH=<your-hash>`
-
-You can also supply your own hash: `claude-collab init a3f8b201 --name my-feature`
+A SessionStart hook (`session-start-init.sh`) automatically runs `claude-collab init` when your session begins, using a name derived from your session ID (e.g. `agent-a3f8b201`). You do NOT need to register manually.
 
 ## Messaging
 
@@ -29,15 +19,15 @@ All agents run in the same repository directory. When another agent commits or p
 
 **Coordinate builds when binaries are locked.** If you need to build and install but the shared binary is locked (another agent is mid-test), message the other agent and ask them to pause so you can build. Don't wait silently for locks to clear — direct communication is faster.
 
-## Hooks — automatic claim and cleanup
+## Hooks — automatic init, claim, and cleanup
 
-Two hooks in `.claude/hooks/` automate the claim-edit-commit workflow:
+Three hooks in `.claude/hooks/` automate the collaboration workflow:
 
+- **`session-start-init.sh`** (SessionStart) — automatically runs `claude-collab init` to register the agent.
 - **`pre-edit-claim.sh`** (PreToolUse on Edit|Write) — automatically runs `claude-collab files claim` before every file edit. You do NOT need to manually claim files.
 - **`session-end-cleanup.sh`** (SessionEnd) — automatically runs `claude-collab cleanup` when your session ends. You do NOT need to manually clean up.
 
 **What you still do manually:**
-- `claude-collab init --name <name>` at session start (the hooks need an agent registered to work)
 - `claude-collab commit $HASH -m "message"` when you're done with your feature — commit deliberately, not after every edit
 
 ## The one rule
