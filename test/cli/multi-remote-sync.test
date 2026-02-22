@@ -1,0 +1,168 @@
+# =============================================================================
+# Multi-Remote Sync — Push to cloud (MinIO) and filesystem remotes independently
+#
+# Tests bit's multi-remote capability:
+# 1. Create a repo with files, add two remotes (MinIO cloud + local folder)
+# 2. Push to both remotes
+# 3. Verify both remotes independently
+# 4. Edit a file, push to only one remote
+# 5. Verify the two remotes have diverged
+#
+# Prerequisites: rclone remote "minio" configured (S3-compatible, localhost:9000)
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_multisync 2>nul & rmdir /s /q test\cli\output\fs_remote_multisync 2>nul & rclone purge minio:bit-multisync-test 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP — init repo, add two remotes
+# ======================================================================
+
+mkdir test\cli\output\work_multisync & mkdir test\cli\output\fs_remote_multisync
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_multisync && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Add MinIO cloud remote
+cd test\cli\output\work_multisync && bit remote add cloud minio:bit-multisync-test
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+# Add local filesystem remote (simulates USB drive)
+cd test\cli\output\work_multisync && bit remote add usb ..\fs_remote_multisync
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: Create files, commit, push to BOTH remotes
+# ======================================================================
+
+cd test\cli\output\work_multisync && echo hello world> readme.txt & echo binary content> data.bin & bit add readme.txt data.bin & bit commit -m "Initial files"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Push to cloud remote (MinIO)
+cd test\cli\output\work_multisync && bit push -u cloud
+<<<
+>>> /Push complete|Metadata push complete/
+>>>= 0
+
+# Push to filesystem remote (USB)
+cd test\cli\output\work_multisync && bit push usb
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: Verify BOTH remotes have correct files
+# ======================================================================
+
+# Verify cloud remote
+cd test\cli\output\work_multisync && bit --remote cloud verify
+<<<
+>>> /\[OK\] All [0-9]+ files match metadata/
+>>>= 0
+
+# Verify filesystem remote
+cd test\cli\output\work_multisync && bit --remote usb verify
+<<<
+>>> /\[OK\] All [0-9]+ files match metadata/
+>>>= 0
+
+# Double-check: filesystem remote has the files on disk
+findstr /C:"hello world" test\cli\output\fs_remote_multisync\readme.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# SECTION 4: Edit a file, push to ONLY the cloud remote
+# ======================================================================
+
+cd test\cli\output\work_multisync && echo updated content> readme.txt & bit add readme.txt & bit commit -m "Update readme"
+<<<
+>>> /\[master|main|files? changed/
+>>>= 0
+
+# Push ONLY to cloud — filesystem remote is NOT updated
+cd test\cli\output\work_multisync && bit push cloud
+<<<
+>>> /Push complete|Metadata push complete/
+>>>= 0
+
+# ======================================================================
+# SECTION 5: Verify remotes have DIVERGED
+# ======================================================================
+
+# Cloud remote has the UPDATED file (check via rclone)
+rclone cat minio:bit-multisync-test/readme.txt
+<<<
+>>> /updated content/
+>>>= 0
+
+# Filesystem remote still has the OLD file (not pushed yet)
+findstr /C:"hello world" test\cli\output\fs_remote_multisync\readme.txt >nul
+<<<
+>>>
+>>>= 0
+
+# Filesystem remote git log has only 1 commit (Initial), cloud has 2
+cd test\cli\output\fs_remote_multisync && bit log --oneline
+<<<
+>>> /Initial files/
+>>>= 0
+
+# Confirm the update commit is NOT on the filesystem remote (only 1 commit)
+cd test\cli\output\fs_remote_multisync && git -C .bit\index rev-list --count HEAD
+<<<
+>>>
+1
+>>>= 0
+
+# ======================================================================
+# SECTION 6: Push to filesystem remote to bring it up to date
+# ======================================================================
+
+cd test\cli\output\work_multisync && bit push usb
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Both remotes should now verify cleanly
+cd test\cli\output\work_multisync && bit --remote cloud verify
+<<<
+>>> /\[OK\] All [0-9]+ files match metadata/
+>>>= 0
+
+cd test\cli\output\work_multisync && bit --remote usb verify
+<<<
+>>> /\[OK\] All [0-9]+ files match metadata/
+>>>= 0
+
+# Confirm filesystem remote now has updated content
+findstr /C:"updated content" test\cli\output\fs_remote_multisync\readme.txt >nul
+<<<
+>>>
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_multisync 2>nul & rmdir /s /q test\cli\output\fs_remote_multisync 2>nul & rclone purge minio:bit-multisync-test 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
