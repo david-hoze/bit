@@ -39,6 +39,7 @@ literate-output/
 
 # Ignore Claude local settings
 .claude/settings.local.json
+.claude/agents/
 
 # Ignore the workspace layout (very noisy)
 .obsidian/workspace.json
