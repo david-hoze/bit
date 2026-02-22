@@ -121,3 +121,101 @@ findstr /C:"b" test\cli\output\work_restore\b.txt >nul
 <<<
 >>>
 >>>= 0
+
+# Cleanup text tests
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_restore 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# CDC binary restore/checkout: restore and checkout chunked binary files
+# ======================================================================
+
+# Setup: solid mode repo with small CDC chunk sizes
+mkdir test\cli\output\work_restore_bin
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_restore_bin && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_restore_bin && bit config core.mode solid
+<<<
+>>> /[Ss]olid|Mode set/
+>>>= 0
+
+cd test\cli\output\work_restore_bin && bit config cdc.min-size 64
+<<<
+>>>= 0
+
+cd test\cli\output\work_restore_bin && bit config cdc.avg-size 256
+<<<
+>>>= 0
+
+cd test\cli\output\work_restore_bin && bit config cdc.max-size 1024
+<<<
+>>>= 0
+
+# Create a deterministic binary file large enough for CDC chunking
+cd test\cli\output\work_restore_bin && powershell -Command "$b = New-Object byte[] 4096; for($i=0;$i -lt 4096;$i++){$b[$i]=$i%256}; [IO.File]::WriteAllBytes('data.bin',$b)"
+<<<
+>>>= 0
+
+cd test\cli\output\work_restore_bin && bit add data.bin && bit commit -m "v1: original binary"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# Modify first bytes of binary and commit v2
+cd test\cli\output\work_restore_bin && powershell -Command "$b = [IO.File]::ReadAllBytes('data.bin'); $e = [Text.Encoding]::ASCII.GetBytes('EDITED!!'); [Array]::Copy($e,$b,$e.Length); [IO.File]::WriteAllBytes('data.bin',$b)"
+<<<
+>>>= 0
+
+cd test\cli\output\work_restore_bin && bit add data.bin && bit commit -m "v2: modified binary"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# Checkout v1 binary from HEAD~1 — should reassemble from CAS chunks
+cd test\cli\output\work_restore_bin && bit checkout HEAD~1 -- data.bin
+<<<
+>>>= 0
+
+# Commit the checkout so HEAD matches working tree, then verify
+cd test\cli\output\work_restore_bin && bit commit -m "v3: restored to v1"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+cd test\cli\output\work_restore_bin && bit verify
+<<<
+>>> /All .* files? match|Verified|0 issues/
+>>>= 0
+
+# Overwrite binary in working tree (don't stage/commit)
+cd test\cli\output\work_restore_bin && echo CORRUPT!> data.bin
+<<<
+>>>= 0
+
+# Restore should reassemble from CAS (HEAD still has v1 metadata after checkout)
+cd test\cli\output\work_restore_bin && bit restore data.bin
+<<<
+>>>= 0
+
+# Verify file matches committed metadata
+cd test\cli\output\work_restore_bin && bit verify
+<<<
+>>> /All .* files? match|Verified|0 issues/
+>>>= 0
+
+# Cleanup
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_restore_bin 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
