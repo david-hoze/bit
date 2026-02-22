@@ -57,18 +57,20 @@ All agents run in the same repository directory. When another agent commits or p
 
 ## The two rules
 
-1. **Claim before editing.** Run `claude-collab files claim $HASH <file>` before editing any file.
+1. **Claim before editing.** Run `claude-collab files claim $HASH <file>` before editing any file. NEVER use the Edit or Write tool on a file you haven't claimed. Not even "just a quick fix." Claim first, always.
 2. **Commit through the tool.** Run `claude-collab commit $HASH -m "message"` instead of raw git. NEVER run `git add`, `git commit`, or `git checkout` directly.
 
 ## The workflow: claim → edit → commit
 
-Always follow this order:
+**This order is strict. Do not skip or reorder steps.**
 
 ```
-claude-collab files claim $HASH <file>       # 1. Claim
-# ... edit the file ...                       # 2. Edit
+claude-collab files claim $HASH <file>       # 1. Claim FIRST
+# ... edit the file ...                       # 2. Edit ONLY AFTER claiming
 claude-collab commit $HASH -m "message"       # 3. Commit (stages, commits, and unclaims)
 ```
+
+**Common mistake:** editing a file first, then claiming it right before commit. This is wrong — another agent may have been editing the same file concurrently. The claim must happen BEFORE the first edit, not before the commit.
 
 `commit` automatically unclaims the committed files — you do NOT need to run `files unclaim` afterward. Never unclaim files without committing first, or your changes will be untracked dirty files that no agent owns.
 
