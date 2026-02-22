@@ -60,6 +60,8 @@ All agents run in the same repository directory. When another agent commits or p
 1. **Claim before editing.** Run `claude-collab files claim $HASH <file>` before editing any file. NEVER use the Edit or Write tool on a file you haven't claimed. Not even "just a quick fix." Claim first, always.
 2. **Commit through the tool.** Run `claude-collab commit $HASH -m "message"` instead of raw git. NEVER run `git add`, `git commit`, or `git checkout` directly.
 
+**IMPORTANT — Edit/Write gate:** Every time you are about to call the Edit or Write tool on any file, stop and ask yourself: "Have I already run `claude-collab files claim` on this file in this session?" If not, you must run the claim command BEFORE the edit. This applies from the moment you run `claude-collab init` — not just when you "feel like" you're collaborating. Initializing means you are in collaboration mode for the rest of the session, and every file edit must go through the claim-edit-commit workflow. There are no exceptions, no "quick fixes," and no "I'll claim it later."
+
 ## The workflow: claim → edit → commit
 
 **This order is strict. Do not skip or reorder steps.**
@@ -94,6 +96,7 @@ claude-collab files claim $HASH <file> --shared
 When you're done with your part of a co-claimed file, just run `commit` as normal.
 
 - If the other agent isn't done yet, your files will be **staged** (git add) and you're free to work on other things.
+- You can keep claiming and committing new files even while waiting — only the already-staged files are held back.
 - When the last agent runs `commit`, the actual git commit happens with everyone's changes included.
 - You'll see a channel message when the commit goes through.
 
@@ -107,11 +110,19 @@ Run `claude-collab reservations` to check what's available.
 Before running tests, builds, or package installs:
 ```
 
-claude-collab reserve $HASH test npm test claude-collab release $HASH test
+claude-collab reserve $HASH test
+npm test
+claude-collab release $HASH test
 
 ```
 
 If the resource is busy, the command waits until it's free. Always release when done.
+
+If you need to release and immediately re-reserve (e.g., running tests again), use `--renew` to do it atomically:
+```
+claude-collab reserve $HASH test --renew
+```
+This avoids a race condition where another agent grabs the resource between your `release` and `reserve`.
 
 ## Sharing test and build results
 

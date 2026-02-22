@@ -1,5 +1,15 @@
 # Claude Code Guidelines for bit
 
+## Collaboration Mode
+
+When the user says **`collaborate <name>`**, immediately:
+
+1. Read `CLAUDE_COLLAB.md` and follow all instructions there.
+2. Run `claude-collab init --name <name>` using the name they provided.
+3. Start a background message listener (`claude-collab read $HASH --wait --timeout 600`).
+
+Then proceed with whatever task the user gives you, following the collaboration protocol for all file edits and commits.
+
 ## Design Philosophy
 
 **bit = Git(metadata) + rclone(sync).** Use git and rclone as primitives, never reimplement what they already do.
