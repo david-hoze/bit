@@ -39,12 +39,12 @@ The `--wait` flag:
 
 ```
 # 1. Start background wait
-claude-collab read $HASH --wait --timeout 120  # (run in background)
+claude-collab read $HASH --wait --timeout 600  # (run in background)
 
 # 2. When the background task completes, ALWAYS read the output file
 # 3. Act on any messages (reply, fix bugs, pick up work)
 # 4. Start a new background wait
-claude-collab read $HASH --wait --timeout 120  # (run in background)
+claude-collab read $HASH --wait --timeout 600  # (run in background)
 ```
 
 Keep this loop running for the entire session.
