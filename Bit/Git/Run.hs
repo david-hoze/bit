@@ -86,10 +86,23 @@ import System.IO.Unsafe (unsafePerformIO)
 
 -- | The ONLY place in the entire codebase that spawns git.
 -- Respects BIT_REAL_GIT env var to avoid recursion when bit masquerades as git.
+-- Reads output in binary mode so non-UTF8 data (e.g. ISO-8859-1 commit messages)
+-- doesn't crash with encoding errors.
 spawnGit :: [String] -> IO (ExitCode, String, String)
 spawnGit args = do
     bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
-    readProcessWithExitCode bin args ""
+    (_, Just outh, Just errh, ph) <- createProcess (proc bin args)
+      { std_in = Inherit, std_out = CreatePipe, std_err = CreatePipe }
+    hSetBinaryMode outh True
+    hSetBinaryMode errh True
+    outVar <- newEmptyMVar
+    errVar <- newEmptyMVar
+    _ <- forkIO $ hGetContents outh >>= \s -> evaluate (length s) >> putMVar outVar s
+    _ <- forkIO $ hGetContents errh >>= \s -> evaluate (length s) >> putMVar errVar s
+    out <- takeMVar outVar
+    err <- takeMVar errVar
+    code <- waitForProcess ph
+    pure (code, out, err)
 
 -- | Global mutable index path. Set once by Commands.runCommand after resolving
 -- the bitlink. Defaults to the standard relative path for normal repos.
@@ -239,6 +252,7 @@ rewriteGitHints =
 
 runGitRaw :: [String] -> IO ExitCode
 runGitRaw args = do
+  bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
   noColor <- lookupEnv "BIT_NO_COLOR"
   let colorFlag = case noColor of
         Just "1" -> "never"
@@ -249,17 +263,14 @@ runGitRaw args = do
         flags
         ++ ["-c", "color.ui=" ++ colorFlag]
         ++ args
-
-  (code, out, err) <- spawnGit fullArgs
-
-  putStr (rewriteGitHints out)
-  hPutStr stderr (rewriteGitHints err)
-
+  -- Inherit all handles to avoid encoding issues with non-UTF8 data.
+  (_, _, _, ph) <- createProcess (proc bin fullArgs)
+    { std_in = Inherit, std_out = Inherit, std_err = Inherit }
+  code <- waitForProcess ph
   case code of
     ExitSuccess   -> pure ()
     ExitFailure n ->
       hPutStrLn stderr ("bit: git exited with code " ++ show n)
-
   pure code
 
 -- | Like runGitRaw but targets .bit/index/<prefix>.
@@ -281,8 +292,10 @@ runGitWithOutputIn prefix args = do
   spawnGit fullArgs
 
 -- | Like runGitRaw but targets an arbitrary directory instead of .bit/index.
+-- Inherits all handles to avoid encoding issues with binary/non-UTF8 data.
 runGitRawAt :: FilePath -> [String] -> IO ExitCode
 runGitRawAt dir args = do
+  bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
   noColor <- lookupEnv "BIT_NO_COLOR"
   let colorFlag = case noColor of
         Just "1" -> "never"
@@ -292,17 +305,13 @@ runGitRawAt dir args = do
         ["-C", dir]
         ++ ["-c", "color.ui=" ++ colorFlag]
         ++ args
-
-  (code, out, err) <- spawnGit fullArgs
-
-  putStr (rewriteGitHints out)
-  hPutStr stderr (rewriteGitHints err)
-
+  (_, _, _, ph) <- createProcess (proc bin fullArgs)
+    { std_in = Inherit, std_out = Inherit, std_err = Inherit }
+  code <- waitForProcess ph
   case code of
     ExitSuccess   -> pure ()
     ExitFailure n ->
       hPutStrLn stderr ("bit: git exited with code " ++ show n)
-
   pure code
 
 add :: [String] -> IO ExitCode
@@ -619,17 +628,11 @@ runGitHere args = do
         Just "true" -> "never"
         _ -> "auto"
   let fullArgs = ["-c", "color.ui=" ++ colorFlag] ++ args
-  (_, Just outh, Just errh, ph) <- createProcess (proc bin fullArgs)
-    { std_in = Inherit, std_out = CreatePipe, std_err = CreatePipe }
-  outVar <- newEmptyMVar
-  errVar <- newEmptyMVar
-  _ <- forkIO $ hGetContents outh >>= \s -> evaluate (length s) >> putMVar outVar s
-  _ <- forkIO $ hGetContents errh >>= \s -> evaluate (length s) >> putMVar errVar s
-  out <- takeMVar outVar
-  err <- takeMVar errVar
+  -- Inherit all handles so git writes directly to terminal.
+  -- This avoids encoding issues (binary data re-encoded as UTF-8).
+  (_, _, _, ph) <- createProcess (proc bin fullArgs)
+    { std_in = Inherit, std_out = Inherit, std_err = Inherit }
   code <- waitForProcess ph
-  putStr (rewriteGitHints out)
-  hPutStr stderr (rewriteGitHints err)
   case code of
     ExitSuccess   -> pure ()
     ExitFailure n ->
@@ -652,30 +655,19 @@ runGitGlobal args = do
                    `catch` \(_ :: IOException) -> pure False
   if hasInput
     then do
-      -- Forward stdin in binary mode to preserve exact bytes
-      (Just inh, Just outh, Just errh, ph) <- createProcess (proc bin args)
-        { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
+      -- Forward stdin in binary mode to preserve exact bytes.
+      -- Inherit stdout/stderr to avoid encoding issues.
+      (Just inh, _, _, ph) <- createProcess (proc bin args)
+        { std_in = CreatePipe, std_out = Inherit, std_err = Inherit }
       hSetBinaryMode stdin True
       hSetBinaryMode inh True
-      -- Fork output readers (avoids deadlock from full pipe buffers)
-      outVar <- newEmptyMVar
-      errVar <- newEmptyMVar
-      _ <- forkIO $ hGetContents outh >>= \s -> evaluate (length s) >> putMVar outVar s
-      _ <- forkIO $ hGetContents errh >>= \s -> evaluate (length s) >> putMVar errVar s
       -- Forward stdin content
       input <- hGetContents stdin
       hPutStr inh input
       hClose inh
-      -- Collect results
-      out <- takeMVar outVar
-      err <- takeMVar errVar
-      code <- waitForProcess ph
-      putStr out
-      hPutStr stderr err
-      pure code
+      waitForProcess ph
     else do
-      -- No stdin to forward: standard approach
-      (code, out, err) <- readProcessWithExitCode bin args ""
-      putStr out
-      hPutStr stderr err
-      pure code
+      -- No stdin to forward: inherit everything
+      (_, _, _, ph) <- createProcess (proc bin args)
+        { std_in = Inherit, std_out = Inherit, std_err = Inherit }
+      waitForProcess ph

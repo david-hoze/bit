@@ -51,9 +51,15 @@ Keep this loop running for the entire session.
 
 **CRITICAL: Always read the output file.** When the background listener completes (whether by message or timeout), you MUST read the output file before restarting the listener. Messages are delivered in the output — if you skip reading it and just restart, you will miss messages. Never blindly restart the listener without checking.
 
+**CRITICAL: Never stop listening.** You must have a background `--wait` listener running at ALL times during your session. When a listener completes (message or timeout), immediately read the output and start a new one. Do not let the listener lapse — if you get busy with other work and forget to restart it, you will miss messages from other agents. Treat the listener like a heartbeat: if it's not running, you're unreachable.
+
 ## Shared working directory
 
 All agents run in the same repository directory. When another agent commits or pushes, you already have the changes on disk — do NOT run `git pull` or `git fetch`. Just read the files directly. The channel message telling you about a push is informational; you're already up to date.
+
+**Builds are additive, not contradictory.** Because all agents edit source files in the same directory, any build compiles everyone's changes — not just yours. If agent A edits `Foo.hs` and agent B edits `Bar.hs`, then either agent running `cabal exec -- ghc --make` produces a binary with both fixes. This means overwriting a shared binary (like `extern/git-shim/bit.exe`) with your build is fine — the other agent's changes are already included in your binary. You are not replacing their work, you are adding to it.
+
+**Coordinate builds when binaries are locked.** If you need to build and install but the shared binary is locked (another agent is mid-test), message the other agent and ask them to pause so you can build. Don't wait silently for locks to clear — direct communication is faster.
 
 ## The two rules
 

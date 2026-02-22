@@ -679,11 +679,17 @@ runCommand args = do
             pure $ BitEnv cwd bitDir prefix mRemote forceMode
 
     -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
+    -- Skip in junction mode (BIT_GIT_JUNCTION=1): bit is just routing git commands,
+    -- and scanning would pollute the working tree with copies of CWD files in .bit/index/.
     let scanAndWrite = do
-            syncBitignoreToIndex cwd bitDir
-            localFiles <- Scan.scanWorkingDir cwd concurrency
-            Scan.writeMetadataFiles cwd localFiles
-            syncGitattributesToIndex cwd bitDir
+            junctionMode <- lookupEnv "BIT_GIT_JUNCTION"
+            case junctionMode of
+              Just "1" -> pure ()
+              _ -> do
+                syncBitignoreToIndex cwd bitDir
+                localFiles <- Scan.scanWorkingDir cwd concurrency
+                Scan.writeMetadataFiles cwd localFiles
+                syncGitattributesToIndex cwd bitDir
 
     -- Helper functions for running commands
     let runScanned action = do { scanAndWrite; env <- baseEnv; runBitM env action }
