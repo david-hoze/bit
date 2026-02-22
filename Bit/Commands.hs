@@ -296,7 +296,12 @@ tryAlias mIndexPath origCwd root name rest = do
                             Dir.setCurrentDirectory origCwd
                         case mTarget of
                             Just target ->
-                                Git.runGitGlobal ("--git-dir" : target : args)
+                                -- Pass --work-tree=<root> alongside --git-dir so git
+                                -- uses the repo root as worktree, not CWD. Without this,
+                                -- relative paths like "../foo" resolve incorrectly when
+                                -- running from a subdirectory.
+                                Git.runGitGlobal
+                                    ("--git-dir" : target : "--work-tree" : root : args)
                                     >>= exitWith
                             Nothing ->
                                 Git.runGitGlobal args >>= exitWith
@@ -537,6 +542,16 @@ findBitRoot start = do
 
 runCommand :: [String] -> IO ()
 runCommand args = do
+    -- In junction mode (BIT_GIT_JUNCTION=1), bit is just a transparent git
+    -- wrapper. Pass ALL commands straight to git before any repo discovery,
+    -- help interception, or flag parsing. This ensures git's exit codes
+    -- (e.g. 129 for -h) are preserved exactly, and commands work even when
+    -- the repo state is corrupt (e.g. invalid index for "merge -h").
+    -- Only --sequential is bit-specific and should be removed.
+    junctionEarly <- lookupEnv "BIT_GIT_JUNCTION"
+    when (junctionEarly == Just "1") $
+        Git.runGitHere (filter (/= "--sequential") args) >>= exitWith
+
     let hasHelp = "--help" `elem` args
     let hasTerseHelp = "-h" `elem` args
     let hasForce = "--force" `elem` args || "-f" `elem` args
@@ -560,6 +575,7 @@ runCommand args = do
     -- Help intercept (before repo check — help works without a repo)
     -- Only intercept for known bit commands; unknown commands pass through
     -- to git with -h/--help intact (git expects exit code 129 for -h).
+    -- Junction mode already exited above, so this only runs in normal mode.
     when (hasHelp || hasTerseHelp) $
         if null cmdName0
             then printMainHelp >> exitSuccess
@@ -642,7 +658,7 @@ runCommand args = do
             Bit.configSetWithRoot bd key value >> exitWith ExitSuccess
         _ -> pure ()
 
-    -- For unknown commands, try alias expansion before repo check
+    -- For unknown commands, try alias expansion before repo check.
     let mIndexPath = if bitExists then Just indexPath else Nothing
     case cmd of
         (name:rest) | not (isKnownCommand name) ->
@@ -705,15 +721,6 @@ runCommand args = do
     let optsManualMerge = Bit.PullOptions Bit.PullManualMerge
     let isPush ("push":_) = True
         isPush _ = False
-
-    -- In junction mode (BIT_GIT_JUNCTION=1), bit is just a git router.
-    -- Run git from CWD (where the .git junction lives) instead of .bit/index/.
-    -- Without this, commands like 'git add' would look for files in
-    -- .bit/index/ instead of the actual working directory.
-    junctionMode <- lookupEnv "BIT_GIT_JUNCTION"
-    case junctionMode of
-      Just "1" -> Git.runGitHere cmd >>= exitWith
-      _ -> pure ()
 
     case cmd of
         -- ── No env needed ────────────────────────────────────

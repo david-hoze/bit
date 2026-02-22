@@ -300,9 +300,11 @@ removeGitPath path = do
     when (isFile && not isDir) $
         Dir.removeFile path
 
--- | When BIT_GIT_JUNCTION=1, create a directory junction from
--- @\<dir\>/.git@ to @\<dir\>/.bit/index/.git@ (if the target exists
--- and the link doesn't).
+-- | When BIT_GIT_JUNCTION=1, create a .git gitfile pointing to
+-- @\<dir\>/.bit/index/.git@ (if the target exists and the link doesn't).
+-- Uses a gitfile ("gitdir: <path>") instead of a directory junction because
+-- junctions cause "not a valid object" errors with git stash and other
+-- commands that create temporary index files on Windows.
 createGitJunction :: FilePath -> FilePath -> IO ()
 createGitJunction targetDir targetBitGitDir = do
     mJunction <- lookupEnv "BIT_GIT_JUNCTION"
@@ -317,10 +319,11 @@ createGitJunction targetDir targetBitGitDir = do
         targetExists <- Platform.doesDirectoryExist targetBitGitDir
         when (targetExists && not linkExists && not fileExists) $ do
             absTarget <- Dir.makeAbsolute targetBitGitDir
-            absLink <- Dir.makeAbsolute link
-            -- Use mklink /j (directory junction) — no admin rights needed.
-            -- Dir.createDirectoryLink creates a symlink which requires elevation.
-            callCommand $ "mklink /j \"" ++ absLink ++ "\" \"" ++ absTarget ++ "\" >nul"
+            -- Write a gitfile instead of creating a junction.
+            -- Git natively supports "gitdir: <path>" files for linked worktrees
+            -- and --separate-git-dir. This works with all git operations including
+            -- stash, unlike NTFS junctions which cause object lookup failures.
+            atomicWriteFileStr link ("gitdir: " ++ toPosix absTarget ++ "\n")
 
 -- | Initialize a bit repository at a remote filesystem location.
 -- Typed wrapper around 'initializeRepoAt' that accepts 'RemotePath'
