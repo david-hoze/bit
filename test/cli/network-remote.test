@@ -1,7 +1,6 @@
 # Network Remote Tests
 # Tests bit push/verify/repair to a UNC network path (\\tsclient\c\users\david\bit-testing).
 # Uses rclone copy to batch-stage the remote and rclone purge for fast cleanup.
-# Requires: RDP session with \\tsclient accessible. Tests skip gracefully when unavailable.
 
 # ---- CLEANUP ----
 timeout /t 1 >nul & rmdir /s /q test\cli\output\work_network 2>nul & rclone purge \\tsclient\c\users\david\bit-testing 2>nul & echo cleanup done
@@ -11,108 +10,106 @@ cleanup done
 >>>= 0
 
 # ======================================================================
-# PREREQ: check \\tsclient availability, create sentinel if accessible
-# ======================================================================
-
-mkdir test\cli\output\work_network & if exist "\\tsclient\c" (echo prereq> test\cli\output\work_network\.tsclient_ok & echo tsclient available) else (echo SKIP: tsclient not available)
-<<<
->>> /tsclient available|SKIP/
->>>= 0
-
-# ======================================================================
 # SETUP: create repo locally, batch-copy to UNC, add remote
 # ======================================================================
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && bit init)
+mkdir test\cli\output\work_network
 <<<
->>> /[Ii]nitialized|SKIP/
+>>>
 >>>= 0
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && echo binary data> data.bin & echo hello world> greet.txt & bit add data.bin greet.txt & bit commit -m "Initial commit")
+cd test\cli\output\work_network && bit init
 <<<
->>> /\[main|files? changed|SKIP/
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_network && echo binary data> data.bin & echo hello world> greet.txt & bit add data.bin greet.txt & bit commit -m "Initial commit"
+<<<
+>>> /\[main|files? changed/
 >>>= 0
 
 # Batch-copy entire repo to UNC (rclone batches all .bit/index/.git/ files in one pass)
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (mkdir \\tsclient\c\users\david\bit-testing & rclone copy test\cli\output\work_network \\tsclient\c\users\david\bit-testing & echo copy done)
+mkdir \\tsclient\c\users\david\bit-testing & rclone copy test\cli\output\work_network \\tsclient\c\users\david\bit-testing
 <<<
->>> /copy done|SKIP/
+>>>
 >>>= 0
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && bit remote add origin \\tsclient\c\users\david\bit-testing)
+cd test\cli\output\work_network && bit remote add origin \\tsclient\c\users\david\bit-testing
 <<<
->>> /Remote 'origin' added|SKIP/
+>>> /Remote 'origin' added/
 >>>= 0
 
 # Fetch + push to sync tracking refs (remote already has content, push is a no-op)
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && bit fetch & bit push -u origin)
+cd test\cli\output\work_network && bit fetch & bit push -u origin
 <<<
->>> /Push complete|SKIP/
+>>> /Push complete/
 >>>= 0
 
 # ======================================================================
 # TEST: Files arrived at network remote
 # ======================================================================
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (if exist "\\tsclient\c\users\david\bit-testing\data.bin" (echo data exists) else (echo missing))
+if exist "\\tsclient\c\users\david\bit-testing\data.bin" (echo data exists) else (echo missing)
 <<<
->>> /data exists|SKIP/
+>>>
+data exists
 >>>= 0
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (if exist "\\tsclient\c\users\david\bit-testing\greet.txt" (echo greet exists) else (echo missing))
+if exist "\\tsclient\c\users\david\bit-testing\greet.txt" (echo greet exists) else (echo missing)
 <<<
->>> /greet exists|SKIP/
+>>>
+greet exists
 >>>= 0
 
 # ======================================================================
 # TEST: bit status shows up-to-date after push
 # ======================================================================
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && bit status)
+cd test\cli\output\work_network && bit status
 <<<
->>> /up to date|SKIP/
+>>> /up to date/
 >>>= 0
 
 # ======================================================================
 # TEST: Modify locally, push to UNC
 # ======================================================================
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && echo updated binary> data.bin & bit add data.bin & bit commit -m "Update data")
+cd test\cli\output\work_network && echo updated binary> data.bin & bit add data.bin & bit commit -m "Update data"
 <<<
->>> /\[main|files? changed|SKIP/
+>>> /\[main|files? changed/
 >>>= 0
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && bit push)
+cd test\cli\output\work_network && bit push
 <<<
->>> /Push complete|SKIP/
+>>> /Push complete/
 >>>= 0
 
 # ======================================================================
 # TEST: Verify against network remote
 # ======================================================================
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && bit verify)
+cd test\cli\output\work_network && bit verify
 <<<
->>> /\[OK\] All.*files match|SKIP/
+>>> /\[OK\] All.*files match/
 >>>= 0
 
 # ======================================================================
 # TEST: Repair from network remote
 # ======================================================================
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && echo corrupted> data.bin & echo corrupted ok)
+cd test\cli\output\work_network && echo corrupted> data.bin
 <<<
->>> /corrupted ok|SKIP/
+>>>
 >>>= 0
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && bit repair)
+cd test\cli\output\work_network && bit repair
 <<<
->>> /REPAIRED.*data\.bin|SKIP/
+>>> /REPAIRED.*data\.bin/
 >>>= 0
 
-if not exist test\cli\output\work_network\.tsclient_ok (echo SKIP) else (cd test\cli\output\work_network && bit verify)
+cd test\cli\output\work_network && bit verify
 <<<
->>> /\[OK\] All.*files match|SKIP/
+>>> /\[OK\] All.*files match/
 >>>= 0
 
 # ======================================================================
