@@ -63,14 +63,13 @@ cd test\cli\output\work_init_nested\parent\sibling && dir /b .bit
 >>>= 0
 
 # ======================================================================
-# TEST: BIT_GIT_JUNCTION creates .git junction
+# TEST: BIT_GIT_JUNCTION creates .git gitfile
 # ======================================================================
 
-# With BIT_GIT_JUNCTION=1, init should create a .git directory junction.
-# .git junction contains HEAD (from .bit/index/.git).
-set BIT_GIT_JUNCTION=1 & cd test\cli\output\work_init_nested & bit init junctiontest & dir /b junctiontest\.git
+# With BIT_GIT_JUNCTION=1, init should create a .git gitfile pointing to .bit/index/.git.
+set BIT_GIT_JUNCTION=1 & cd test\cli\output\work_init_nested & bit init junctiontest & type junctiontest\.git
 <<<
->>> /HEAD/
+>>> /gitdir: /
 >>>= 0
 
 # ======================================================================
