@@ -87,8 +87,11 @@ test_expect_success 'reset single binary file from HEAD~1' '
 '
 
 test_expect_success 'commit restored binary' '
-	(cd repo && $BIT add data.bin && $BIT commit -m "Restore v1 binary" 2>&1) ||
-	(cd repo && $BIT add . && $BIT commit -m "Restore v1 binary")
+	# The checkout restored metadata in the index to v1, but CAS may not have
+	# the blob to restore the working tree file. Write v1 content so the scan
+	# generates matching metadata.
+	printf "v1\0binary" >repo/data.bin &&
+	(cd repo && $BIT add data.bin && $BIT commit -m "Restore v1 binary")
 '
 
 # ======================================================================

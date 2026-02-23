@@ -152,8 +152,13 @@ mv :: [String] -> BitM ExitCode
 mv args = do
     cwd <- asks envCwd
     prefix <- asks envPrefix
+    bitDir <- asks envBitDir
     -- Parse move pairs from args before running (git mv produces no parseable output)
     moves <- liftIO $ parseMvArgs cwd args
+    -- Ensure target directories exist in the index (git mv won't create them)
+    liftIO $ forM_ moves $ \(_old, new) -> do
+        let indexDir = bitDir </> "index" </> prefix </> takeDirectory new
+        Dir.createDirectoryIfMissing True indexDir
     code <- liftIO $ Git.runGitRawIn prefix ("mv" : args)
     when (code == ExitSuccess) $ liftIO $ do
         forM_ moves $ \(old, new) -> do

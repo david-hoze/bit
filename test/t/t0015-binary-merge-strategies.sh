@@ -142,12 +142,14 @@ test_expect_success 'setup: fresh repo for mixed merge' '
 	printf "side\0binary" >mixed-repo/data.bin &&
 	(cd mixed-repo && $BIT add . && $BIT commit -m "Side: both") &&
 	(cd mixed-repo && git -C .bit/index checkout main) &&
+	# Restore working tree binary to base content (index checkout does not
+	# update the working tree, so scanAndWrite would see stale side content)
+	printf "base\0binary" >mixed-repo/data.bin &&
 	echo "main text different line" >>mixed-repo/readme.txt &&
-	(cd mixed-repo && $BIT add readme.txt && $BIT commit -m "Main: text only")
+	(cd mixed-repo && $BIT add . && $BIT commit -m "Main: text only")
 '
 
 test_expect_success 'merge -X theirs resolves mixed binary+text conflict' '
-	printf "base\0binary" >mixed-repo/data.bin &&
 	(cd mixed-repo && $BIT merge -X theirs mixed-side -m "Merge mixed") &&
 	verify_binary_metadata mixed-repo data.bin
 '

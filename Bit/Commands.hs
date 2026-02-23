@@ -215,6 +215,13 @@ handleDashC dir rest = do
             runCommand rest
         else Git.runGitRawAt dir rest >>= exitWith
 
+-- | Commands that only bit understands (git doesn't have them).
+-- Used to bypass the junction early-exit so these still go through bit.
+isBitOnlyCommand :: [String] -> Bool
+isBitOnlyCommand args = commandKey (filter (`notElem` ["-h", "--help", "--sequential"]) args) `elem` bitOnlyCommands
+  where
+    bitOnlyCommands = ["init", "export", "import", "become-git", "become-bit"]
+
 -- | Commands that bit handles natively (not aliases).
 -- Checks the first word of the command key, so multi-word commands like
 -- "remote add" or "merge --continue" are recognized via their root command.
@@ -543,13 +550,15 @@ findBitRoot start = do
 runCommand :: [String] -> IO ()
 runCommand args = do
     -- In junction mode (BIT_GIT_JUNCTION=1), bit is just a transparent git
-    -- wrapper. Pass ALL commands straight to git before any repo discovery,
+    -- wrapper. Pass most commands straight to git before any repo discovery,
     -- help interception, or flag parsing. This ensures git's exit codes
     -- (e.g. 129 for -h) are preserved exactly, and commands work even when
     -- the repo state is corrupt (e.g. invalid index for "merge -h").
     -- Only --sequential is bit-specific and should be removed.
+    -- Exception: bit-only commands (export, import) that git doesn't have
+    -- must still go through bit's command handling.
     junctionEarly <- lookupEnv "BIT_GIT_JUNCTION"
-    when (junctionEarly == Just "1") $
+    when (junctionEarly == Just "1" && not (isBitOnlyCommand args)) $
         Git.runGitHere (filter (/= "--sequential") args) >>= exitWith
 
     let hasHelp = "--help" `elem` args
