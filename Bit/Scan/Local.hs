@@ -6,6 +6,7 @@
 module Bit.Scan.Local
   ( scanWorkingDir
   , scanWorkingDirWithAbort
+  , scanWorkingDirWithAbort'
   , ScanResult(..)
   , ScanPhase(..)
   , writeMetadataFiles
@@ -389,6 +390,14 @@ statAndCheckCache root (rel, fullPath) = do
                 }
         _ -> pure $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
 
+-- | Stat a file without checking cache — always requires hashing.
+statNoCache :: FilePath -> (FilePath, FilePath) -> IO (Either FileToHash FileEntry)
+statNoCache _root (rel, fullPath) = do
+    size <- getFileSize fullPath
+    mtime <- getModificationTime fullPath
+    let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+    pure $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
+
 -- | Hash a single file and save the result to cache.
 hashFileToEntry :: FilePath -> ConfigFile.TextConfig -> Maybe (IORef Integer) -> FileToHash -> IO FileEntry
 hashFileToEntry root config mBytesRef fth = do
@@ -485,7 +494,12 @@ scanWorkingDir root concurrencyMode = do
 -- Returns entries (with hashes) and skipped file paths.
 -- The Concurrency parameter controls hashing parallelism (Sequential = 1 thread).
 scanWorkingDirWithAbort :: FilePath -> Concurrency -> Maybe (ScanPhase -> IO ()) -> IO ScanResult
-scanWorkingDirWithAbort root concurrencyMode mCallback = do
+scanWorkingDirWithAbort = scanWorkingDirWithAbort' False
+
+-- | Like 'scanWorkingDirWithAbort' but with an option to skip the hash cache.
+-- When forceRehash is True, all files are re-hashed regardless of cache state.
+scanWorkingDirWithAbort' :: Bool -> FilePath -> Concurrency -> Maybe (ScanPhase -> IO ()) -> IO ScanResult
+scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
     mBitRoot <- resolveBitRoot root
     case mBitRoot of
       Nothing -> pure (ScanResult [] [])
@@ -503,8 +517,10 @@ scanWorkingDirWithAbort root concurrencyMode mCallback = do
         -- Report collection phase
         traverse_ (\cb -> cb (PhaseCollected (length filesToProcess))) mCallback
 
-        -- Phase 1: stat all files and check cache
-        statResults <- mapM (statAndCheckCache root) filesToProcess
+        -- Phase 1: stat all files and check cache (skip cache when forceRehash)
+        statResults <- if forceRehash
+            then mapM (statNoCache root) filesToProcess
+            else mapM (statAndCheckCache root) filesToProcess
         let cacheHits    = [e | Right e <- statResults]
             needsHashing = [fth | Left fth <- statResults]
             totalBytesNeeded = sum [fthSize fth | fth <- needsHashing]

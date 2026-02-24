@@ -331,7 +331,7 @@ verifyLocal cwd = verifyLocalAt cwd
 -- Returns the verify result plus a list of files that were skipped.
 verifyWithAbort :: FilePath -> Maybe (IORef Int) -> Concurrency -> Maybe (Scan.ScanPhase -> IO ()) -> IO (VerifyResult, [FilePath])
 verifyWithAbort root mCounter concurrency mCallback = do
-  Scan.ScanResult entries skipped <- Scan.scanWorkingDirWithAbort root concurrency mCallback
+  Scan.ScanResult entries skipped <- Scan.scanWorkingDirWithAbort' True root concurrency mCallback
 
   -- For skipped files, create size-only entries: committed hash + actual file size.
   -- If the size changed, git diff will detect the mismatch.
