@@ -63,7 +63,7 @@ hint: Run 'bit push --force' to overwrite remote with local state.
 
 ### Verification Cost
 
-Verification requires hashing every binary file, which means reading the entire working tree. Mitigation: scan caching (keyed on path, mtime, size) skips re-hashing unchanged files.
+Verification requires hashing every binary file, which means reading the entire working tree. **Verify always re-hashes all files** — it bypasses the scan cache to ensure corruption is detected even when mtime and size haven't changed (e.g., same-second overwrites). This is intentional: the cache is an optimization for `bit status` and `bit add`, but verify's purpose is to catch exactly the cases where the cache might lie.
 
 **Remote verification cost by transport type:**
 - **Cloud remotes (Google Drive, S3, etc.):** `rclone lsjson --hash` returns MD5 hashes as free metadata. Cheap.
@@ -78,7 +78,7 @@ Verifies local working tree files match their committed metadata. Uses a bandwid
 **Why scan + git diff (not direct file-vs-metadata comparison):** An earlier approach loaded metadata from `.bit/index/` on disk and compared file hashes against it. The problem: any command that scans the working directory (`bit status`, `bit add`, etc.) updates `.bit/index/` metadata to reflect current file state. If a file was corrupted and the user happened to run `bit status` first, the metadata would be updated to match the corrupted content -- and verification would pass. By comparing against the *committed* state in git, verification is immune to stale metadata.
 
 **Verification steps:**
-1. `Scan.scanWorkingDirWithAbort` -- hash files with bandwidth detection
+1. `Scan.scanWorkingDirWithAbort' True` -- hash files with bandwidth detection (force-rehash bypasses cache)
 2. `Scan.writeMetadataFiles` -- update `.bit/index/` to match scan results
 3. `git diff --name-only` in `.bit/index` repo -- find files whose metadata changed from HEAD
 4. For each changed binary file: read committed metadata (`git show HEAD:<path>`) for expected hash/size, read filesystem metadata for actual hash/size -> `HashMismatch`
@@ -90,25 +90,19 @@ Verifies local working tree files match their committed metadata. Uses a bandwid
 ```
 Verifying local files...
 Collecting files... 1247 found.
-Checking cache... 1200 cached, 47 need hashing (892.1 MB).
-Hashing: 23/47 files, 156.3 MB / 892.1 MB (17%)     ← live progress bar (TTY only)
-Hashed 47 files (892.1 MB).                           ← final summary replaces bar
+Checking cache... 0 cached, 1247 need hashing (12.3 GB).
+Hashing: 23/1247 files, 156.3 MB / 12.3 GB (1%)      ← live progress bar (TTY only)
+Hashed 1247 files (12.3 GB).                           ← final summary replaces bar
 Comparing against committed metadata...
 [OK] All 1247 files match metadata.
 ```
 
-Fast path (everything cached):
-```
-Collecting files... 1247 found.
-All 1247 files cached, no hashing needed.
-Comparing against committed metadata...
-[OK] All 1247 files match metadata.
-```
+Note: verify always shows "0 cached" because it bypasses the hash cache to ensure correctness. The cache fast path ("All N files cached, no hashing needed") is only used by `bit status` and `bit add`.
 
 ### Bandwidth-Aware Hashing
 
-1. **Cache check**: Each file's mtime+size is compared against `.bit/cache/` entries. Cache hits skip re-hashing.
-2. **Threshold**: If total uncached bytes are below 20 MB, skip bandwidth check and hash all files.
+1. **No cache check**: Verify always re-hashes all files (bypasses the mtime+size cache used by status/add).
+2. **Threshold**: If total bytes are below 20 MB, skip bandwidth check and hash all files.
 3. **Throughput measurement**: If >100 MB of uncached files remain, reads a 10 MB sample and estimates total time.
 4. **Abort prompt**: If estimated time exceeds 60 seconds, prompts the user with option for size-only verification.
 5. **Size-only fallback**: If the user declines, uncached files are verified by size only -- same-size content corruption is not detected but covers the majority of real-world corruption (partial writes, truncation, failed transfers).
