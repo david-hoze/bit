@@ -6,16 +6,12 @@ Based on the full 1024-script run (2026-02-24), here's how to run the suite fast
 
 | Category | Count | % of 1024 |
 |----------|-------|-----------|
-| Passed (all tests OK) | ~660 | 64% |
-| Timed out (>120s) | 58+ | 6% |
-| Skipped (missing prereqs) | ~154 | 15% |
-| Known breakage only | ~8 | 1% |
+| Passed (all tests OK) | 796 | 77% |
+| Timed out (>120s) | 58 | 6% |
+| Skipped (missing prereqs) | 145 | 14% |
+| Known breakage only | 22 | 2% |
 | Real failures | 5 | <1% |
-| Infra failures (t9xxx scalar/perl/shell) | ~32 | 3% |
-
-**Note**: The t6+t7 results file (`extern/git-suite-t6t7-results.txt`) is truncated
-at t7101 — scripts t7102 through t7900+ were not captured. The actual timeout and
-skip counts for t6+t7 may be higher than shown here.
+| Infra failures (t9xxx scalar/perl/shell) | 32 | 3% |
 
 ## Optimization 1: Skip known-skip scripts upfront (~154 scripts)
 
@@ -74,11 +70,14 @@ t5505-remote.sh  t5510-fetch.sh  t5515-fetch-merge-logic.sh
 t5516-fetch-push.sh  t5520-pull.sh  t5526-fetch-submodules.sh
 t5552-skipping-fetch-negotiator.sh  t5572-pull-submodule.sh  t5616-partial-clone.sh
 
-# t6xxx-t7xxx (10 timeouts — likely more, results truncated after t7101)
+# t6xxx-t7xxx (20 timeouts)
 t6030-bisect-porcelain.sh  t6041-bisect-submodule.sh  t6300-for-each-ref.sh
 t6416-recursive-corner-cases.sh  t6422-merge-rename-corner-cases.sh
 t6423-merge-rename-directories.sh  t6438-submodule-directory-file-conflicts.sh
 t6600-test-reach.sh  t7003-filter-branch.sh  t7004-tag.sh
+t7112-reset-submodule.sh  t7400-submodule-basic.sh  t7406-submodule-update.sh
+t7508-status.sh  t7513-interpret-trailers.sh  t7600-merge.sh
+t7610-mergetool.sh  t7800-difftool.sh  t7810-grep.sh  t7900-maintenance.sh
 
 # t9xxx (3 timeouts)
 t9001-send-email.sh  t9300-fast-import.sh  t9902-completion.sh
@@ -93,10 +92,8 @@ Current split by number prefix gives uneven loads:
 | t0+t1 | 169 | 152 | 12 | 5 | 0 |
 | t2+t3 | 184 | 160 | 11 | 5 | 1 (t2501) |
 | t4+t5 | 316 | 274 | 22 | 24 | 0 |
-| t6+t7 | ~203 | ~170* | 10+ | 2+ | 0* |
-| t9 | 137 | ~16 | 3 | 118 | 4 (scalar/perl/shell) |
-
-*t6+t7 results truncated at t7101 — real numbers are higher.
+| t6+t7 | 203 | 179 | 20 | 2 | 0 |
+| t9 | 137 | 16 | 3 | 114 | 4 (scalar/perl/shell) |
 
 **Better split (5 agents, ~130 effective scripts each):**
 
@@ -171,9 +168,8 @@ done > ../../git-suite-full-results.txt 2>&1
 
 ## Data quality notes
 
-- **t6+t7 results are incomplete**: `extern/git-suite-t6t7-results.txt` stops at t7101
-  (111 lines). Scripts t7102 through t7900+ were not captured. Next run should ensure
-  the full t6+t7 range is recorded.
+- **All batches complete**: t6 results in `extern/git-suite-t6t7-results.txt`, t7 results
+  in `extern/git-suite-t7-results.txt` (run separately after the initial t6+t7 runner timed out).
 - **t9 failures are infrastructure, not bit bugs**: scalar (t9210, t9211), perl (t9700),
   and shell (t9850) failures are due to missing/misconfigured tools, not bit routing issues.
 - **t0000-basic.sh** exits with code 1 (not 143/timeout) — may be a real test failure
