@@ -1,18 +1,18 @@
 # =============================================================================
-# Multi-Remote Sync — Push to cloud (MinIO) and filesystem remotes independently
+# Multi-Remote Sync — Push to cloud and filesystem remotes independently
 #
 # Tests bit's multi-remote capability:
-# 1. Create a repo with files, add two remotes (MinIO cloud + local folder)
+# 1. Create a repo with files, add two remotes (cloud + local folder)
 # 2. Push to both remotes
 # 3. Verify both remotes independently
 # 4. Edit a file, push to only one remote
 # 5. Verify the two remotes have diverged
 #
-# Prerequisites: rclone remote "minio" configured (S3-compatible, localhost:9000)
+# Prerequisites: rclone remote "gdrive-test" configured (Google Drive)
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_multisync 2>nul & rmdir /s /q test\cli\output\fs_remote_multisync 2>nul & rclone purge minio:bit-multisync-test 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_multisync 2>nul & rmdir /s /q test\cli\output\fs_remote_multisync 2>nul & rclone purge gdrive-test:bit-multisync-test 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
@@ -32,8 +32,8 @@ cd test\cli\output\work_multisync && bit init
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-# Add MinIO cloud remote
-cd test\cli\output\work_multisync && bit remote add cloud minio:bit-multisync-test
+# Add cloud remote (Google Drive)
+cd test\cli\output\work_multisync && bit remote add cloud gdrive-test:bit-multisync-test
 <<<
 >>> /Remote.*added/
 >>>= 0
@@ -53,7 +53,7 @@ cd test\cli\output\work_multisync && echo hello world> readme.txt & echo binary 
 >>> /\[master|main|files? changed/
 >>>= 0
 
-# Push to cloud remote (MinIO)
+# Push to cloud remote
 cd test\cli\output\work_multisync && bit push -u cloud
 <<<
 >>> /Push complete|Metadata push complete/
@@ -107,7 +107,7 @@ cd test\cli\output\work_multisync && bit push cloud
 # ======================================================================
 
 # Cloud remote has the UPDATED file (check via rclone)
-rclone cat minio:bit-multisync-test/readme.txt
+rclone cat gdrive-test:bit-multisync-test/readme.txt
 <<<
 >>> /updated content/
 >>>= 0
@@ -161,7 +161,7 @@ findstr /C:"updated content" test\cli\output\fs_remote_multisync\readme.txt >nul
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_multisync 2>nul & rmdir /s /q test\cli\output\fs_remote_multisync 2>nul & rclone purge minio:bit-multisync-test 2>nul & echo cleanup done
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_multisync 2>nul & rmdir /s /q test\cli\output\fs_remote_multisync 2>nul & rclone purge gdrive-test:bit-multisync-test 2>nul & echo cleanup done
 <<<
 >>>
 cleanup done
