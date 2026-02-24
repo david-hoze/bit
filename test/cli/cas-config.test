@@ -15,9 +15,10 @@ cleanup done
 >>>= 0
 
 # ---- SETUP ----
-mkdir test\cli\output\work_casconfig
+mkdir test\cli\output\work_casconfig 2>nul & echo setup ready
 <<<
 >>>
+setup ready
 >>>= 0
 
 cd test\cli\output\work_casconfig && bit init

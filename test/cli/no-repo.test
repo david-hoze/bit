@@ -133,7 +133,8 @@ cd test\cli\output\work_norepo && bit status
 >>>= 0
 
 # Cleanup
-rmdir /s /q test\cli\output\work_norepo 2>nul
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_norepo 2>nul & echo cleanup done
 <<<
 >>>
+cleanup done
 >>>= 0

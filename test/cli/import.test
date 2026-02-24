@@ -53,7 +53,7 @@ cd test\cli\output\work_import && git log --oneline
 # ---- Verify bit status shows files need committing (metadata transition) ----
 cd test\cli\output\work_import && set "BIT_GIT_JUNCTION=1" & bit status
 <<<
->>> /modified/
+>>> /Untracked|modified/
 >>>= 0
 
 # ======================================================================

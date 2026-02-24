@@ -1,8 +1,7 @@
 # bit verify verbose output tests
 # Verifies that verify prints phase messages on stderr:
 #   - "Collecting files... N found."
-#   - "All N files cached, no hashing needed." (when all cached)
-#   - "Checking cache... N cached, M need hashing (X B)." (when some need hashing)
+#   - "Checking cache... 0 cached, N need hashing (X B)." (verify always re-hashes)
 #   - "Comparing against committed metadata..."
 
 # ---- CLEANUP ----
@@ -50,7 +49,7 @@ cd test\cli\output\work_vv && echo hello> a.txt & echo data> b.bin & bit add a.t
 >>>= 0
 
 # ======================================================================
-# TEST: All files cached — "All N files cached, no hashing needed."
+# TEST: Verify always re-hashes (never uses cache for correctness)
 # ======================================================================
 
 cd test\cli\output\work_vv && bit verify
@@ -60,14 +59,14 @@ cd test\cli\output\work_vv && bit verify
 
 cd test\cli\output\work_vv && bit verify
 <<<
->>>2 /All 2 files cached, no hashing needed/
+>>>2 /0 cached, 2 need hashing/
 >>>= 0
 
 # ======================================================================
-# TEST: Cache miss forces re-hash — "Checking cache... N cached, M need hashing"
+# TEST: Verify re-hashes even with cache entries present
 # ======================================================================
 
-# Delete one cache entry to force re-hash
+# Delete one cache entry (verify ignores cache anyway)
 cd test\cli\output\work_vv && del .bit\cache\b.bin
 <<<
 >>>
@@ -75,7 +74,7 @@ cd test\cli\output\work_vv && del .bit\cache\b.bin
 
 cd test\cli\output\work_vv && bit verify
 <<<
->>>2 /Checking cache\.\.\. 1 cached, 1 need hashing/
+>>>2 /0 cached, 2 need hashing/
 >>>= 0
 
 # ======================================================================
