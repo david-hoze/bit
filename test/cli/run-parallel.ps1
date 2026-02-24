@@ -20,8 +20,9 @@ $testDir = "test\cli"
 # Prevent findBitRoot from walking past test output dirs into the parent repo
 $env:BIT_CEILING_DIRECTORIES = "$projectRoot\test\cli\output"
 
-# Tests that must run fully sequentially (contend on remote-init resources)
-$serial = @("remote-flag.test", "remote-targeted.test")
+# Tests that must run fully sequentially (currently none — all contention
+# is handled by the gdrive mutex above)
+$serial = @()
 
 # Tests that share the gdrive-test rclone remote — run in parallel with
 # everything else but acquire a named mutex so only one uses gdrive at a time
