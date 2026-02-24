@@ -16,8 +16,18 @@ $testDir = "test\cli"
 # Prevent findBitRoot from walking past test output dirs into the parent repo
 $env:BIT_CEILING_DIRECTORIES = "$projectRoot\test\cli\output"
 
-# Tests that must run sequentially (contend on remote-init resources)
-$serial = @("remote-flag.test", "remote-targeted.test")
+# Tests that must run sequentially:
+# - remote-flag/remote-targeted: contend on remote-init resources
+# - gdrive tests: share the gdrive-test rclone remote, concurrent access causes races
+$serial = @(
+    "remote-flag.test",
+    "remote-targeted.test",
+    "gdrive-remote.test",
+    "multi-remote-sync.test",
+    "bare-push-pull.test",
+    "fetch-output.test",
+    "verify-bare-remote.test"
+)
 
 function Run-Shelltest($file) {
     $output = shelltest --debug $file 2>&1 | Out-String
