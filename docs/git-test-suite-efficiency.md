@@ -8,10 +8,9 @@ Based on the full 1028-script run (2026-02-24, updated 2026-02-25 with 300s/600s
 |----------|-------|-----------|
 | Passed at 120s | 796 | 77% |
 | Additionally passed at 300s | 44 | 4% |
-| Additionally passed at 600s | 2 (t1013, t3305) | <1% |
+| Additionally passed at 600s | 4 (t1013, t3305, t5510¹, t5572) | <1% |
 | Still timeout at 600s | 3 (t0027, t1092, t1517) | <1% |
-| Junction-mode failures at 600s | 3 (t2013, t3432, t7112) | <1% |
-| Bail-out (need clean rerun) | 5 | <1% |
+| Junction-mode failures at 600s | 6 | <1% |
 | Infrastructure failures | 5 | <1% |
 | Skipped (missing prereqs) | 145 | 14% |
 | Known breakage only | 22 | 2% |
@@ -66,17 +65,16 @@ Don't include these in pass/fail counts for routine runs — they need code fixe
 SKIP_TIMEOUT="t0027|t1092|t1517"
 
 # Junction-mode failures at 600s (not slowness — real test failures)
-SKIP_JUNCTION="t2013|t3432|t7112"
-
-# Need clean rerun (bailed out on locked trash dirs from prior timed-out runs)
-NEED_RERUN="t5510|t5516|t5572|t6423|t7610"
+SKIP_JUNCTION="t2013|t3432|t5516|t6423|t7112|t7610"
 ```
 
 These failure patterns cluster around:
-- **Submodule operations** (t1013, t2013, t5572, t7112): junction-mode git_test_func failures
-- **Fetch/push** (t5510, t5516): massive failure rates (290/314 and 118/123)
-- **Merge/rebase** (t3432, t6423): junction-mode rename directory handling
-- **Mergetool** (t7610): tool routing issues
+- **Submodule operations** (t2013, t7112): junction-mode git_test_func failures
+- **Fetch/push** (t5516): 110/123 failures — remote transport handling
+- **Merge/rebase** (t3432, t6423): rename directory detection issues
+- **Mergetool** (t7610): tool invocation routing issues
+
+¹ t5510-fetch passes 204/207 (3 minor failures). t5572-pull-submodule passes all 60 non-KB tests.
 
 ## Optimization 3: Balance agent batches by runtime, not count
 
@@ -172,5 +170,7 @@ done > ../../git-suite-full-results.txt 2>&1
 - **t1006, t1461** pass at 300s with known breakages — the "FATAL" at 120s was a timeout artifact.
 - **Version**: Both test suite (extern/git submodule) and real git (PortableGit) are v2.52.0. No version mismatch.
 - **1 bit bug found**: `git help --config-for-completion` passthrough — fixed in Bit/Commands.hs.
-- **600s rerun**: 10 of 13 scripts that timed out at 300s have real junction-mode failures
-  (not just slowness). These are mostly submodule and fetch/push operations.
+- **600s rerun**: Of 13 scripts that timed out at 300s: 4 pass (t1013, t3305, t5510 nearly, t5572),
+  3 still timeout (t0027, t1092, t1517), 6 have junction-mode failures.
+- **Trash directory cleanup**: Always remove `trash directory.*` dirs between runs to avoid
+  "Device or resource busy" bail-outs when scripts share the same test directory names.
