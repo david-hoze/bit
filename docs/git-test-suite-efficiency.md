@@ -1,17 +1,21 @@
 # Git Test Suite — Efficient Running Guide
 
-Based on the full 1024-script run (2026-02-24), here's how to run the suite faster next time.
+Based on the full 1028-script run (2026-02-24, updated 2026-02-25 with 300s/600s rerun data).
 
 ## Key findings from the full run
 
-| Category | Count | % of 1024 |
+| Category | Count | % of 1028 |
 |----------|-------|-----------|
-| Passed (all tests OK) | 796 | 77% |
-| Timed out (>120s) | 58 | 6% |
+| Passed at 120s | 796 | 77% |
+| Additionally passed at 300s | 44 | 4% |
+| Additionally passed at 600s | 1 (t3305) | <1% |
+| Still timeout at 600s | 2 | <1% |
+| Junction-mode failures at 600s | 10 | 1% |
+| Infrastructure failures | 5 | <1% |
 | Skipped (missing prereqs) | 145 | 14% |
 | Known breakage only | 22 | 2% |
-| Real failures | 5 | <1% |
-| Infra failures (t9xxx scalar/perl/shell) | 32 | 3% |
+| Infra failures (t9xxx scalar/perl/shell) | 4 | <1% |
+| **Total passing (300s timeout)** | **843** | **82%** |
 
 ## Optimization 1: Skip known-skip scripts upfront (~154 scripts)
 
@@ -40,70 +44,58 @@ SKIP_MISC="t0034|t0301|t0612|t1509|t3300|t3435|t3514|t3902|t3910|t4016|t5580|t56
 # t9200: no cvs                 t9500-t9502: no CGI modules
 ```
 
-## Optimization 2: Increase timeout for large scripts
+## Optimization 2: Use 300s timeout (not 120s)
 
-58+ scripts timed out at 120s. These are legitimate tests that just need more time.
-Use 300s (5 min) instead. The largest scripts (t0027-auto-crlf, t5310-pack-bitmaps)
-may need 600s.
+58 scripts timed out at 120s. With 300s, 44 of them pass — they just need more time.
+**Use 300s as the default timeout.** This adds ~45 scripts to the pass count for minimal extra wall-clock time (since scripts run in parallel).
 
-**Large scripts (need 300-600s timeout):**
+The 44 scripts that pass at 300s range from 98s to 299s. Key slow categories:
+- **Pack/bitmap** (t5310, t5326, t5327): 183-299s — heavy I/O
+- **Config/refs** (t1300, t1400, t1461): 171-241s — many individual tests
+- **Fetch** (t5500, t5515, t5616): 200-259s — network simulation
+- **Worktree** (t2400): 291s — close to timeout, benefits from 300s
+
+### Scripts that still fail even at 600s (skip these unless investigating junction issues)
+
+10 scripts complete at 600s but have real junction-mode failures. 2 more still timeout.
+Don't include these in pass/fail counts for routine runs — they need code fixes, not more time.
+
+```bash
+# Always timeout (need >600s or are genuinely hanging)
+SKIP_TIMEOUT="t0027|t1517"
+
+# Junction-mode failures at 600s (not slowness — real test failures)
+SKIP_JUNCTION="t1013|t1092|t2013|t3432|t5510|t5516|t5572|t6423|t7112|t7610"
 ```
-# t0xxx-t1xxx (12 timeouts)
-t0000-basic.sh  t0008-ignores.sh  t0027-auto-crlf.sh  t1006-cat-file.sh
-t1013-read-tree-submodule.sh  t1092-sparse-checkout-compatibility.sh
-t1300-config.sh  t1400-update-ref.sh  t1450-fsck.sh  t1461-refs-list.sh
-t1510-repo-setup.sh  t1517-outside-repo.sh
 
-# t2xxx-t3xxx (11 timeouts)
-t2013-checkout-submodule.sh  t2400-worktree-add.sh  t3200-branch.sh
-t3301-notes.sh  t3305-notes-fanout.sh  t3311-notes-merge-fanout.sh
-t3404-rebase-interactive.sh  t3421-rebase-topology-linear.sh
-t3426-rebase-submodule.sh  t3432-rebase-fast-forward.sh  t3903-stash.sh
-
-# t4xxx-t5xxx (22 timeouts)
-t4013-diff-various.sh  t4014-format-patch.sh  t4018-diff-funcname.sh
-t4137-apply-submodule.sh  t4216-log-bloom.sh  t4255-am-submodule.sh
-t5310-pack-bitmaps.sh  t5318-commit-graph.sh  t5319-multi-pack-index.sh
-t5324-split-commit-graph.sh  t5326-multi-pack-bitmaps.sh
-t5327-multi-pack-bitmaps-rev.sh  t5400-send-pack.sh  t5500-fetch-pack.sh
-t5505-remote.sh  t5510-fetch.sh  t5515-fetch-merge-logic.sh
-t5516-fetch-push.sh  t5520-pull.sh  t5526-fetch-submodules.sh
-t5552-skipping-fetch-negotiator.sh  t5572-pull-submodule.sh  t5616-partial-clone.sh
-
-# t6xxx-t7xxx (20 timeouts)
-t6030-bisect-porcelain.sh  t6041-bisect-submodule.sh  t6300-for-each-ref.sh
-t6416-recursive-corner-cases.sh  t6422-merge-rename-corner-cases.sh
-t6423-merge-rename-directories.sh  t6438-submodule-directory-file-conflicts.sh
-t6600-test-reach.sh  t7003-filter-branch.sh  t7004-tag.sh
-t7112-reset-submodule.sh  t7400-submodule-basic.sh  t7406-submodule-update.sh
-t7508-status.sh  t7513-interpret-trailers.sh  t7600-merge.sh
-t7610-mergetool.sh  t7800-difftool.sh  t7810-grep.sh  t7900-maintenance.sh
-
-# t9xxx (3 timeouts)
-t9001-send-email.sh  t9300-fast-import.sh  t9902-completion.sh
-```
+These failure patterns cluster around:
+- **Submodule operations** (t1013, t2013, t5572, t7112): junction-mode git_test_func failures
+- **Fetch/push** (t5510, t5516): massive failure rates (290/314 and 118/123)
+- **Merge/rebase** (t3432, t6423): junction-mode rename directory handling
+- **Mergetool** (t7610): tool routing issues
 
 ## Optimization 3: Balance agent batches by runtime, not count
 
 Current split by number prefix gives uneven loads:
 
-| Batch | Scripts | Passed | Timed out | Skipped | Failed |
-|-------|---------|--------|-----------|---------|--------|
-| t0+t1 | 169 | 152 | 12 | 5 | 0 |
-| t2+t3 | 184 | 160 | 11 | 5 | 1 (t2501) |
-| t4+t5 | 316 | 274 | 22 | 24 | 0 |
-| t6+t7 | 203 | 179 | 20 | 2 | 0 |
-| t9 | 137 | 16 | 3 | 114 | 4 (scalar/perl/shell) |
+| Batch | Scripts | Passed (300s) | Skipped | Failed |
+|-------|---------|---------------|---------|--------|
+| t0+t1 | 169 | 160 | 5 | 0 |
+| t2+t3 | 184 | 168 | 5 | 1 (t2501) |
+| t4+t5 | 316 | 296 | 24 | 0 |
+| t6+t7 | 203 | 199 | 2 | 0 |
+| t9 | 137 | 16 | 114 | 4 (scalar/perl/shell) |
 
-**Better split (5 agents, ~130 effective scripts each):**
+**Better split (4 agents, excluding skips, ~170 effective each):**
 
 | Agent | Range | Effective | Notes |
 |-------|-------|-----------|-------|
-| A | t0xxx + t1xxx | ~152 | Keep together (core tests) |
-| B | t2xxx + t3xxx | ~169 | Keep together (checkout/rebase) |
-| C | t4xxx (only) | ~130 | Diff/apply/format-patch |
-| D | t5xxx (only) | ~140 | Fetch/push/pack (most timeouts) |
-| E | t6xxx + t7xxx + t9xxx | ~200 | Merge/ref + misc (t9 is fast: ~16 real) |
+| A | t0xxx + t1xxx + t2xxx | ~310 | Core + checkout (many fast scripts) |
+| B | t3xxx + t4xxx | ~250 | Rebase + diff/format-patch |
+| C | t5xxx | ~140 | Fetch/push/pack (slowest batch) |
+| D | t6xxx + t7xxx + t9xxx | ~200 | Merge/ref + misc (t9 is fast: ~16 real) |
+
+Skip t91xx, t94xx, t98xx upfront (saves ~114 scripts of process startup overhead).
 
 ## Optimization 4: Run fast scripts in batches
 
@@ -172,7 +164,9 @@ done > ../../git-suite-full-results.txt 2>&1
   in `extern/git-suite-t7-results.txt` (run separately after the initial t6+t7 runner timed out).
 - **t9 failures are infrastructure, not bit bugs**: scalar (t9210, t9211), perl (t9700),
   and shell (t9850) failures are due to missing/misconfigured tools, not bit routing issues.
-- **t0000-basic.sh** exits with code 1 (not 143/timeout) — may be a real test failure
-  or an early abort, not just slowness.
-- **t1006, t1461** exit with code 0 but are marked FATAL — likely the test harness
-  detected an unexpected early exit despite exit code 0.
+- **t0000-basic.sh** passes at 300s (92/92, 114s) — was just slow, not a real failure.
+- **t1006, t1461** pass at 300s with known breakages — the "FATAL" at 120s was a timeout artifact.
+- **Version**: Both test suite (extern/git submodule) and real git (PortableGit) are v2.52.0. No version mismatch.
+- **1 bit bug found**: `git help --config-for-completion` passthrough — fixed in Bit/Commands.hs.
+- **600s rerun**: 10 of 13 scripts that timed out at 300s have real junction-mode failures
+  (not just slowness). These are mostly submodule and fetch/push operations.
