@@ -10,7 +10,7 @@ Based on the full 1028-script run (2026-02-24, updated 2026-02-25 with 300s/600s
 | Additionally passed at 300s | 44 | 4% |
 | Additionally passed at 600s | 4 (t1013, t3305, t5510¹, t5572) | <1% |
 | Still timeout at 600s | 3 (t0027, t1092, t1517) | <1% |
-| Junction-mode failures at 600s | 6 | <1% |
+| Junction-mode failures at 600s | 5 (+ 1 intermittent) | <1% |
 | Infrastructure failures | 5 | <1% |
 | Skipped (missing prereqs) | 145 | 14% |
 | Known breakage only | 22 | 2% |
@@ -65,13 +65,14 @@ Don't include these in pass/fail counts for routine runs — they need code fixe
 SKIP_TIMEOUT="t0027|t1092|t1517"
 
 # Junction-mode failures at 600s (not slowness — real test failures)
-SKIP_JUNCTION="t2013|t3432|t5516|t6423|t7112|t7610"
+SKIP_JUNCTION="t2013|t5516|t6423|t7112|t7610"
+# t3432 is intermittent (passes in some runs, 14/219 fail in others)
 ```
 
 These failure patterns cluster around:
 - **Submodule operations** (t2013, t7112): junction-mode git_test_func failures
 - **Fetch/push** (t5516): 110/123 failures — remote transport handling
-- **Merge/rebase** (t3432, t6423): rename directory detection issues
+- **Merge rename** (t6423): rename directory detection issues
 - **Mergetool** (t7610): tool invocation routing issues
 
 ¹ t5510-fetch passes 204/207 (3 minor failures). t5572-pull-submodule passes all 60 non-KB tests.
@@ -170,7 +171,9 @@ done > ../../git-suite-full-results.txt 2>&1
 - **t1006, t1461** pass at 300s with known breakages — the "FATAL" at 120s was a timeout artifact.
 - **Version**: Both test suite (extern/git submodule) and real git (PortableGit) are v2.52.0. No version mismatch.
 - **1 bit bug found**: `git help --config-for-completion` passthrough — fixed in Bit/Commands.hs.
-- **600s rerun**: Of 13 scripts that timed out at 300s: 4 pass (t1013, t3305, t5510 nearly, t5572),
-  3 still timeout (t0027, t1092, t1517), 6 have junction-mode failures.
+- **600s rerun**: Of 13 scripts that timed out at 300s: 5 pass or nearly pass (t1013, t3305, t3432,
+  t5510, t5572), 3 still timeout (t0027, t1092, t1517), 5 have consistent junction-mode failures.
+- **Run variability**: Parallel runs introduce contention — some scripts fail in parallel but
+  pass sequentially (t1013), others are intermittent (t3432). Use sequential runs for authoritative results.
 - **Trash directory cleanup**: Always remove `trash directory.*` dirs between runs to avoid
   "Device or resource busy" bail-outs when scripts share the same test directory names.
