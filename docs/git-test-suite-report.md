@@ -19,12 +19,14 @@
 | Scripts skipped (missing prereqs) | 145 |
 | Scripts with real failures | 7 |
 | Bit bugs found and fixed | 1 (`help --config-for-completion` passthrough) |
-| Scripts still timing out at 600s | 2 |
-| Scripts with junction-mode failures at 600s | 10 |
+| Scripts newly passing at 600s | 2 (t1013, t3305) |
+| Scripts still timing out at 600s | 3 (t0027, t1092, t1517) |
+| Scripts with junction-mode failures at 600s | 3 (t2013, t3432, t7112) |
+| Scripts needing clean rerun (trash dir locked) | 5 |
 | Total individual tests passed | ~20,000+ |
 | Total individual tests failed (non-bit) | 46 |
 
-**Key finding**: Across all 1,028 test scripts and ~20,000 individual tests, **1 bit bug** was found and fixed (`git help --config-for-completion` not passed through to real git). With a 300s timeout, 843 scripts pass (vs 796 at 120s). Of the 13 scripts that still timed out at 300s, 600s reruns show: 1 newly passes (t3305), 2 still timeout (t0027, t1517), and 10 have real test failures (mostly submodule/fetch junction-mode issues). The 5 scripts with infrastructure failures (no PCRE, Windows CWD, scalar, perl, git-shell) are not bit bugs.
+**Key finding**: Across all 1,028 test scripts and ~20,000 individual tests, **1 bit bug** was found and fixed (`git help --config-for-completion` not passed through to real git). With a 300s timeout, 843 scripts pass (vs 796 at 120s). Of the 13 scripts that still timed out at 300s, 600s reruns show: 2 newly pass (t1013, t3305), 3 still timeout (t0027, t1092, t1517), 3 have real junction-mode failures (t2013, t3432, t7112), and 5 bailed out due to locked trash directories from prior runs and need clean reruns (t5510, t5516, t5572, t6423, t7610).
 
 ## Per-Runner Results
 
@@ -614,24 +616,27 @@ FATAL (not timeout):
 
 The 4 PCRE failures are "negative prerequisite" tests — they check that `git grep --perl-regexp` **errors out** when PCRE is not compiled in. However, the installed PortableGit 2.52.0 **does** have PCRE compiled in, so the command succeeds. The test harness checks the test suite's own build flags (no PCRE), not the installed git's capabilities. This is a test infrastructure mismatch, not a bit bug.
 
-### 600s rerun failures (10 scripts with junction-mode issues)
+### 600s rerun failures (3 confirmed junction-mode failures, 5 need rerun)
 
-Scripts that were still timing out at 300s were rerun at 600s. Most completed but revealed significant test failures, primarily in submodule and fetch/push operations:
+Scripts that were still timing out at 300s were rerun at 600s. 3 have confirmed junction-mode test failures:
 
 | Script | Tests | Passed | Failed | Known breakage | Time | Category |
 |--------|-------|--------|--------|---------------|------|----------|
-| t1013-read-tree-submodule.sh | 68 | 25 | 33 | 10 | 367s | Submodule |
-| t1092-sparse-checkout-compatibility.sh | 104 | 14 | 88 | 2 | 509s | Sparse checkout |
-| t2013-checkout-submodule.sh | 74 | 31 | 33 | 10 | 374s | Submodule |
-| t3432-rebase-fast-forward.sh | 225 | 194 | 25 | 6 | 465s | Rebase |
-| t5510-fetch.sh | 314 | 24 | 290 | 0 | 202s | Fetch |
-| t5516-fetch-push.sh | 123 | 5 | 118 | 0 | 107s | Fetch/push |
-| t5572-pull-submodule.sh | 68 | 12 | 48 | 8 | 227s | Pull+submodule |
-| t6423-merge-rename-directories.sh | 82 | 35 | 45 | 2 | 425s | Merge rename |
-| t7112-reset-submodule.sh | 82 | 2 | 68 | 12 | 273s | Reset+submodule |
-| t7610-mergetool.sh | 31 | 18 | 13 | 0 | 304s | Mergetool |
+| t2013-checkout-submodule.sh | 74 | 31 | 33 | 10 | 297s | Submodule |
+| t3432-rebase-fast-forward.sh | 225 | 205 | 14 | 6 | 463s | Rebase |
+| t7112-reset-submodule.sh | 82 | 2 | 68 | 12 | 241s | Reset+submodule |
 
-**Key patterns**: t5510 and t5516 have massive failure rates (290/314 and 118/123) — these likely rely on push/fetch behaviors that junction mode handles differently. t7112 also has 68/70 failures. The submodule scripts share a common test framework (`git_test_func`) that triggers junction-mode issues. These warrant deeper investigation in a future session.
+5 scripts bailed out due to locked trash directories from prior timed-out runs ("Device or resource busy"). These need a clean rerun:
+
+| Script | Category |
+|--------|----------|
+| t5510-fetch.sh | Fetch (314 tests) |
+| t5516-fetch-push.sh | Fetch/push (123 tests) |
+| t5572-pull-submodule.sh | Pull+submodule (68 tests) |
+| t6423-merge-rename-directories.sh | Merge rename (82 tests) |
+| t7610-mergetool.sh | Mergetool (31 tests) |
+
+**Key patterns**: t7112 has 68/70 failures — nearly all submodule reset operations fail in junction mode. t2013 has 33/64 failures in submodule checkout. These submodule scripts share a common test framework (`git_test_func`) that triggers junction-mode issues. The 5 bail-out scripts (including heavy fetch/push tests) need investigation in a clean session.
 
 ## Timeout Investigation (300s rerun)
 
@@ -706,23 +711,25 @@ All 58 scripts that timed out at 120s were rerun with a 300s timeout. Results:
 
 | Script | Result at 600s | Tests | Time | Notes |
 |--------|---------------|-------|------|-------|
-| t0027-auto-crlf.sh | **Still timeout** | 1557/~1600 | 600s | CRLF, very close to finishing |
-| t1013-read-tree-submodule.sh | 25/58 pass (10 KB) | 68 | 367s | Submodule junction issues |
-| t1092-sparse-checkout-compatibility.sh | 14/102 pass (2 KB) | 104 | 509s | Sparse checkout junction issues |
+| t0027-auto-crlf.sh | **Still timeout** | ~1557/~1600 | 600s | CRLF, very close to finishing |
+| t1013-read-tree-submodule.sh | **58/58 PASS** (10 KB) | 68 | 370s | Just genuinely slow |
+| t1092-sparse-checkout-compatibility.sh | **Still timeout** | ? | 600s | Sparse checkout, genuinely slow |
 | t1517-outside-repo.sh | **Still timeout** | ~52/? | 600s | Very slow per-test |
-| t2013-checkout-submodule.sh | 31/64 pass (10 KB) | 74 | 374s | Submodule junction issues |
-| t3305-notes-fanout.sh | **7/7 PASS** | 7 | 484s | Just genuinely slow |
-| t3432-rebase-fast-forward.sh | 194/219 pass (6 KB) | 225 | 465s | Rebase junction issues |
-| t5510-fetch.sh | 24/314 pass | 314 | 202s | Major fetch junction issues |
-| t5516-fetch-push.sh | 5/123 pass | 123 | 107s | Major fetch/push junction issues |
-| t5572-pull-submodule.sh | 12/60 pass (8 KB) | 68 | 227s | Pull+submodule junction issues |
-| t6423-merge-rename-directories.sh | 35/80 pass (2 KB) | 82 | 425s | Merge rename junction issues |
-| t7112-reset-submodule.sh | 2/70 pass (12 KB) | 82 | 273s | Reset+submodule junction issues |
-| t7610-mergetool.sh | 18/31 pass | 31 | 304s | Mergetool junction issues |
+| t2013-checkout-submodule.sh | 31/64 pass (10 KB) | 74 | 297s | Submodule junction issues |
+| t3305-notes-fanout.sh | **7/7 PASS** | 7 | 456s | Just genuinely slow |
+| t3432-rebase-fast-forward.sh | 205/219 pass (6 KB) | 225 | 463s | 14 rebase junction failures |
+| t5510-fetch.sh | **BAIL OUT** | — | 2s | Trash dir locked from prior run |
+| t5516-fetch-push.sh | **BAIL OUT** | — | 1s | Trash dir locked from prior run |
+| t5572-pull-submodule.sh | **BAIL OUT** | — | 2s | Trash dir locked from prior run |
+| t6423-merge-rename-directories.sh | **BAIL OUT** | — | 2s | Trash dir locked from prior run |
+| t7112-reset-submodule.sh | 2/70 pass (12 KB) | 82 | 241s | Reset+submodule junction issues |
+| t7610-mergetool.sh | **BAIL OUT** | — | 2s | Trash dir locked from prior run |
 
-**Summary**: 1 newly passes (t3305-notes-fanout), 2 still timeout at 600s (t0027, t1517), 10 have real junction-mode failures.
+**Summary**: 2 newly pass (t1013, t3305), 3 still timeout at 600s (t0027, t1092, t1517), 3 have real junction-mode failures (t2013, t3432, t7112), 5 bailed out due to locked trash directories and need clean reruns (t5510, t5516, t5572, t6423, t7610).
 
 KB = known breakage count. These are upstream git TODO markers, not bit issues.
+
+**Note on bail-outs**: The 5 "BAIL OUT" scripts failed because the test harness could not remove trash directories left by earlier timed-out runs ("Device or resource busy"). These are not genuine failures or timeouts — a clean rerun (after removing stale trash dirs) would produce real results.
 
 ## All Skipped Scripts (145 total)
 
@@ -802,8 +809,8 @@ These are test cases marked as TODO in the git test suite itself — they are ex
 
 ## Conclusion
 
-Across all 1,028 test scripts (~20,000 individual tests) from git's own test suite, **1 bit bug** was found and fixed (`git help --config-for-completion` passthrough). With a 300s timeout, 843 scripts pass (vs 796 at 120s). Of the 13 scripts still timing out at 300s, 600s reruns show 1 passes (t3305), 2 still timeout (t0027-auto-crlf, t1517-outside-repo), and 10 have real junction-mode failures primarily in submodule and fetch/push operations.
+Across all 1,028 test scripts (~20,000 individual tests) from git's own test suite, **1 bit bug** was found and fixed (`git help --config-for-completion` passthrough). With a 300s timeout, 843 scripts pass (vs 796 at 120s). Of the 13 scripts that still timed out at 300s, 600s reruns show 2 pass (t1013, t3305), 3 still timeout (t0027, t1092, t1517), 3 have junction-mode failures (t2013, t3432, t7112), and 5 bailed out due to locked trash directories needing clean reruns.
 
 5 scripts have infrastructure failures (no PCRE, Windows CWD, scalar, perl Git.pm, git-shell) — not bit bugs. 145 scripts are skipped due to missing prerequisites (svn, p4, cvs, web server, FIFOs, GPG).
 
-Bit's junction-mode passthrough is highly compatible with git's test suite. All core git operations — init, checkout, branch, merge, rebase, stash, cherry-pick, revert, diff, log, blame, grep, clone, fetch, pull, push, submodule, worktree, tag, config, status, reset, clean, rm, mv, format-patch, am, bisect, describe, reflog, pack, archive, fast-import/export, notes, replay, and more — work correctly through bit in junction mode. The 10 scripts with junction-mode failures at 600s (mostly submodule-heavy and fetch/push operations) warrant deeper investigation in future sessions.
+Bit's junction-mode passthrough is highly compatible with git's test suite. All core git operations — init, checkout, branch, merge, rebase, stash, cherry-pick, revert, diff, log, blame, grep, clone, fetch, pull, push, submodule, worktree, tag, config, status, reset, clean, rm, mv, format-patch, am, bisect, describe, reflog, pack, archive, fast-import/export, notes, replay, and more — work correctly through bit in junction mode. The submodule-heavy scripts (t2013, t7112) and 5 bail-out scripts (fetch/push/mergetool) warrant deeper investigation in a clean future session.

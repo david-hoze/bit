@@ -8,9 +8,10 @@ Based on the full 1028-script run (2026-02-24, updated 2026-02-25 with 300s/600s
 |----------|-------|-----------|
 | Passed at 120s | 796 | 77% |
 | Additionally passed at 300s | 44 | 4% |
-| Additionally passed at 600s | 1 (t3305) | <1% |
-| Still timeout at 600s | 2 | <1% |
-| Junction-mode failures at 600s | 10 | 1% |
+| Additionally passed at 600s | 2 (t1013, t3305) | <1% |
+| Still timeout at 600s | 3 (t0027, t1092, t1517) | <1% |
+| Junction-mode failures at 600s | 3 (t2013, t3432, t7112) | <1% |
+| Bail-out (need clean rerun) | 5 | <1% |
 | Infrastructure failures | 5 | <1% |
 | Skipped (missing prereqs) | 145 | 14% |
 | Known breakage only | 22 | 2% |
@@ -62,10 +63,13 @@ Don't include these in pass/fail counts for routine runs — they need code fixe
 
 ```bash
 # Always timeout (need >600s or are genuinely hanging)
-SKIP_TIMEOUT="t0027|t1517"
+SKIP_TIMEOUT="t0027|t1092|t1517"
 
 # Junction-mode failures at 600s (not slowness — real test failures)
-SKIP_JUNCTION="t1013|t1092|t2013|t3432|t5510|t5516|t5572|t6423|t7112|t7610"
+SKIP_JUNCTION="t2013|t3432|t7112"
+
+# Need clean rerun (bailed out on locked trash dirs from prior timed-out runs)
+NEED_RERUN="t5510|t5516|t5572|t6423|t7610"
 ```
 
 These failure patterns cluster around:
