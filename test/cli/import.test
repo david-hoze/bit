@@ -37,11 +37,11 @@ if exist "test\cli\output\work_import\.bit\" (echo bit-exists) else (echo bit-mi
 bit-exists
 >>>= 0
 
-# ---- Verify .bit/index/.git exists ----
-if exist "test\cli\output\work_import\.bit\index\.git\" (echo index-git-exists) else (echo index-git-missing)
+# ---- Verify .git exists at root (hybrid layout: real dir) ----
+if exist "test\cli\output\work_import\.git\HEAD" (echo root-git-exists) else (echo root-git-missing)
 <<<
 >>>
-index-git-exists
+root-git-exists
 >>>= 0
 
 # ---- Verify git history is preserved ----
@@ -88,8 +88,8 @@ set "BIT_GIT_JUNCTION=1" & bit import test\cli\output\work_import_ext
 >>> /Imported git repository/
 >>>= 0
 
-# ---- Verify the external import worked ----
-if exist "test\cli\output\work_import_ext\.bit\index\.git\" (echo ext-ok) else (echo ext-fail)
+# ---- Verify the external import worked (hybrid layout: .git at root) ----
+if exist "test\cli\output\work_import_ext\.git\HEAD" (echo ext-ok) else (echo ext-fail)
 <<<
 >>>
 ext-ok

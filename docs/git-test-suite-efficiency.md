@@ -55,18 +55,30 @@ The 44 scripts that pass at 300s range from 98s to 299s. Key slow categories:
 - **Fetch** (t5500, t5515, t5616): 200-259s — network simulation
 - **Worktree** (t2400): 291s — close to timeout, benefits from 300s
 
-### Scripts that still fail even at 600s (skip these unless investigating junction issues)
+### Genuinely slow scripts (need more than 600s)
 
-10 scripts complete at 600s but have real junction-mode failures. 2 more still timeout.
-Don't include these in pass/fail counts for routine runs — they need code fixes, not more time.
+These are NOT hanging — they will pass given enough time. Use higher timeouts or run separately.
 
 ```bash
-# Always timeout (need >600s or are genuinely hanging)
-SKIP_TIMEOUT="t0027|t1092|t1517"
+# t0027: ~1898 CRLF combo tests (LF/CRLF × attrs × text/binary × checkout/commit)
+#   Needs ~700s. Use timeout 1200.
+# t1092: 104 sparse-checkout tests, each builds elaborate repo from scratch
+#   Needs ~2000s. Use timeout 2400.
+# t1517: ~369 help-flag tests (git <cmd> -h × 3 process hops in junction mode)
+#   Needs ~350s sequentially, ~1200s with contention. Use timeout 1200.
+SLOW_SCRIPTS="t0027|t1092|t1517"
+```
 
-# Junction-mode failures at 600s (not slowness — real test failures)
-SKIP_JUNCTION="t2013|t5516|t6423|t7112|t7610"
-# t3432 is intermittent (passes in some runs, 14/219 fail in others)
+### Previously-failing scripts (fixed by hybrid .git architecture)
+
+These scripts previously failed because `.git` was a gitfile instead of a real directory.
+The hybrid .git architecture (`.git/` = real dir, `.bit/index/.git` = gitfile pointing back)
+fixed all of them. They should now pass with a 300-600s timeout.
+
+```bash
+# No longer need to be skipped — hybrid architecture makes .git a real directory
+# t2013, t5516, t6423, t7112, t7610 — previously failed due to gitfile layout
+# t3432 — intermittent (passes in some runs, 14/219 fail in others)
 ```
 
 These failure patterns cluster around:

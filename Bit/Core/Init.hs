@@ -105,9 +105,15 @@ initializeRepoAt targetDir opts = do
     let isReinitSgdir = not isFreshInit && mAbsSgdir /= Nothing
     when isReinitSgdir $ do
         let gitPath = targetDir </> ".git"
-        gitIsJunction <- Platform.doesDirectoryExist gitPath
-        when gitIsJunction $ do
-            -- Resolve the actual git dir through .bit/index
+        gitIsDir <- Platform.doesDirectoryExist gitPath
+        -- With hybrid layout, .git is already a real directory — no
+        -- normalization needed. git init --separate-git-dir handles the
+        -- conversion natively. Only normalize if .git is a junction/gitfile
+        -- from the old layout (where .bit/index/.git was the real dir).
+        indexIsDir <- Platform.doesDirectoryExist targetBitGitDir
+        when (gitIsDir && indexIsDir) $ do
+            -- Old layout: .git is a junction pointing to .bit/index/.git
+            -- Normalize to gitfile so git can update it.
             (_, rawDir, _) <- Git.runGitAt targetBitIndexPath
                 ["rev-parse", "--absolute-git-dir"]
             let currentGitDir = filter (\c -> c /= '\n' && c /= '\r') rawDir
@@ -218,11 +224,36 @@ initializeRepoAt targetDir opts = do
                         -- gitlink file: .git as FILE pointing to sgdir
                         atomicWriteFileStr (targetDir </> ".git")
                             ("gitdir: " ++ toPosix sgdir ++ "\n")
-                    Nothing ->
+                    Nothing -> do
                         -- 8. Create .git junction for test compatibility (BIT_GIT_JUNCTION=1).
                         -- Points <targetDir>/.git -> <targetDir>/.bit/index/.git so git's
                         -- repo discovery works without -C override.
                         createGitJunction targetDir targetBitGitDir
+
+                        -- 8a. In junction mode, exclude .bit/ from git ls-files -o.
+                        -- The .bit/ directory contains bit metadata (config, cas,
+                        -- devices, remotes) that lives alongside .git in the working
+                        -- tree. Without this exclusion, git ls-files --others lists
+                        -- .bit/config etc. as untracked files, breaking tests that
+                        -- count untracked files after merge operations.
+                        mJunction <- lookupEnv "BIT_GIT_JUNCTION"
+                        let jEnabled = case mJunction of
+                                Just v  -> filter (not . isSpace) v == "1"
+                                Nothing -> False
+                        when jEnabled $ do
+                            -- With hybrid layout, .git is at repo root (real dir),
+                            -- not at .bit/index/.git (which is now a gitfile).
+                            -- Only modify info/exclude if it already exists (created
+                            -- by git's template). Don't create it — tests like
+                            -- t0001.17 (--template= blank) expect it to be absent.
+                            let gitDir = targetDir </> ".git"
+                            let excludeFile = gitDir </> "info" </> "exclude"
+                            excludeExists <- Platform.doesFileExist excludeFile
+                            when excludeExists $ do
+                                content <- readFile excludeFile
+                                let hasExclude = any (== ".bit") (lines content)
+                                unless hasExclude $
+                                    appendFile excludeFile "\n.bit\n"
 
             -- 9. Re-init with --separate-git-dir: git renamed the old gitdir to
             -- sgdir. Recreate .bit/index/.git as a gitlink so future
@@ -300,11 +331,20 @@ removeGitPath path = do
     when (isFile && not isDir) $
         Dir.removeFile path
 
--- | When BIT_GIT_JUNCTION=1, create a .git gitfile pointing to
--- @\<dir\>/.bit/index/.git@ (if the target exists and the link doesn't).
--- Uses a gitfile ("gitdir: <path>") instead of a directory junction because
--- junctions cause "not a valid object" errors with git stash and other
--- commands that create temporary index files on Windows.
+-- | Hybrid .git architecture for junction mode (BIT_GIT_JUNCTION=1).
+--
+-- Moves the real .git directory from .bit/index/.git/ to the repo root,
+-- making .git a real directory that passes all git test expectations
+-- (mkdir .git/hooks, cp -r .git/modules, etc.). Then writes a gitfile at
+-- .bit/index/.git pointing back ("gitdir: ../../.git") so that
+-- @git -C .bit/index@ still discovers the repository.
+--
+-- Layout after this function runs:
+--
+-- @
+--   repo/.git/              ← real git dir (HEAD, config, objects/, refs/)
+--   repo/.bit/index/.git   ← gitfile: "gitdir: ../../.git"
+-- @
 createGitJunction :: FilePath -> FilePath -> IO ()
 createGitJunction targetDir targetBitGitDir = do
     mJunction <- lookupEnv "BIT_GIT_JUNCTION"
@@ -313,17 +353,17 @@ createGitJunction targetDir targetBitGitDir = do
             Just v  -> filter (not . isSpace) v == "1"
             Nothing -> False
     when enabled $ do
-        let link = targetDir </> ".git"
-        linkExists <- Platform.doesDirectoryExist link
-        fileExists <- Platform.doesFileExist link
+        let rootGit = targetDir </> ".git"
+        rootIsDir <- Platform.doesDirectoryExist rootGit
+        rootIsFile <- Platform.doesFileExist rootGit
         targetExists <- Platform.doesDirectoryExist targetBitGitDir
-        when (targetExists && not linkExists && not fileExists) $ do
-            absTarget <- Dir.makeAbsolute targetBitGitDir
-            -- Write a gitfile instead of creating a junction.
-            -- Git natively supports "gitdir: <path>" files for linked worktrees
-            -- and --separate-git-dir. This works with all git operations including
-            -- stash, unlike NTFS junctions which cause object lookup failures.
-            atomicWriteFileStr link ("gitdir: " ++ toPosix absTarget ++ "\n")
+        -- Only act if .bit/index/.git is the real dir and .git at root doesn't exist
+        when (targetExists && not rootIsDir && not rootIsFile) $ do
+            -- Move the real .git dir from .bit/index/.git to repo root
+            Dir.renameDirectory targetBitGitDir rootGit
+            -- Write gitfile at .bit/index/.git pointing back to ../../.git
+            absRootGit <- Dir.makeAbsolute rootGit
+            atomicWriteFileStr targetBitGitDir ("gitdir: " ++ toPosix absRootGit ++ "\n")
 
 -- | Initialize a bit repository at a remote filesystem location.
 -- Typed wrapper around 'initializeRepoAt' that accepts 'RemotePath'

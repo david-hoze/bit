@@ -216,10 +216,19 @@ handleDashC dir rest = do
             runCommand rest
         else Git.runGitRawAt dir rest >>= exitWith
 
--- | Commands that only bit understands (git doesn't have them).
+-- | Commands that must go through bit even in junction mode.
 -- Used to bypass the junction early-exit so these still go through bit.
+-- "init" is here deliberately: even in junction mode, `git init` must create
+-- a .bit repo. The hybrid .git architecture (see createGitJunction) ensures
+-- .git is a real directory at repo root, so tests that do `mkdir .git/hooks`
+-- or `cp -r .git/modules` work correctly. .bit/index/.git is a gitfile
+-- pointing back to ../../.git, so `git -C .bit/index` still finds the repo.
 isBitOnlyCommand :: [String] -> Bool
-isBitOnlyCommand args = commandKey (filter (`notElem` ["-h", "--help", "--sequential"]) args) `elem` bitOnlyCommands
+isBitOnlyCommand args =
+    let stripped = filter (`notElem` ["-h", "--help", "--sequential"]) args
+        -- Peel global flags like -c key=val that appear before the command
+        (_, coreArgs) = peelGitGlobalFlags stripped
+    in commandKey coreArgs `elem` bitOnlyCommands
   where
     bitOnlyCommands = ["init", "export", "import", "become-git", "become-bit"]
 

@@ -63,13 +63,14 @@ cd test\cli\output\work_init_nested\parent\sibling && dir /b .bit
 >>>= 0
 
 # ======================================================================
-# TEST: BIT_GIT_JUNCTION creates .git gitfile
+# TEST: BIT_GIT_JUNCTION creates hybrid .git layout
 # ======================================================================
 
-# With BIT_GIT_JUNCTION=1, init should create a .git gitfile pointing to .bit/index/.git.
-set BIT_GIT_JUNCTION=1 & cd test\cli\output\work_init_nested & bit init junctiontest & type junctiontest\.git
+# With BIT_GIT_JUNCTION=1, init should create .git as a real directory at root
+# and .bit/index/.git as a gitfile pointing back to ../../.git.
+set BIT_GIT_JUNCTION=1 & cd test\cli\output\work_init_nested & bit init junctiontest & if exist junctiontest\.git\HEAD (echo hybrid-ok) else (echo hybrid-fail)
 <<<
->>> /gitdir: /
+>>> /hybrid-ok/
 >>>= 0
 
 # ======================================================================
