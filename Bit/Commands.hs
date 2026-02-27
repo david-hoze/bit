@@ -47,9 +47,9 @@ run = do
     case args of
         []               -> Git.runGitGlobal [] >>= exitWith
         ["help"]         -> printMainHelp >> exitSuccess
-        ("help":flags)   | any ("--" `isPrefixOf`) flags -> Git.runGitGlobal args >>= exitWith
         ["help", cmd]    -> printCommandHelp cmd >> exitSuccess
         ["help", c1, c2] -> printCommandHelp (c1 ++ " " ++ c2) >> exitSuccess
+        ("help":flags)   | any ("--" `isPrefixOf`) flags -> Git.runGitGlobal args >>= exitWith
         ["-h"]           -> printMainHelp >> exitSuccess
         ["--help"]       -> printMainHelp >> exitSuccess
         _ | isGitGlobalFlag args -> Git.runGitGlobal args >>= exitWith

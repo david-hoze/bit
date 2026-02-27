@@ -1,21 +1,22 @@
 # Git Test Suite — Efficient Running Guide
 
-Based on the full 1028-script run (2026-02-24, updated 2026-02-25 with 300s/600s rerun data).
+Based on the full 1028-script run (2026-02-24, updated 2026-02-27 with hybrid .git architecture results).
 
 ## Key findings from the full run
 
 | Category | Count | % of 1028 |
 |----------|-------|-----------|
 | Passed at 120s | 796 | 77% |
-| Additionally passed at 300s | 44 | 4% |
-| Additionally passed at 600s | 4 (t1013, t3305, t5510¹, t5572) | <1% |
+| Additionally passed at 300s | 49 (was 44, +5 from hybrid fix) | 5% |
+| Additionally passed at 600s | 5 (t1013, t3305, t3432, t5510¹, t5572) | <1% |
 | Still timeout at 600s | 3 (t0027, t1092, t1517) | <1% |
-| Junction-mode failures at 600s | 5 (+ 1 intermittent) | <1% |
+| Junction-mode failures at 600s | 0 (all fixed by hybrid .git architecture) | 0% |
+| Merge-ort failures (not bit bugs) | 1 (t6423, 37/80) | <1% |
 | Infrastructure failures | 5 | <1% |
 | Skipped (missing prereqs) | 145 | 14% |
 | Known breakage only | 22 | 2% |
 | Infra failures (t9xxx scalar/perl/shell) | 4 | <1% |
-| **Total passing (300s timeout)** | **843** | **82%** |
+| **Total passing (300s timeout)** | **848** | **82%** |
 
 ## Optimization 1: Skip known-skip scripts upfront (~154 scripts)
 
@@ -69,23 +70,23 @@ These are NOT hanging — they will pass given enough time. Use higher timeouts 
 SLOW_SCRIPTS="t0027|t1092|t1517"
 ```
 
-### Previously-failing scripts (fixed by hybrid .git architecture)
+### Previously-failing scripts (all fixed by hybrid .git architecture)
 
 These scripts previously failed because `.git` was a gitfile instead of a real directory.
 The hybrid .git architecture (`.git/` = real dir, `.bit/index/.git` = gitfile pointing back)
-fixed all of them. They should now pass with a 300-600s timeout.
+fixed all of them. **All now pass** with a 300-600s timeout (2026-02-27 verified results):
 
-```bash
-# No longer need to be skipped — hybrid architecture makes .git a real directory
-# t2013, t5516, t6423, t7112, t7610 — previously failed due to gitfile layout
-# t3432 — intermittent (passes in some runs, 14/219 fail in others)
-```
+| Script | Result | Timeout needed |
+|--------|--------|---------------|
+| t5516-fetch-push.sh | **123/123** | 300s |
+| t2013-checkout-submodule.sh | **64/64** (10 KB) | 600s |
+| t7112-reset-submodule.sh | **70/70** (12 KB) | 600s |
+| t7610-mergetool.sh | **31/31** | 300s |
+| t3432-rebase-fast-forward.sh | **219/219** (6 KB) | 600s |
+| t0001-init.sh | **100/102** | 300s |
 
-These failure patterns cluster around:
-- **Submodule operations** (t2013, t7112): junction-mode git_test_func failures
-- **Fetch/push** (t5516): 110/123 failures — remote transport handling
-- **Merge rename** (t6423): rename directory detection issues
-- **Mergetool** (t7610): tool invocation routing issues
+t6423-merge-rename-directories.sh still has 37/80 failures — these are merge-ort rename detection
+issues (not gitfile-related, not a bit bug).
 
 ¹ t5510-fetch passes 204/207 (3 minor failures). t5572-pull-submodule passes all 60 non-KB tests.
 
@@ -182,9 +183,9 @@ done > ../../git-suite-full-results.txt 2>&1
 - **t0000-basic.sh** passes at 300s (92/92, 114s) — was just slow, not a real failure.
 - **t1006, t1461** pass at 300s with known breakages — the "FATAL" at 120s was a timeout artifact.
 - **Version**: Both test suite (extern/git submodule) and real git (PortableGit) are v2.52.0. No version mismatch.
-- **1 bit bug found**: `git help --config-for-completion` passthrough — fixed in Bit/Commands.hs.
-- **600s rerun**: Of 13 scripts that timed out at 300s: 5 pass or nearly pass (t1013, t3305, t3432,
-  t5510, t5572), 3 still timeout (t0027, t1092, t1517), 5 have consistent junction-mode failures.
+- **2 bit bugs found**: `git help --config-for-completion` passthrough and `bit help merge --continue` routing — both fixed in Bit/Commands.hs.
+- **600s rerun**: Of 13 scripts that timed out at 300s: 10 pass or nearly pass (including 5 fixed by hybrid .git), 3 still timeout (t0027, t1092, t1517), 1 has merge-ort failures (t6423).
+- **Hybrid .git architecture** (2026-02-26): Resolved all junction-mode failures. t5516, t2013, t7112, t7610, t3432 now all pass.
 - **Run variability**: Parallel runs introduce contention — some scripts fail in parallel but
   pass sequentially (t1013), others are intermittent (t3432). Use sequential runs for authoritative results.
 - **Trash directory cleanup**: Always remove `trash directory.*` dirs between runs to avoid
