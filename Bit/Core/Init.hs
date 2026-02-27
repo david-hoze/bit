@@ -156,9 +156,12 @@ initializeRepoAt targetDir opts = do
                 void $ Git.spawnGit ["config", "--global", "--add", "safe.directory", safePath]
 
                 -- Default branch: only if no explicit --initial-branch/-b
+                -- Skip in junction mode — let git use its own configured default
+                mJunctionInit <- lookupEnv "BIT_GIT_JUNCTION"
+                let isJunction = mJunctionInit == Just "1"
                 let hasExplicitBranch = any (\f -> f == "-b"
                         || "--initial-branch" `isPrefixOf` f) (initGitFlags opts)
-                unless hasExplicitBranch $ do
+                unless (hasExplicitBranch || isJunction) $ do
                     void $ Git.runGitAt targetBitIndexPath ["config", "init.defaultBranch", "main"]
                     void $ Git.runGitAt targetBitIndexPath ["branch", "-m", "master", "main"]
 
