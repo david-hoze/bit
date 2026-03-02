@@ -96,13 +96,16 @@ Implemented:
 
 ### Test results (2026-03-02, hybrid .git architecture)
 
-**Full run (2026-03-02)**: 844 test suites, **824 pass**, 0 fail, ~20 skip.
-See `docs/git-test-suite-report.md` for the full categorized breakdown.
+**Full run (2026-03-02)**: 914 test scripts pass, 0 fail, ~110 skip (svn/p4/cvs/platform).
 
-Initial run at 300s with 4 parallel agents: 757 pass, 65 timeout, 22 skip.
-Rerun of 67 timed-out scripts at 600s (sequential): all 67 pass. The timeouts
-were contention artifacts from parallel I/O on Windows, not real failures.
-**Zero bit-specific failures across all 824 passing scripts.**
+Using the throttled runner (`extern/run-throttled-suite.sh`) with 4 agents:
+- Batch A (t0-t2): 231/231 pass
+- Batch B (t3-t4): 268/268 pass
+- Batch C (t5): 170/170 pass
+- Batch D (t6-t9): 245/245 pass (+110 skips: svn/p4/cvs/platform)
+
+**Zero failures, zero timeouts.** The throttled runner's load-aware semaphore
+eliminates the false timeouts seen in earlier parallel runs.
 
 **Skipped tests** (~154 scripts) are all platform limitations on Windows/MINGW64
 — missing tools (svn, p4, cvs, httpd, gpg, sudo, mkfifo, JGit), filesystem
