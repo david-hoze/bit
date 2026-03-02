@@ -40,6 +40,12 @@ run = do
     case mGitDir of
         Just d | not (null d) -> Git.runGitGlobal args >>= exitWith
         _ -> pure ()
+    -- In junction mode, pass through bit-only commands called with just
+    -- -h/--help (e.g. `git init -h` → exit 129). Non-bit-only commands
+    -- are handled by the junction early-exit in runCommand.
+    mJunction <- lookupEnv "BIT_GIT_JUNCTION"
+    when (mJunction == Just "1" && isBitOnlyHelpRequest args) $
+        Git.runGitHere (filter (/= "--sequential") args) >>= exitWith
     -- When --git-dir or --work-tree appears as a leading global flag,
     -- pass through to git directly (same logic as GIT_DIR env var).
     when (hasExplicitGitDir args) $
@@ -214,7 +220,24 @@ handleDashC dir rest = do
             absDir <- Dir.makeAbsolute dir
             Dir.setCurrentDirectory absDir
             runCommand rest
-        else Git.runGitRawAt dir rest >>= exitWith
+        else do
+            code <- Git.runGitRawAt dir rest
+            -- In junction mode, after re-init of a plain git repo (e.g. linked
+            -- worktree), re-add .bit to info/exclude. git recreates info/exclude
+            -- from template during re-init, losing the .bit entry we added.
+            mJunc <- lookupEnv "BIT_GIT_JUNCTION"
+            when (mJunc == Just "1" && code == ExitSuccess
+                  && not (null rest) && head rest == "init") $ do
+                (_, commonDir, _) <- Git.spawnGit
+                    ["-C", dir, "rev-parse", "--git-common-dir"]
+                let gitCommon = filter (\c -> c /= '\n' && c /= '\r') commonDir
+                let excludeFile = gitCommon </> "info" </> "exclude"
+                exExists <- Dir.doesFileExist excludeFile
+                when exExists $ do
+                    content <- readFile excludeFile
+                    unless (any (== ".bit") (lines content)) $
+                        appendFile excludeFile "\n.bit\n"
+            exitWith code
 
 -- | Commands that must go through bit even in junction mode.
 -- Used to bypass the junction early-exit so these still go through bit.
@@ -231,6 +254,19 @@ isBitOnlyCommand args =
     in commandKey coreArgs `elem` bitOnlyCommands
   where
     bitOnlyCommands = ["init", "export", "import", "become-git", "become-bit"]
+
+-- | True when args represent a bit-only command called with just -h/--help.
+-- In junction mode, `git init -h` should display git's usage (exit 129),
+-- not run bit's init handler. This detects that pattern.
+isBitOnlyHelpRequest :: [String] -> Bool
+isBitOnlyHelpRequest args =
+    isBitOnlyCommand args && hasOnlyHelp
+  where
+    hasOnlyHelp =
+        let (_, coreArgs) = peelGitGlobalFlags args
+        in case coreArgs of
+            (_cmd : rest) -> all (`elem` ["-h", "--help"]) rest && not (null rest)
+            _             -> False
 
 -- | Commands that bit handles natively (not aliases).
 -- Checks the first word of the command key, so multi-word commands like

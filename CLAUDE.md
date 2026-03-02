@@ -183,13 +183,35 @@ cd test/t && bash t0001-binary-add-commit.sh                   # Single test scr
 
 ### Git Test Suite
 - Consult `docs/git-test-suite.md` for setup, environment variables, and how the router works
+- Consult `docs/git-test-suite-efficiency.md` for batch splits, skip reference, and the throttled runner
 - One-time setup: `extern/git-shim/setup.sh` then `bit become-git --init`
-- **Always save results to a file** (avoids re-running expensive tests):
-```bash
-cd extern/git/t
-BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED=/path/to/extern/git-shim bash t0001-init.sh --verbose 2>&1 > ../../t0001-results-latest.txt
-```
-- Use `--run=N` to run a single test number
+- **Always use the throttled runner** (`extern/run-throttled-suite.sh`) — never raw for-loops.
+  It handles special timeouts, skip prefixes, load-aware throttling, trash cleanup, and result tracking.
+- **Full suite** — always use a team of 4 agents with the batch split from the efficiency guide.
+  Clean trash directories first, then spawn agents that each run the throttled runner:
+  ```
+  Agent A: cd extern && RESULTS_FILE=git-suite-batch-a.txt bash run-throttled-suite.sh t0*.sh t1*.sh t2*.sh
+  Agent B: cd extern && RESULTS_FILE=git-suite-batch-b.txt bash run-throttled-suite.sh t3*.sh t4*.sh
+  Agent C: cd extern && RESULTS_FILE=git-suite-batch-c.txt bash run-throttled-suite.sh t5*.sh
+  Agent D: cd extern && RESULTS_FILE=git-suite-batch-d.txt bash run-throttled-suite.sh t6*.sh t7*.sh t8*.sh t9*.sh
+  ```
+  The throttled runner's semaphore (`MAX_SLOTS=2`) ensures at most 2 heavy tests run concurrently
+  across all 4 agents, preventing I/O contention that causes false timeouts on Windows.
+  Lightweight tests (<25 test cases) run freely without throttling.
+- **Rerunning timeouts** — collect timed-out scripts from results files and rerun with 2 agents
+  (not 4 — all timeout scripts are heavy, so match agents to `MAX_SLOTS=2`):
+  ```
+  Agent 1: cd extern && DEFAULT_TIMEOUT=600 RESULTS_FILE=rerun-1.txt bash run-throttled-suite.sh <scripts...>
+  Agent 2: cd extern && DEFAULT_TIMEOUT=600 RESULTS_FILE=rerun-2.txt bash run-throttled-suite.sh <scripts...>
+  ```
+- **Single test** — run directly:
+  ```bash
+  cd extern/git/t
+  BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED=/c/Users/natanh/repos/bit/extern/git-shim \
+      bash t0001-init.sh --verbose 2>&1 | tee ../../t0001-results-latest.txt
+  ```
+- Use `--run=N` to run a single test number within a script
+- **Always save results to a file** (avoids re-running expensive tests)
 - Analyze results from the saved file, not by re-running
 
 ### Cloud Remote Tests

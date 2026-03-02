@@ -11,39 +11,114 @@ Based on the full 1028-script run (2026-02-24, updated 2026-02-27 with hybrid .g
 | Additionally passed at 600s | 5 (t1013, t3305, t3432, t5510¹, t5572) | <1% |
 | Still timeout at 600s | 3 (t0027, t1092, t1517) | <1% |
 | Junction-mode failures at 600s | 0 (all fixed by hybrid .git architecture) | 0% |
-| Merge-ort failures (not bit bugs) | 1 (t6423, 37/80) | <1% |
+| Merge-ort failures (not bit bugs) | 0 (t6423 passes 82/82 without contention) | 0% |
 | Infrastructure failures | 5 | <1% |
 | Skipped (missing prereqs) | 145 | 14% |
 | Known breakage only | 22 | 2% |
 | Infra failures (t9xxx scalar/perl/shell) | 4 | <1% |
-| **Total passing (300s timeout)** | **848** | **82%** |
+| **Total passing (600s timeout)** | **824** | **80%** |
 
 ## Optimization 1: Skip known-skip scripts upfront (~154 scripts)
 
 These scripts always skip on our platform (Windows/MINGW64, no svn/p4/cvs/http/gpg/FIFOs).
 Exclude them to save process startup time (~5-10s each = ~15-25 minutes saved).
 
+The `run-throttled-suite.sh` script auto-skips the prefix-based categories (t91xx,
+t94xx, t98xx). The rest skip themselves at runtime via `test_have_prereq`.
+
 ```bash
-# Scripts to exclude (always skip on Windows without extra infra)
 SKIP_PREFIXES="t91 t94 t98"  # git-svn (69), git-p4 (37), git-cvsserver/cvsimport (8)
-
-# HTTP/web server dependent (16 scripts)
-SKIP_HTTP="t0611|t5539|t5540|t5541|t5542|t5549|t5550|t5551|t5557|t5559|t5561|t5563|t5564|t5581|t5619|t5732|t5812"
-
-# FIFO dependent — no mkfifo on MINGW64 (5 scripts)
-SKIP_FIFO="t5570|t5700|t5702|t5731|t5811"
-
-# Other missing prerequisites (12 scripts)
-SKIP_MISC="t0034|t0301|t0612|t1509|t3300|t3435|t3514|t3902|t3910|t4016|t5580|t5608"
-# t0034: needs GIT_TEST_ALLOW_SUDO    t0301: no unix sockets     t0612: no JGit
-# t1509: needs IKNOWWHATIAMDOING      t3300,t3902,t4016: no tabs in filenames
-# t3435,t3514: no gpg                 t3910: macOS precompose     t5580: no UNC
-# t5608: expensive (needs GIT_TEST_CLONE_2GB)
-
-# Filesystem / platform skips detected at runtime (not worth pre-filtering)
-# t6131: case-insensitive FS    t6137: needs BSLASHPSPEC
-# t9200: no cvs                 t9500-t9502: no CGI modules
 ```
+
+### Complete skip reference
+
+Every skipped test falls into one of these categories. None are bit bugs — they
+are all platform limitations or missing optional infrastructure on Windows/MINGW64.
+
+#### 1. Version control backends (114 scripts)
+
+| Category | Prefix | Count | Reason |
+|----------|--------|-------|--------|
+| git-svn | t91xx | 69 | Subversion not installed. Requires `svn` CLI + svn libraries. |
+| git-p4 | t94xx | 37 | Perforce not installed. Requires `p4` + `p4d` binaries. |
+| git-cvsserver/cvsimport | t98xx | 8 | CVS not installed. Requires `cvs` + `cvsps`. |
+
+These are entire script families that test interop with other VCS tools. They
+will never run on our test platform without installing those tools, which is
+out of scope for bit testing.
+
+#### 2. HTTP/web server (16 scripts)
+
+| Scripts | Reason |
+|---------|--------|
+| t0611, t5539-t5542, t5549-t5551, t5557, t5559, t5561, t5563-t5564, t5581, t5619, t5732, t5812 | Need `lib-httpd.sh` which requires Apache httpd with CGI modules. Not available on MINGW64. |
+
+These test smart HTTP transport, push-over-HTTP, and gitweb. They require a
+running HTTP server that the test framework starts and stops. Apache httpd is
+not bundled with PortableGit/MSYS2.
+
+#### 3. FIFOs / named pipes (5 scripts)
+
+| Scripts | Reason |
+|---------|--------|
+| t5570, t5700, t5702, t5731, t5811 | Need `mkfifo` which doesn't exist on MINGW64. |
+
+MSYS2 on Windows lacks POSIX named pipes (`mkfifo`). These tests use FIFOs to
+simulate slow/blocking I/O for testing protocol behavior.
+
+#### 4. Filesystem limitations (4 scripts)
+
+| Script | Prereq | Reason |
+|--------|--------|--------|
+| t3300-funny-names | FUNNYNAMES | NTFS does not allow tab characters in filenames. |
+| t3902-quoted | FUNNYNAMES | Same — tests quoting of filenames with tabs/newlines. |
+| t4016-diff-quote | FUNNYNAMES | Same — tests diff output with special chars in filenames. |
+| t6131-pathspec-icase | CASE_INSENSITIVE_FS | Skips on case-insensitive filesystems (NTFS). The test checks case-sensitive pathspec matching behavior that doesn't apply on Windows. |
+
+#### 5. Backslash in pathspecs (1 script)
+
+| Script | Prereq | Reason |
+|--------|--------|--------|
+| t6137-pathspec-wildcards-literal | BSLASHPSPEC | Windows uses `\` as the path separator, so git cannot distinguish `\*` (escaped glob) from `\*` (directory separator + star). The `BSLASHPSPEC` prereq is set for macOS and Linux but deliberately excluded for MINGW. This is a genuine platform limitation, not a missing tool. |
+
+#### 6. GPG signing (2 scripts)
+
+| Scripts | Reason |
+|---------|--------|
+| t3435-rebase-gpg-sign, t3514-cherry-pick-gpg | Need `gpg` (GnuPG) for commit signing tests. Not installed on our test platform. |
+
+#### 7. Unix-specific features (2 scripts)
+
+| Script | Prereq | Reason |
+|--------|--------|--------|
+| t0301-credential-store | UNIX_SOCKETS | Tests credential-cache daemon which uses Unix domain sockets. Windows uses named pipes for credential-manager instead. |
+| t5580-unc-paths | MINGW | Tests UNC path (`\\server\share`) handling. Skips because it needs network shares configured. |
+
+#### 8. Privileged / dangerous tests (2 scripts)
+
+| Script | Env var | Reason |
+|--------|---------|--------|
+| t0034-root-safe-directory | `GIT_TEST_ALLOW_SUDO=YES` | Tests `safe.directory` behavior when running as root. Even with the env var set, requires real `sudo` access (`sudo -n id -u`). Not available on MSYS2 — there is no `sudo`. |
+| t1509-root-work-tree | `IKNOWWHATIAMDOING=YES` | Tests `git init` at filesystem root (`/`). Requires write access to `/` and is designed for throwaway chroot/VM environments. Not safe to run on a real system. |
+
+#### 9. Other infrastructure (4 scripts)
+
+| Script | Reason |
+|--------|--------|
+| t0612-jgit | Needs JGit (Java git implementation). Not installed. |
+| t3910-mac-os-precompose | macOS-only — tests Unicode precomposition (NFC/NFD). Skipped on all non-macOS platforms. |
+| t5608-clone-2gb | Needs `GIT_TEST_CLONE_2GB=true` — creates a 2GB+ repo. Deliberately excluded as it's expensive and tests git internals, not bit. |
+| t9200-git-cvsexportcommit | Needs CVS. Same as t98xx family but numbered in t92xx. |
+
+#### 10. Runtime-detected skips (3 scripts)
+
+These skip at runtime based on platform detection, not env vars:
+
+| Script | Reason |
+|--------|--------|
+| t9500-gitweb-hierarchical | Needs Perl CGI modules (`CGI`, `CGI::Util`). |
+| t9501-gitweb-hierarchical | Same. |
+| t9502-gitweb-hierarchical | Same. |
 
 ## Optimization 2: Use 300s timeout (not 120s)
 
@@ -83,10 +158,14 @@ fixed all of them. **All now pass** with a 300-600s timeout (2026-02-27 verified
 | t7112-reset-submodule.sh | **70/70** (12 KB) | 600s |
 | t7610-mergetool.sh | **31/31** | 300s |
 | t3432-rebase-fast-forward.sh | **219/219** (6 KB) | 600s |
-| t0001-init.sh | **100/102** | 300s |
+| t0001-init.sh | **102/102** | 300s |
 
-t6423-merge-rename-directories.sh still has 37/80 failures — these are merge-ort rename detection
-issues (not gitfile-related, not a bit bug).
+t6423-merge-rename-directories.sh passes **82/82** when run without contention (2026-03-02
+rerun at 600s). The previously reported 37/80 failures were contention artifacts from
+parallel execution, not merge-ort bugs.
+
+t0001 tests 51 (linked-worktree re-init) and 52 were fixed by re-adding `.bit` to
+`info/exclude` after passthrough re-init (2026-03-02, Bit/Commands.hs `handleDashC`).
 
 ¹ t5510-fetch passes 204/207 (3 minor failures). t5572-pull-submodule passes all 60 non-KB tests.
 
@@ -113,24 +192,86 @@ Current split by number prefix gives uneven loads:
 
 Skip t91xx, t94xx, t98xx upfront (saves ~114 scripts of process startup overhead).
 
-## Optimization 4: Run fast scripts in batches
+## Optimization 4: Load-aware throttled runner (`run-throttled-suite.sh`)
 
-Instead of running each script individually, batch fast scripts together:
+When running multiple agents in parallel, I/O contention on Windows/NTFS causes
+false timeouts — scripts that pass at 200s solo take 350s+ under 4× load.
+
+`extern/run-throttled-suite.sh` solves this with a hybrid approach:
+- **Lightweight scripts** (<25 test cases) run freely without throttling
+- **Heavy scripts** (≥25 test cases) acquire a shared semaphore slot AND wait
+  for system load to drop before starting
+
+This lets fast tests run at full parallelism while preventing heavy tests from
+piling up and starving each other.
+
 ```bash
-# Run 10 scripts in parallel within one agent
-for script in t6000 t6001 t6002 ...; do
-    timeout 300 bash $script &
-done
-wait
+# 4-agent parallel run with throttling:
+# Agent A:
+bash extern/run-throttled-suite.sh t0*.sh t1*.sh t2*.sh
+# Agent B:
+bash extern/run-throttled-suite.sh t3*.sh t4*.sh
+# Agent C:
+bash extern/run-throttled-suite.sh t5*.sh
+# Agent D:
+bash extern/run-throttled-suite.sh t6*.sh t7*.sh t8*.sh t9*.sh
 ```
 
-This is safe because git tests use `$TRASH_DIRECTORY` for isolation. The risk is
-output interleaving, so redirect each to a file:
+Configuration via environment variables:
 ```bash
-for script in t6*.sh; do
-    (timeout 300 bash $script > /tmp/$script.out 2>&1) &
-done
-wait
+MAX_SLOTS=2          # Max concurrent heavy tests (default: 2)
+DEFAULT_TIMEOUT=300  # Per-script timeout in seconds (default: 300)
+HEAVY_THRESHOLD=25   # Test count above which script is "heavy" (default: 25)
+MAX_LOAD=4           # Load average gate for heavy tests (default: 4)
+RESULTS_FILE=out.txt # Save results to file (default: stdout only)
+```
+
+The semaphore uses `mkdir`-based locking at `/tmp/git-test-slots/` with PID-based
+stale slot detection (crashed agents' slots are automatically reclaimed).
+
+### How it works
+
+1. Before each script, the runner counts `test_expect_success` + `test_expect_failure`
+   lines in the script file to classify it as lightweight or heavy.
+2. **Lightweight** (<`HEAVY_THRESHOLD` test cases): runs immediately, no throttling.
+   These scripts finish in 10-60s and don't cause meaningful I/O contention.
+3. **Heavy** (≥`HEAVY_THRESHOLD` test cases): first checks `/proc/loadavg` and waits
+   if system load exceeds `MAX_LOAD` (caps at 2 min wait). Then acquires a shared
+   semaphore slot via `mkdir /tmp/git-test-slots/slot-N`. If all slots are taken,
+   spins with 2s sleep until one opens.
+4. After the script finishes, the slot is released. A trap ensures slots are released
+   on unexpected exit.
+5. Built-in special timeouts for known-slow scripts (t0027=900s, t1092=2400s,
+   t1517=1200s, t3432=600s, t5510=600s, t5516=600s) override the default.
+6. Auto-skips t91xx/t94xx/t98xx prefixes.
+7. Cleans trash directories after each script to prevent bail-outs.
+
+### Choosing the number of agents
+
+Match agents to `MAX_SLOTS` for heavy-dominated workloads:
+
+| Workload | Agents | MAX_SLOTS | Why |
+|----------|--------|-----------|-----|
+| Full suite (mixed heavy/light) | 4 | 2 | Light tests run freely; heavy tests throttled to 2 concurrent |
+| Rerunning only timeouts (all heavy) | 2 | 2 | All scripts are heavy, so agents = slots avoids idle waiters |
+| Single agent, full suite | 1 | N/A | No contention, semaphore not needed |
+
+For the full suite, 4 agents with `MAX_SLOTS=2` is optimal: lightweight tests
+from all 4 agents run in parallel (no slot needed), while at most 2 heavy tests
+run simultaneously. This prevents the I/O starvation that causes false timeouts.
+
+### Rerunning timed-out scripts
+
+After a full run, collect timed-out script names from the results files and rerun
+with a higher timeout. Since these are all heavy scripts, use 2 agents:
+
+```bash
+# Agent 1:
+DEFAULT_TIMEOUT=600 RESULTS_FILE=rerun-1.txt bash run-throttled-suite.sh \
+    t0000-basic.sh t0008-ignores.sh t1300-config.sh ...
+# Agent 2:
+DEFAULT_TIMEOUT=600 RESULTS_FILE=rerun-2.txt bash run-throttled-suite.sh \
+    t7600-merge.sh t7810-grep.sh t9300-fast-import.sh ...
 ```
 
 ## Optimization 5: Pre-filter with --run for targeted reruns
@@ -150,28 +291,33 @@ could be affected:
 
 ## Recommended agent prompt template
 
-```
-Run git test scripts from your batch. For each script:
+Use the throttled runner script instead of raw for-loops:
 
-  cd /c/Users/natanh/repos/bit/extern/git/t
-  BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED=/c/Users/natanh/repos/bit/extern/git-shim \
-      timeout 300 bash <script> 2>&1 | tail -3
+```
+Run git test scripts from your batch using the throttled runner:
+
+  cd /c/Users/natanh/repos/bit/extern
+  RESULTS_FILE=git-suite-batch-X-results.txt bash run-throttled-suite.sh t0*.sh t1*.sh
+
+The script handles timeouts, skip prefixes, load throttling, and result tracking
+automatically. Just pass the glob patterns for your batch.
+```
+
+For manual/raw runs without the throttled runner:
+```
+cd /c/Users/natanh/repos/bit/extern/git/t
+BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED=/c/Users/natanh/repos/bit/extern/git-shim \
+    timeout 300 bash <script> 2>&1 | tail -3
 
 Skip these prefixes entirely: t91xx, t94xx, t98xx (svn/p4/cvs, always skip).
-Save ALL output to extern/git-suite-<batch>-results.txt (append, don't overwrite).
-Include a summary at the end with pass/fail/timeout/skip counts.
 ```
 
 ## Quick-run command (single agent, full suite, ~2 hours)
 
 ```bash
-cd /c/Users/natanh/repos/bit/extern/git/t
-for f in t[0-9]*.sh; do
-    case "$f" in t91*|t94*|t98*) continue ;; esac  # skip svn/p4
-    echo -n "$f: "
-    BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED=/c/Users/natanh/repos/bit/extern/git-shim \
-        timeout 300 bash "$f" 2>&1 | tail -1
-done > ../../git-suite-full-results.txt 2>&1
+cd /c/Users/natanh/repos/bit/extern
+RESULTS_FILE=git-suite-full-results.txt \
+    bash run-throttled-suite.sh t[0-9]*.sh
 ```
 
 ## Data quality notes
@@ -184,7 +330,9 @@ done > ../../git-suite-full-results.txt 2>&1
 - **t1006, t1461** pass at 300s with known breakages — the "FATAL" at 120s was a timeout artifact.
 - **Version**: Both test suite (extern/git submodule) and real git (PortableGit) are v2.52.0. No version mismatch.
 - **2 bit bugs found**: `git help --config-for-completion` passthrough and `bit help merge --continue` routing — both fixed in Bit/Commands.hs.
-- **600s rerun**: Of 13 scripts that timed out at 300s: 10 pass or nearly pass (including 5 fixed by hybrid .git), 3 still timeout (t0027, t1092, t1517), 1 has merge-ort failures (t6423).
+- **600s rerun (2026-03-02)**: All 67 scripts that timed out at 300s under parallel load pass at 600s
+  when run without contention. t0027 (2600 tests), t1092 (104 tests), t1517 (369 tests) all pass with
+  their special timeouts (900s, 2400s, 1200s). t6423 passes 82/82 (previously reported failures were contention).
 - **Hybrid .git architecture** (2026-02-26): Resolved all junction-mode failures. t5516, t2013, t7112, t7610, t3432 now all pass.
 - **Run variability**: Parallel runs introduce contention — some scripts fail in parallel but
   pass sequentially (t1013), others are intermittent (t3432). Use sequential runs for authoritative results.

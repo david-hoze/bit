@@ -19,7 +19,7 @@ import Control.Monad (unless, void, when)
 import qualified Bit.Git.Run as Git
 import System.Environment (lookupEnv)
 import System.Process (callCommand)
-import System.Exit (ExitCode(..))
+import System.Exit (ExitCode(..), exitWith)
 import System.IO (hPutStr, stderr)
 import Bit.Utils (atomicWriteFileStr, toPosix)
 import Bit.Path (RemotePath(..))
@@ -60,6 +60,42 @@ initializeBareRepoAt _dir = pure ()
 -- Returns the exit code from git init (or ExitSuccess if post-init setup succeeds).
 initializeRepoAt :: FilePath -> InitOptions -> IO ExitCode
 initializeRepoAt targetDir opts = do
+    -- In junction mode, if the target already has .git but no .bit, it's a
+    -- plain git repo (e.g. a linked worktree). Pass through to git for re-init
+    -- instead of creating a new .bit structure. This prevents bit from polluting
+    -- worktrees that don't belong to it (fixes t0001 test 51).
+    mJunctionEarly <- lookupEnv "BIT_GIT_JUNCTION"
+    when (mJunctionEarly == Just "1") $ do
+        hasGitAtRoot <- Platform.doesDirectoryExist (targetDir </> ".git")
+        hasGitFileAtRoot <- Platform.doesFileExist (targetDir </> ".git")
+        hasBitAtRoot <- Platform.doesDirectoryExist (targetDir </> ".bit")
+        hasBitFileAtRoot <- Platform.doesFileExist (targetDir </> ".bit")
+        let hasGit = hasGitAtRoot || hasGitFileAtRoot
+        let hasBit = hasBitAtRoot || hasBitFileAtRoot
+        when (hasGit && not hasBit) $ do
+            -- Plain git repo — pass through to git init directly
+            (code, out, err) <- Git.spawnGit $
+                ["-C", targetDir]
+                ++ initGitGlobalFlags opts
+                ++ ("init" : initGitFlags opts)
+            putStr out
+            hPutStr stderr err
+            -- Re-add .bit to info/exclude after re-init. git recreates
+            -- info/exclude from template, losing our .bit entry.
+            -- Use git-common-dir to find the shared .git/ (handles worktrees).
+            when (code == ExitSuccess) $ do
+                (_, commonDir, _) <- Git.spawnGit
+                    ["-C", targetDir, "rev-parse", "--git-common-dir"]
+                let gitCommon = filter (\c -> c /= '\n' && c /= '\r') commonDir
+                let excludeFile = gitCommon </> "info" </> "exclude"
+                excludeExists <- Platform.doesFileExist excludeFile
+                when excludeExists $ do
+                    content <- readFile excludeFile
+                    let hasExclude = any (== ".bit") (lines content)
+                    unless hasExclude $
+                        appendFile excludeFile "\n.bit\n"
+            exitWith code
+
     let separated = initSeparateGitDir opts
 
     -- For --separate-git-dir, compute absolute sgdir and put bit metadata there

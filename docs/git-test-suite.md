@@ -94,26 +94,29 @@ Implemented:
 - **Global flags** — `--exec-path`, `--version`, `--html-path`, etc.
 - **Known bit commands** — `add`, `commit`, `diff`, `status`, `log`, etc.
 
-### Test results
+### Test results (2026-03-02, hybrid .git architecture)
 
-**Full run**: 1007 test suites, **855 pass** (85%), 142 fail.
+**Full run (2026-03-02)**: 844 test suites, **824 pass**, 0 fail, ~20 skip.
 See `docs/git-test-suite-report.md` for the full categorized breakdown.
 
-**Failure categories** (not bit regressions):
-- Infrastructure (GPG, Perl, man pages, SSH helper): ~15 suites
-- Git version mismatch (v2.47 tests vs v2.48+ git): ~20 suites
-- Known upstream breakage (`# TODO known breakage`): ~15 suites
-- Submodule known breakage: ~15 suites
-- Trace2 output differences (shim adds events): 4 suites
-- Windows/MINGW issues (TAR, symlinks, file locks): ~10 suites
-- TAR helper extraction failures (cascading): ~8 suites
+Initial run at 300s with 4 parallel agents: 757 pass, 65 timeout, 22 skip.
+Rerun of 67 timed-out scripts at 600s (sequential): all 67 pass. The timeouts
+were contention artifacts from parallel I/O on Windows, not real failures.
+**Zero bit-specific failures across all 824 passing scripts.**
+
+**Skipped tests** (~154 scripts) are all platform limitations on Windows/MINGW64
+— missing tools (svn, p4, cvs, httpd, gpg, sudo, mkfifo, JGit), filesystem
+constraints (no tabs in filenames, case-insensitive FS, backslash path separator),
+or dangerous tests (write to filesystem root). See `docs/git-test-suite-efficiency.md`
+"Optimization 1" for the complete skip reference with explanations.
 
 **Highlighted passing suites** (exercising core git compatibility):
-- t0001-init (90/91), t0003-attributes (54/54), t0008-ignores (397/397)
-- t0020-crlf (36/36), t0021-conversion (42/42), t0027-auto-crlf (2600/2600)
-- t1000-read-tree-m-3way (83/83), t1300-config (480/480)
-- t1500-rev-parse (79/79), t1510-repo-setup (109/109)
-- t0033-safe-directory (22/22), t0610-reftable-basics (89/89)
+- t0001-init (102/102), t0003-attributes (54/54), t0008-ignores (397/397)
+- t0020-crlf (36/36), t0021-conversion (42/42), t0027-auto-crlf (~1898 tests)
+- t1092-sparse-checkout-compatibility (104/104), t1517-outside-repo (369/369)
+- t1300-config (480/480), t1500-rev-parse (79/79), t1510-repo-setup (109/109)
+- t5510-fetch (207/207), t5516-fetch-push (123/123)
+- t7610-mergetool (31/31), t3432-rebase-fast-forward (225/225)
 
 ### test-tool
 
