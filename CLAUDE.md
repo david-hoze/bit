@@ -166,20 +166,32 @@ When tests fail, analyze which is wrong — the test or the implementation. Fix 
 - **Use `&&` (not `&`) after `cd`** — `cd dir & bit cmd` runs `bit cmd` even if `cd` fails (cmd.exe quirk), which leaks into the parent repo. Always: `cd test\cli\output\work_dir && bit cmd`
 
 ### Running Tests
+
+**Run order matters:** Always run CLI and binary suites **before** the git suite.
+The git suite spawns hundreds of concurrent processes that cause I/O contention on
+Windows, which can make binary tests flaky. Run them sequentially:
+
+1. CLI tests (~2 min)
+2. Binary tests (~1 min)
+3. Git suite with 4 team agents (~30 min)
+
 ```bash
 cabal install --overwrite-policy=always
-shelltest test/cli/specific.test --debug                       # Single test
-powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # Full suite (parallel, including cloud)
+powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # 1. CLI suite
+cd test/t && bash run-tests.sh                                       # 2. Binary suite
+# 3. Git suite — see "Git Test Suite" section below
+```
+
+For single tests:
+```bash
+shelltest test/cli/specific.test --debug                       # Single CLI test
+cd test/t && bash t0001-binary-add-commit.sh                   # Single binary test
 ```
 
 ### Binary File Test Suite
 - Tests bit's binary file handling: classification, metadata, push/pull, merge, stash, verify, reset, cherry-pick, rebase, revert, grep, diff/rename, attributes, format-patch/am
 - Location: `test/t/` — 14 bash scripts, 222 tests
 - Consult `docs/binary-test-suite.md` for details and how to add new tests
-```bash
-cd test/t && bash run-tests.sh                                 # Full binary test suite
-cd test/t && bash t0001-binary-add-commit.sh                   # Single test script
-```
 
 ### Git Test Suite
 - Consult `docs/git-test-suite.md` for setup, environment variables, and how the router works
@@ -241,7 +253,7 @@ Consult `docs/spec/implementation-status.md` before making structural changes. I
 1. Build: `cabal install --overwrite-policy=always`
 2. Add tests that test the feature, follow `.cursor/rules/creating-cli-tests.mdc`
 3. Test the feature and fix if necessary, follow `.cursor/rules/testing-principles.mdc`
-4. Test the entire suite, follow `.cursor/rules/testing-workflow.mdc`
+4. Run CLI suite, then binary suite, then git suite (in that order — see "Running Tests")
 5. Update `docs/spec/` accordingly (see `docs/spec/index.md` for file layout)
 6. Review the entire implementation process — if you introduced bugs, follow `.cursor/rules/review.mdc`
 7. Give a commit message, follow `.cursor/rules/commit-messages.mdc`
