@@ -35,6 +35,7 @@ module Bit.Core
     , RepairMode(..)
     , verify
     , repair
+    , hydrate
     , fsck
 
       -- Remote management
@@ -100,7 +101,7 @@ import Bit.Core.Pull (pull)
 import Bit.Core.Fetch (fetch)
 import Bit.Core.RemoteManagement (remoteAdd, remoteShow)
 import Bit.Core.Config (configGet, configSet, configList, configGetWithRoot, configSetWithRoot, configListWithRoot, knownConfigKeys)
-import Bit.Core.Verify (VerifyTarget(..), RepairMode(..), verify, repair, fsck, casBackfill)
+import Bit.Core.Verify (VerifyTarget(..), RepairMode(..), verify, repair, hydrate, fsck, casBackfill)
 import Bit.Core.Import (importRepo)
 import Bit.Core.Export (exportRepo)
 import Bit.Core.BecomeGit (becomeGit, becomeBit)

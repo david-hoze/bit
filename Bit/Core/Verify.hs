@@ -9,6 +9,7 @@ module Bit.Core.Verify
     , RepairMode(..)
     , verify
     , repair
+    , hydrate
     , fsck
     , casBackfill
     ) where
@@ -48,7 +49,10 @@ import qualified Bit.Rclone.Run as Transport
 import qualified Bit.Git.Run as Git
 
 import Bit.Core.Helpers (printVerifyIssue, isFilesystemRemote)
+import Bit.Core.Fetch (fetchRemoteBundle, saveFetchedBundle, FetchOutcome(..))
 import Bit.Remote (Remote, remoteName, remoteUrl, resolveRemote)
+import qualified Bit.Rclone.Sync as Sync
+import qualified Bit.Device.Identity as Device
 import qualified Bit.IO.Platform as Platform
 
 -- | Whether to verify local working tree or a specific remote.
@@ -77,6 +81,38 @@ verify (VerifyRemotePath remote) repairMode concurrency = do
 -- | Repair = verify with AutoRepair.
 repair :: VerifyTarget -> Concurrency -> BitM ()
 repair target = verify target AutoRepair
+
+-- | Hydrate: download missing files from a storage remote.
+-- Used after pulling from a metadata-only remote to download actual content.
+hydrate :: Concurrency -> BitM ()
+hydrate concurrency = do
+    mRemote <- asks envRemote
+    case mRemote of
+        Nothing -> liftIO $ do
+            hPutStrLn stderr "usage: bit hydrate <remote>"
+            exitWith (ExitFailure 1)
+        Just remote -> do
+            cwd <- asks envCwd
+            isFs <- isFilesystemRemote remote
+            -- For cloud remotes, fetch the bundle first (needed for CAS metadata)
+            unless isFs $ liftIO $ do
+                maybeBundlePath <- fetchRemoteBundle remote
+                case maybeBundlePath of
+                    Nothing -> do
+                        hPutStrLn stderr $ "Failed to fetch metadata from '" ++ remoteName remote ++ "'."
+                        exitWith (ExitFailure 1)
+                    Just bPath -> do
+                        outcome <- saveFetchedBundle remote (Just bPath)
+                        case outcome of
+                            FetchError err -> do
+                                hPutStrLn stderr $ "Error saving bundle: " ++ err
+                                exitWith (ExitFailure 1)
+                            _ -> pure ()
+            -- Sync all files from HEAD using the storage remote as source
+            layout <- if isFs then pure Device.LayoutFull else liftIO (Device.readRemoteLayout cwd (remoteName remote))
+            let mRemote' = if isFs then Nothing else Just remote
+            liftIO $ Sync.syncAllFilesFromHEAD (remoteUrl remote) cwd layout mRemote'
+            liftIO $ putStrLn "Hydrate complete."
 
 -- ============================================================================
 -- Filesystem verify (local and filesystem remotes share this path)

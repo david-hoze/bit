@@ -1,0 +1,184 @@
+# =============================================================================
+# bit hydrate tests
+#
+# Tests:
+# - bit hydrate (no args) prints usage and exits 1
+# - bit hydrate <remote> downloads missing files after metadata-only pull
+# - bit hydrate <remote> on already-hydrated repo is a no-op
+# =============================================================================
+
+# ---- CLEANUP: remove leftover state from previous runs ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_hydrate_a 2>nul & rmdir /s /q test\cli\output\work_hydrate_b 2>nul & rmdir /s /q test\cli\output\hydrate_git_remote 2>nul & rmdir /s /q test\cli\output\hydrate_fs_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: Usage error
+# ======================================================================
+
+mkdir test\cli\output\work_hydrate_a
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_hydrate_a && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ---- bit hydrate with no args => usage error ----
+cd test\cli\output\work_hydrate_a && bit hydrate 2>&1
+<<<
+>>> /usage.*bit hydrate/
+>>>= 1
+
+# ======================================================================
+# SECTION 2: Full hydrate workflow with filesystem remotes
+# ======================================================================
+
+# ---- Clean start ----
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_hydrate_a 2>nul & rmdir /s /q test\cli\output\work_hydrate_b 2>nul & rmdir /s /q test\cli\output\hydrate_git_remote 2>nul & rmdir /s /q test\cli\output\hydrate_fs_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ---- Create bare git repo (metadata-only remote) ----
+mkdir test\cli\output\hydrate_git_remote
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\hydrate_git_remote && git init --bare --initial-branch=main
+<<<
+>>> /Initialized/
+>>>= 0
+
+# ---- Create filesystem storage remote ----
+mkdir test\cli\output\hydrate_fs_remote
+<<<
+>>>
+>>>= 0
+
+# ---- Machine A: init, add remotes, commit, push to both ----
+mkdir test\cli\output\work_hydrate_a
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_hydrate_a && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_hydrate_a && echo binarydata1234567890> data.bin & bit add data.bin & bit commit -m "Add binary"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test\cli\output\work_hydrate_a && bit remote add storage ..\hydrate_fs_remote
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\output\work_hydrate_a && bit push -u storage
+<<<
+>>> /Push complete/
+>>>= 0
+
+cd test\cli\output\work_hydrate_a && bit remote add github ..\hydrate_git_remote --metadata-only
+<<<
+>>> /Remote.*added.*metadata only/
+>>>= 0
+
+cd test\cli\output\work_hydrate_a && bit push github
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ---- Machine B: init, add remotes, pull metadata only ----
+mkdir test\cli\output\work_hydrate_b
+<<<
+>>>
+>>>= 0
+
+cd test\cli\output\work_hydrate_b && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test\cli\output\work_hydrate_b && bit remote add github ..\hydrate_git_remote --metadata-only
+<<<
+>>> /Remote.*added.*metadata only/
+>>>= 0
+
+cd test\cli\output\work_hydrate_b && bit remote add storage ..\hydrate_fs_remote
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test\cli\output\work_hydrate_b && bit pull github
+<<<
+>>> /Checking out|first pull/
+>>>= 0
+
+# ---- Verify file is NOT in working directory (metadata only pull) ----
+if exist "test\cli\output\work_hydrate_b\data.bin" (echo file exists - BAD) else (echo no file - GOOD)
+<<<
+>>>
+no file - GOOD
+>>>= 0
+
+# ---- Verify git log shows the commit ----
+cd test\cli\output\work_hydrate_b && bit log --oneline
+<<<
+>>> /Add binary/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: Hydrate from storage remote
+# ======================================================================
+
+cd test\cli\output\work_hydrate_b && bit hydrate storage
+<<<
+>>> /Hydrate complete/
+>>>= 0
+
+# ---- Verify file IS now in working directory ----
+if exist "test\cli\output\work_hydrate_b\data.bin" (echo file exists - GOOD) else (echo no file - BAD)
+<<<
+>>>
+file exists - GOOD
+>>>= 0
+
+# ---- Verify passes after hydrate ----
+cd test\cli\output\work_hydrate_b && bit verify
+<<<
+>>> /\[OK\] All.*files match/
+>>>= 0
+
+# ======================================================================
+# SECTION 4: Hydrate again is a no-op (already hydrated)
+# ======================================================================
+
+cd test\cli\output\work_hydrate_b && bit hydrate storage
+<<<
+>>> /Hydrate complete/
+>>>= 0
+
+cd test\cli\output\work_hydrate_b && bit verify
+<<<
+>>> /\[OK\] All.*files match/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+timeout /t 1 >nul & rmdir /s /q test\cli\output\work_hydrate_a 2>nul & rmdir /s /q test\cli\output\work_hydrate_b 2>nul & rmdir /s /q test\cli\output\hydrate_git_remote 2>nul & rmdir /s /q test\cli\output\hydrate_fs_remote 2>nul & echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

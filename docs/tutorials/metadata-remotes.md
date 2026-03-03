@@ -110,7 +110,26 @@ bit push github    # Just history — instant
 bit push gdrive    # History + files — takes longer
 ```
 
-Team members who only need to see what files exist and what changed can pull from GitHub. Those who need the actual files pull from Google Drive.
+Team members who only need to see what files exist and what changed can pull from GitHub. Those who need the actual files use `bit hydrate`:
+
+```bash
+# On a collaborator's machine:
+bit init
+bit remote add github git@github.com:team/project.git
+bit remote add gdrive gdrive:Projects/footage
+
+# Step 1: Pull history from GitHub (fast, no large files downloaded)
+bit pull github
+
+# Step 2: Download actual files from Google Drive
+bit hydrate gdrive
+# → Hydrate complete.
+
+# Everything is verified and ready
+bit verify
+```
+
+`bit hydrate` is the bridge between metadata-only and full remotes — pull history from one, hydrate content from another.
 
 ## Limitations
 

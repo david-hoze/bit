@@ -179,6 +179,33 @@ If this happens, you'll need to restore the file from another source (another
 backup, the original file, etc.), then `bit add` and `bit commit` to update
 the metadata.
 
+## `bit hydrate`
+
+Downloads missing files after pulling from a metadata-only remote. If you've pulled
+commit history from GitHub (or a bare git repo) but don't have the actual binary
+files yet, `bit hydrate` fetches them from a content remote.
+
+```bash
+# You pulled metadata from GitHub — history is here, files are not
+bit pull github
+
+# Add a content remote and hydrate
+bit remote add storage gdrive:Projects/footage
+bit hydrate storage
+# → Downloads all binary files from storage
+# → Hydrate complete.
+
+# Verify everything is correct
+bit verify
+# → [OK] All 47 files match metadata.
+```
+
+Running `bit hydrate` again is safe — if all files are already present, it's a no-op.
+
+**Hydrate vs repair**: Use `bit repair` when files are corrupted or accidentally deleted
+in a previously-complete repo. Use `bit hydrate` when you intentionally pulled metadata
+only and now need the actual content.
+
 ## `bit fsck`
 
 Runs `git fsck` on bit's internal metadata repository. This checks that the

@@ -278,7 +278,7 @@ isKnownCommand name = root `elem` knownRoots
     knownRoots =
         [ "init", "import", "export", "add", "commit", "diff", "status", "log", "ls-files"
         , "rm", "mv", "reset", "restore", "checkout", "revert", "branch", "merge"
-        , "push", "pull", "fetch", "remote", "verify", "repair", "fsck"
+        , "push", "pull", "fetch", "remote", "verify", "repair", "hydrate", "fsck"
         , "cas", "submodule"
         , "help", "become-git", "become-bit"
         ]
@@ -804,6 +804,8 @@ runCommand args = do
         ["remote", "show", name]        -> runBaseWithRemote name $ Bit.remoteShow (Just name)
         ["verify"]                      -> runBase $ Bit.verify Bit.VerifyLocal Bit.PromptRepair concurrency
         ["repair"]                      -> runBase $ Bit.verify Bit.VerifyLocal Bit.AutoRepair concurrency
+        ["hydrate", name]               -> runBaseWithRemote name $ Bit.hydrate concurrency
+        ["hydrate"]                     -> do hPutStrLn stderr "usage: bit hydrate <remote>"; exitWith (ExitFailure 1)
 
         ("rm":rest)                     -> runBase (Bit.rm rest) >>= exitWith
         ("branch":rest)                 -> Bit.branch prefix rest >>= exitWith

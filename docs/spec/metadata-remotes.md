@@ -442,11 +442,16 @@ bit remote add github git@github.com:user/foo.git
 bit pull github
 # → Local repo now has full history and file metadata, but no actual files.
 
-# Add the content remote:
+# Add the content remote and hydrate:
 bit remote add origin gdrive:Projects/foo
-bit pull origin
-# → Now local repo has actual files too.
+bit hydrate origin
+# → Downloads all binary files from the content remote. Working tree is now complete.
+
+bit verify
+# → [OK] All files match metadata.
 ```
+
+**Why `bit hydrate` instead of `bit pull`?** After a metadata-only pull, the git history is already up to date — commits are merged, HEAD is correct. A second `bit pull origin` would say "Working tree already up to date" because there's nothing new to merge. `bit hydrate` skips the merge step and goes straight to downloading missing content from the specified remote.
 
 ### Metadata-Only Cloud Backup
 
@@ -468,3 +473,5 @@ bit push meta-backup
 - **No layout conversion.** Same as full↔bare: no conversion to/from metadata. Create a new remote.
     
 - **No content operations on metadata-only remotes.** `bit verify <remote>`, `bit repair <remote>`, `bit --remote <n> add .` — all operations that touch content — are rejected for metadata-only remotes with a clear error message.
+
+- **`bit hydrate` requires a content remote.** Hydrating from a metadata-only remote makes no sense — there's no content to download. Use `bit hydrate` with a `full` or `bare` layout remote.

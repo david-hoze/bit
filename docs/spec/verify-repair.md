@@ -155,6 +155,37 @@ Remote-to-remote repairs use a single `rclone copyto` call -- rclone handles the
 
 ---
 
+## `bit hydrate`
+
+Downloads missing files after a metadata-only pull. When a collaborator pulls from a metadata-only remote (GitHub, bare git repo), they get the full commit history and file metadata but no actual binary content. `bit hydrate <remote>` fills in the missing files from a content-bearing remote.
+
+**Syntax:**
+
+```
+bit hydrate <remote>
+```
+
+Where `<remote>` is a content-bearing remote (layout `full` or `bare`) that has the binary files.
+
+**Flow:**
+
+1. **Cloud remotes:** Fetch the metadata bundle from the remote first (needed to resolve CAS chunk metadata), then sync all files from HEAD using the remote as the content source.
+2. **Filesystem remotes:** Skip bundle fetch (git metadata is already local from the metadata-only pull), sync all files from HEAD directly.
+3. Print `Hydrate complete.` on success.
+
+**Implementation:** Hydrate delegates to `syncAllFilesFromHEAD` from `Bit/Rclone/Sync.hs`, which derives actions from `git diff` between an empty tree and HEAD, downloads CAS chunks (or whole blobs) from the remote, and reassembles files into the working directory. This handles both CDC-chunked and whole-blob files correctly.
+
+**Idempotent:** Running `bit hydrate` a second time on an already-hydrated repo is a no-op — `syncAllFilesFromHEAD` detects that all files are already present and skips them.
+
+**Error cases:**
+
+- `bit hydrate` with no remote argument prints usage and exits 1.
+- If the bundle fetch fails (cloud remotes), prints an error and exits 1.
+
+**Relationship to `bit repair`:** Hydrate and repair solve different problems. Repair fixes corrupted or missing files in a repo that was previously complete — it searches all remotes for content-addressable matches. Hydrate populates a repo that was intentionally pulled without content (metadata-only pull). Hydrate always uses a single specified remote as the source.
+
+---
+
 ## `bit fsck`
 
 Runs `git fsck` on the internal metadata repository (`.bit/index`). Checks the integrity of the object store -- that all commits, trees, and blobs are valid and consistent. This is a passthrough to git's own integrity check. Use `bit verify` to check file integrity instead.

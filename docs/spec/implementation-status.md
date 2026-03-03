@@ -106,6 +106,7 @@
 - `bit fetch` -- fetch metadata bundle only
 - `bit verify` -- local verification against committed metadata (scan + git diff)
 - `bit repair` -- verify + auto-repair from all remotes
+- `bit hydrate <remote>` -- download missing files after metadata-only pull (fetch bundle + sync from HEAD)
 - `bit --remote <name> verify / repair` -- remote file verification and repair
 - `bit fsck` -- passthrough to `git fsck`
 - `bit --remote <name>` / `bit @<remote>` -- ephemeral remote workspace commands

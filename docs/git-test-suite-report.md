@@ -847,7 +847,7 @@ Across all 1,028 test scripts (~20,000 individual tests) from git's own test sui
 5 scripts have infrastructure failures (no PCRE, Windows CWD, scalar, perl Git.pm, git-shell) — not bit bugs. 145 scripts are skipped due to missing prerequisites (svn, p4, cvs, web server, FIFOs, GPG).
 
 **All three test suites pass clean:**
-- **CLI suite**: 1207/1207 (0 failures)
+- **CLI suite**: 1235/1235 (0 failures)
 - **Binary suite**: 20/20 scripts, 222/222 individual tests
 - **Git test suite** (6 key scripts): t5516 123/123, t2013 64/64, t7112 70/70, t7610 31/31, t3432 219/219, t0001 100/102
 
