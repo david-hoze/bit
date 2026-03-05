@@ -19,6 +19,7 @@
 #   HEAVY_THRESHOLD=25   Test count above which a script is "heavy" (default: 25)
 #   MAX_LOAD=4           Load average threshold for heavy test gating (default: 4)
 #   RESULTS_FILE=...     Output file for results (default: stdout summary only)
+#   RESUME=1             Skip tests already recorded in RESULTS_FILE (default: off)
 
 set -u
 
@@ -32,6 +33,7 @@ DEFAULT_TIMEOUT="${DEFAULT_TIMEOUT:-300}"
 HEAVY_THRESHOLD="${HEAVY_THRESHOLD:-25}"
 MAX_LOAD="${MAX_LOAD:-4}"
 RESULTS_FILE="${RESULTS_FILE:-}"
+RESUME="${RESUME:-}"
 SLOT_DIR="/tmp/git-test-slots"
 
 # Special per-script timeouts (genuinely slow, not contention)
@@ -149,6 +151,11 @@ should_skip() {
     return 1
 }
 
+# Helper: append a line to the results file
+log_result() {
+    [ -n "$RESULTS_FILE" ] && echo "$1" >> "$SCRIPT_DIR/$RESULTS_FILE"
+}
+
 # --- Main ---
 
 cd "$TEST_DIR" || { echo "Cannot cd to $TEST_DIR"; exit 1; }
@@ -183,6 +190,42 @@ bail_names=""
 # Trap to release slot on unexpected exit
 trap 'release_slot' EXIT
 
+# Resume support: load already-completed tests from results file
+declare -A completed_tests
+if [ -n "$RESUME" ] && [ -n "$RESULTS_FILE" ] && [ -f "$SCRIPT_DIR/$RESULTS_FILE" ]; then
+    while IFS= read -r rline; do
+        # Lines look like: "t0001-init (94t, 300s [HEAVY:94t]): PASS (1..102)"
+        tname=$(echo "$rline" | sed -n 's/^\(t[0-9][^ ]*\) .*/\1/p')
+        if [ -n "$tname" ]; then
+            completed_tests["$tname"]=1
+        fi
+    done < "$SCRIPT_DIR/$RESULTS_FILE"
+    resumed=${#completed_tests[@]}
+    if [ "$resumed" -gt 0 ]; then
+        echo "Resuming: skipping $resumed already-completed tests"
+        echo ""
+        # Strip the old summary (=== RESULTS === to end) so we append cleanly
+        summary_line=$(grep -n "^=== RESULTS ===" "$SCRIPT_DIR/$RESULTS_FILE" | tail -1 | cut -d: -f1)
+        if [ -n "$summary_line" ]; then
+            head -n $((summary_line - 1)) "$SCRIPT_DIR/$RESULTS_FILE" > "$SCRIPT_DIR/$RESULTS_FILE.tmp"
+            mv "$SCRIPT_DIR/$RESULTS_FILE.tmp" "$SCRIPT_DIR/$RESULTS_FILE"
+        fi
+    fi
+else
+    # Fresh run: initialize results file with header
+    if [ -n "$RESULTS_FILE" ]; then
+        {
+            echo "=== Throttled test suite runner ==="
+            echo "Scripts: ${#scripts[@]}"
+            echo "Heavy threshold: >${HEAVY_THRESHOLD} test cases"
+            echo "Max concurrent heavy: $MAX_SLOTS"
+            echo "Max load for heavy: $MAX_LOAD"
+            echo "Default timeout: ${DEFAULT_TIMEOUT}s"
+            echo ""
+        } > "$SCRIPT_DIR/$RESULTS_FILE"
+    fi
+fi
+
 echo "=== Throttled test suite runner ==="
 echo "Scripts: ${#scripts[@]}"
 echo "Heavy threshold: >${HEAVY_THRESHOLD} test cases"
@@ -199,6 +242,14 @@ for f in "${scripts[@]}"; do
     if should_skip "$f"; then
         skipped=$((skipped + 1))
         echo "SKIP $name (excluded prefix)"
+        log_result "SKIP $name (excluded prefix)"
+        continue
+    fi
+
+    # Skip already-completed tests (resume mode)
+    if [ -n "${completed_tests[$name]+x}" ]; then
+        passed=$((passed + 1))
+        echo "SKIP $name (already completed)"
         continue
     fi
 
@@ -237,29 +288,32 @@ for f in "${scripts[@]}"; do
     fi
 
     # Classify result
+    line=""
     if [ $exit_code -eq 124 ] || [ $exit_code -eq 143 ]; then
         timed_out=$((timed_out + 1))
         timeout_names="$timeout_names $name"
-        echo "TIMEOUT (${t}s)"
+        line="TIMEOUT (${t}s)"
     elif echo "$result" | grep -q "^Bail out!"; then
         bailed=$((bailed + 1))
         bail_names="$bail_names $name"
-        echo "BAIL: $result"
+        line="BAIL: $result"
     elif echo "$result" | grep -q "^# passed all"; then
         passed=$((passed + 1))
-        echo "PASS ($result)"
+        line="PASS ($result)"
     elif echo "$result" | grep -q "^1\.\." && [ $exit_code -eq 0 ]; then
         passed=$((passed + 1))
-        echo "PASS ($result)"
+        line="PASS ($result)"
     elif [ $exit_code -eq 0 ]; then
         # Exit 0 but no clear pass indicator — likely all-skip
         passed=$((passed + 1))
-        echo "PASS/SKIP ($result)"
+        line="PASS/SKIP ($result)"
     else
         failed=$((failed + 1))
         failed_names="$failed_names $name"
-        echo "FAIL (exit $exit_code): $result"
+        line="FAIL (exit $exit_code): $result"
     fi
+    echo "$line"
+    log_result "$name (${test_count}t, ${t}s${heavy}): $line"
 
     # Clean trash directory after run (background, best-effort)
     if [ -d "$trash" ]; then
@@ -291,9 +345,11 @@ if [ -n "$bail_names" ]; then
     echo "BAIL OUT:$bail_names"
 fi
 
-# Save to file if requested
+# Append summary to results file
 if [ -n "$RESULTS_FILE" ]; then
     {
+        echo ""
+        echo "=== RESULTS ==="
         echo "Total: $total"
         echo "Passed: $passed"
         echo "Failed: $failed"
@@ -303,7 +359,7 @@ if [ -n "$RESULTS_FILE" ]; then
         [ -n "$failed_names" ] && echo "FAILED:$failed_names"
         [ -n "$timeout_names" ] && echo "TIMEOUT:$timeout_names"
         [ -n "$bail_names" ] && echo "BAIL OUT:$bail_names"
-    } > "$RESULTS_FILE"
+    } >> "$SCRIPT_DIR/$RESULTS_FILE"
     echo ""
     echo "Results saved to $RESULTS_FILE"
 fi
