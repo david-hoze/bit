@@ -42,7 +42,11 @@ declare -A SPECIAL_TIMEOUTS=(
     [t1092-sparse-checkout-compatibility.sh]=2400
     [t1517-outside-repo.sh]=1200
     [t3432-rebase-fast-forward.sh]=600
-    [t5510-fetch.sh]=600
+    [t5319-multi-pack-index.sh]=600
+    [t5324-split-commit-graph.sh]=600
+    [t5500-fetch-pack.sh]=600
+    [t5505-remote.sh]=600
+    [t5510-fetch.sh]=900
     [t5516-fetch-push.sh]=600
 )
 
