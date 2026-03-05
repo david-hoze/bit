@@ -177,7 +177,7 @@ Windows, which can make binary tests flaky. Run them sequentially:
 
 ```bash
 cabal install --overwrite-policy=always
-powershell -ExecutionPolicy Bypass -File test/cli/run-parallel.ps1   # 1. CLI suite
+bash test/cli/run.sh                                                # 1. CLI suite
 cd test/t && bash run-tests.sh                                       # 2. Binary suite
 # 3. Git suite — see "Git Test Suite" section below
 ```

@@ -5,7 +5,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_export 2>nul & rmdir /s /q test\cli\output\work_export_target 2>nul & rmdir /s /q test\cli\output\work_export_nobit 2>nul & rmdir /s /q test\cli\output\work_export_copy 2>nul & echo cleanup done
+rm -rf test/cli/output/work_export 2>/dev/null && rm -rf test/cli/output/work_export_target 2>/dev/null && rm -rf test/cli/output/work_export_nobit 2>/dev/null && rm -rf test/cli/output/work_export_copy 2>/dev/null && echo cleanup done
 <<<
 >>>
 cleanup done
@@ -16,33 +16,33 @@ cleanup done
 # ======================================================================
 
 # ---- Setup: create a bit repo with history ----
-mkdir test\cli\output\work_export & cd test\cli\output\work_export & set "BIT_GIT_JUNCTION=1" & bit init -q & echo hello> file.txt & bit add file.txt & bit commit -m "initial-commit"
+mkdir -p test/cli/output/work_export && cd test/cli/output/work_export && BIT_GIT_JUNCTION=1 bit init -q && echo hello > file.txt && bit add file.txt && bit commit -m "initial-commit"
 <<<
 >>> /.*commit.*/
 >>>= 0
 
 # ---- Run bit export from inside the bit repo ----
-cd test\cli\output\work_export && bit export
+cd test/cli/output/work_export && bit export
 <<<
 >>> /Exported bit repository to git/
 >>>= 0
 
 # ---- Verify .git directory exists ----
-if exist "test\cli\output\work_export\.git\" (echo git-exists) else (echo git-missing)
+test -d test/cli/output/work_export/.git && echo git-exists || echo git-missing
 <<<
 >>>
 git-exists
 >>>= 0
 
 # ---- Verify .bit directory is gone ----
-if exist "test\cli\output\work_export\.bit\" (echo bit-still-exists) else (echo bit-gone)
+test -d test/cli/output/work_export/.bit && echo bit-still-exists || echo bit-gone
 <<<
 >>>
 bit-gone
 >>>= 0
 
 # ---- Verify git log works ----
-cd test\cli\output\work_export && git log --oneline
+cd test/cli/output/work_export && git log --oneline
 <<<
 >>> /initial-commit/
 >>>= 0
@@ -52,46 +52,46 @@ cd test\cli\output\work_export && git log --oneline
 # ======================================================================
 
 # ---- Create a fresh bit repo for copy export ----
-mkdir test\cli\output\work_export_copy & cd test\cli\output\work_export_copy & set "BIT_GIT_JUNCTION=1" & bit init -q & echo data> doc.txt & bit add doc.txt & bit commit -m "copy-test"
+mkdir -p test/cli/output/work_export_copy && cd test/cli/output/work_export_copy && BIT_GIT_JUNCTION=1 bit init -q && echo data > doc.txt && bit add doc.txt && bit commit -m "copy-test"
 <<<
 >>> /.*commit.*/
 >>>= 0
 
 # ---- Export to a new directory ----
-cd test\cli\output\work_export_copy && bit export ..\..\..\..\test\cli\output\work_export_target
+cd test/cli/output/work_export_copy && bit export ../../../../test/cli/output/work_export_target
 <<<
 >>> /Exported bit repository to/
 >>>= 0
 
 # ---- Verify target has .git ----
-if exist "test\cli\output\work_export_target\.git\" (echo target-git-ok) else (echo target-git-missing)
+test -d test/cli/output/work_export_target/.git && echo target-git-ok || echo target-git-missing
 <<<
 >>>
 target-git-ok
 >>>= 0
 
 # ---- Verify target has the working file ----
-if exist "test\cli\output\work_export_target\doc.txt" (echo target-file-ok) else (echo target-file-missing)
+test -f test/cli/output/work_export_target/doc.txt && echo target-file-ok || echo target-file-missing
 <<<
 >>>
 target-file-ok
 >>>= 0
 
 # ---- Verify target does NOT have .bit ----
-if exist "test\cli\output\work_export_target\.bit\" (echo target-bit-exists) else (echo target-bit-gone)
+test -d test/cli/output/work_export_target/.bit && echo target-bit-exists || echo target-bit-gone
 <<<
 >>>
 target-bit-gone
 >>>= 0
 
 # ---- Verify git log works in target ----
-cd test\cli\output\work_export_target && git log --oneline
+cd test/cli/output/work_export_target && git log --oneline
 <<<
 >>> /copy-test/
 >>>= 0
 
 # ---- Verify original bit repo is unchanged ----
-if exist "test\cli\output\work_export_copy\.bit\" (echo original-bit-ok) else (echo original-bit-gone)
+test -d test/cli/output/work_export_copy/.bit && echo original-bit-ok || echo original-bit-gone
 <<<
 >>>
 original-bit-ok
@@ -102,13 +102,13 @@ original-bit-ok
 # ======================================================================
 
 # ---- Error: not a bit repo ----
-mkdir test\cli\output\work_export_nobit & cd test\cli\output\work_export_nobit & bit export
+mkdir -p test/cli/output/work_export_nobit && cd test/cli/output/work_export_nobit && bit export
 <<<
 >>>2 /not a bit repository/
 >>>= 1
 
 # ---- Error: target path already exists ----
-cd test\cli\output\work_export_copy && bit export ..\..\..\..\test\cli\output\work_export_target
+cd test/cli/output/work_export_copy && bit export ../../../../test/cli/output/work_export_target
 <<<
 >>>2 /target path already exists/
 >>>= 1
@@ -117,7 +117,7 @@ cd test\cli\output\work_export_copy && bit export ..\..\..\..\test\cli\output\wo
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_export 2>nul & rmdir /s /q test\cli\output\work_export_target 2>nul & rmdir /s /q test\cli\output\work_export_nobit 2>nul & rmdir /s /q test\cli\output\work_export_copy 2>nul & echo cleanup done
+rm -rf test/cli/output/work_export 2>/dev/null && rm -rf test/cli/output/work_export_target 2>/dev/null && rm -rf test/cli/output/work_export_nobit 2>/dev/null && rm -rf test/cli/output/work_export_copy 2>/dev/null && echo cleanup done
 <<<
 >>>
 cleanup done

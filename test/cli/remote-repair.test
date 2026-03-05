@@ -3,7 +3,7 @@
 # `bit repair` = `bit verify` without prompt — auto-repairs from all remotes.
 
 # ---- CLEANUP ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_repair 2>nul & rmdir /s /q test\cli\output\remote_repair 2>nul & echo cleanup done
+rm -rf test/cli/output/work_repair 2>/dev/null; rm -rf test/cli/output/remote_repair 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
@@ -13,24 +13,24 @@ cleanup done
 # TEST: No remotes configured — repair should fail when issues exist
 # ======================================================================
 
-rmdir /s /q test\cli\output\work_repair 2>nul & mkdir test\cli\output\work_repair & cd test\cli\output\work_repair & bit init & echo data> file.bin & bit add file.bin & bit commit -m "Add file"
+rm -rf test/cli/output/work_repair 2>/dev/null; mkdir -p test/cli/output/work_repair && cd test/cli/output/work_repair && bit init && echo data > file.bin && bit add file.bin && bit commit -m "Add file"
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # No remotes — repair with no issues should succeed (nothing to repair)
-cd test\cli\output\work_repair && bit repair
+cd test/cli/output/work_repair && bit repair
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
 
 # Corrupt file — repair should fail with no sources
-cd test\cli\output\work_repair && echo corrupted> file.bin
+cd test/cli/output/work_repair && echo corrupted > file.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_repair && bit repair
+cd test/cli/output/work_repair && bit repair
 <<<
 >>>2 /No repair sources available/
 >>>= 1
@@ -39,22 +39,22 @@ cd test\cli\output\work_repair && bit repair
 # SETUP: init, add remote, add files, commit, push
 # ======================================================================
 
-rmdir /s /q test\cli\output\work_repair 2>nul & rmdir /s /q test\cli\output\remote_repair 2>nul & mkdir test\cli\output\work_repair & mkdir test\cli\output\remote_repair & cd test\cli\output\work_repair & bit init
+rm -rf test/cli/output/work_repair 2>/dev/null; rm -rf test/cli/output/remote_repair 2>/dev/null; mkdir -p test/cli/output/work_repair && mkdir -p test/cli/output/remote_repair && cd test/cli/output/work_repair && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_repair && bit remote add origin ..\remote_repair
+cd test/cli/output/work_repair && bit remote add origin ../remote_repair
 <<<
 >>> /Remote.*added/
 >>>= 0
 
-cd test\cli\output\work_repair && echo hello> greet.txt & echo binarydata> data.bin & bit add greet.txt data.bin & bit commit -m "Add files"
+cd test/cli/output/work_repair && echo hello > greet.txt && echo binarydata > data.bin && bit add greet.txt data.bin && bit commit -m "Add files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_repair && bit push -u origin
+cd test/cli/output/work_repair && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
@@ -63,7 +63,7 @@ cd test\cli\output\work_repair && bit push -u origin
 # TEST: Nothing to repair — all local files match committed metadata
 # ======================================================================
 
-cd test\cli\output\work_repair && bit repair
+cd test/cli/output/work_repair && bit repair
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
@@ -72,18 +72,18 @@ cd test\cli\output\work_repair && bit repair
 # TEST: Local corruption — corrupt a binary file, repair from remote
 # ======================================================================
 
-cd test\cli\output\work_repair && echo corrupted> data.bin
+cd test/cli/output/work_repair && echo corrupted > data.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_repair && bit repair
+cd test/cli/output/work_repair && bit repair
 <<<
 >>> /REPAIRED.*data\.bin/
 >>>= 0
 
 # Verify after repair — should be clean
-cd test\cli\output\work_repair && bit repair
+cd test/cli/output/work_repair && bit repair
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
@@ -94,24 +94,24 @@ cd test\cli\output\work_repair && bit repair
 #  content; verify's git diff still detects mismatch vs committed state.)
 # ======================================================================
 
-cd test\cli\output\work_repair && echo stale_corrupt> data.bin
+cd test/cli/output/work_repair && echo stale_corrupt > data.bin
 <<<
 >>>
 >>>= 0
 
 # Run status to trigger a scan — this updates local metadata
-cd test\cli\output\work_repair && bit status
+cd test/cli/output/work_repair && bit status
 <<<
 >>>= 0
 
 # Repair must still detect the mismatch and fix it
-cd test\cli\output\work_repair && bit repair
+cd test/cli/output/work_repair && bit repair
 <<<
 >>> /REPAIRED.*data\.bin/
 >>>= 0
 
 # Verify after repair — should be clean
-cd test\cli\output\work_repair && bit repair
+cd test/cli/output/work_repair && bit repair
 <<<
 >>> /\[OK\] All.*files match/
 >>>= 0
@@ -120,24 +120,24 @@ cd test\cli\output\work_repair && bit repair
 # TEST: Unrepairable — file committed but never pushed to any remote
 # ======================================================================
 
-cd test\cli\output\work_repair && echo new_local_only> local_only.bin & bit add local_only.bin & bit commit -m "Add local only"
+cd test/cli/output/work_repair && echo new_local_only > local_only.bin && bit add local_only.bin && bit commit -m "Add local only"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
 
 # Corrupt the file (not pushed, so no remote has it)
-cd test\cli\output\work_repair && echo corrupted> local_only.bin
+cd test/cli/output/work_repair && echo corrupted > local_only.bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_repair && bit repair
+cd test/cli/output/work_repair && bit repair
 <<<
 >>> /unrepairable/
 >>>= 1
 
 # ---- CLEANUP ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_repair 2>nul & rmdir /s /q test\cli\output\remote_repair 2>nul
+rm -rf test/cli/output/work_repair 2>/dev/null; rm -rf test/cli/output/remote_repair 2>/dev/null
 <<<
 >>>
 >>>= 0

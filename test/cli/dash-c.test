@@ -7,7 +7,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_dashc 2>nul & rmdir /s /q test\cli\output\work_dashc_plain 2>nul & echo cleanup done
+rm -rf test/cli/output/work_dashc 2>/dev/null && rm -rf test/cli/output/work_dashc_plain 2>/dev/null && echo cleanup done
 <<<
 >>>
 cleanup done
@@ -17,34 +17,34 @@ cleanup done
 # SETUP: create a bit repo and a plain git repo
 # ======================================================================
 
-mkdir test\cli\output\work_dashc
+mkdir -p test/cli/output/work_dashc
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_dashc && bit init
+cd test/cli/output/work_dashc && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Add a file and commit so rev-parse and log have something to work with
-cd test\cli\output\work_dashc && echo hello> file.txt & bit add file.txt & bit commit -m "Initial commit"
+cd test/cli/output/work_dashc && echo hello > file.txt && bit add file.txt && bit commit -m "Initial commit"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
 # Create a plain git repo (no .bit, just .git)
-mkdir test\cli\output\work_dashc_plain
+mkdir -p test/cli/output/work_dashc_plain
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_dashc_plain && git init
+cd test/cli/output/work_dashc_plain && git init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_dashc_plain && echo hello> file.txt & git add file.txt & git commit -m "Initial commit"
+cd test/cli/output/work_dashc_plain && echo hello > file.txt && git add file.txt && git commit -m "Initial commit"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
@@ -54,19 +54,19 @@ cd test\cli\output\work_dashc_plain && echo hello> file.txt & git add file.txt &
 # ======================================================================
 
 # ---- rev-parse HEAD should work (proves git runs inside .bit/index) ----
-bit -C test\cli\output\work_dashc rev-parse HEAD
+bit -C test/cli/output/work_dashc rev-parse HEAD
 <<<
 >>> /^[0-9a-f]{40}/
 >>>= 0
 
 # ---- log should show our commit ----
-bit -C test\cli\output\work_dashc log --oneline
+bit -C test/cli/output/work_dashc log --oneline
 <<<
 >>> /Initial commit/
 >>>= 0
 
 # ---- status should work ----
-bit -C test\cli\output\work_dashc status
+bit -C test/cli/output/work_dashc status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
@@ -76,13 +76,13 @@ bit -C test\cli\output\work_dashc status
 # ======================================================================
 
 # ---- rev-parse HEAD should work in plain git repo ----
-bit -C test\cli\output\work_dashc_plain rev-parse HEAD
+bit -C test/cli/output/work_dashc_plain rev-parse HEAD
 <<<
 >>> /^[0-9a-f]{40}/
 >>>= 0
 
 # ---- log should show commit from plain git repo ----
-bit -C test\cli\output\work_dashc_plain log --oneline
+bit -C test/cli/output/work_dashc_plain log --oneline
 <<<
 >>> /Initial commit/
 >>>= 0
@@ -91,7 +91,7 @@ bit -C test\cli\output\work_dashc_plain log --oneline
 # SECTION 3: -C with nonexistent directory — git reports error
 # ======================================================================
 
-bit -C test\cli\output\work_dashc_nosuchdir rev-parse HEAD
+bit -C test/cli/output/work_dashc_nosuchdir rev-parse HEAD
 <<<
 >>>2 /cannot change to/
 >>>= 128
@@ -100,7 +100,7 @@ bit -C test\cli\output\work_dashc_nosuchdir rev-parse HEAD
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_dashc 2>nul & rmdir /s /q test\cli\output\work_dashc_plain 2>nul & echo cleanup done
+rm -rf test/cli/output/work_dashc 2>/dev/null && rm -rf test/cli/output/work_dashc_plain 2>/dev/null && echo cleanup done
 <<<
 >>>
 cleanup done

@@ -10,7 +10,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_unicode_remote 2>nul & rmdir /s /q test\cli\output\fs_unicode_remote 2>nul & echo cleanup done
+rm -rf test/cli/output/work_unicode_remote 2>/dev/null; rm -rf test/cli/output/fs_unicode_remote 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
@@ -20,23 +20,23 @@ cleanup done
 # SECTION 1: SETUP
 # ======================================================================
 
-mkdir test\cli\output\work_unicode_remote
+mkdir -p test/cli/output/work_unicode_remote
 <<<
 >>>
 >>>= 0
 
-mkdir test\cli\output\fs_unicode_remote
+mkdir -p test/cli/output/fs_unicode_remote
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_unicode_remote && bit init
+cd test/cli/output/work_unicode_remote && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Add filesystem remote (using rclone path syntax to ensure rclone is involved)
-cd test\cli\output\work_unicode_remote && bit remote add origin ..\fs_unicode_remote
+cd test/cli/output/work_unicode_remote && bit remote add origin ../fs_unicode_remote
 <<<
 >>> /Remote 'origin' added/
 >>>= 0
@@ -48,24 +48,24 @@ cd test\cli\output\work_unicode_remote && bit remote add origin ..\fs_unicode_re
 # ---- Create files with ASCII names but Unicode content ----
 # This tests the core functionality: rclone JSON parsing with Unicode in filenames
 # Note: We use ASCII filenames to avoid Windows cmd.exe Unicode handling issues in tests
-cd test\cli\output\work_unicode_remote && echo שלום Hebrew content> test-hebrew.txt
+cd test/cli/output/work_unicode_remote && echo שלום Hebrew content > test-hebrew.txt
 <<<
 >>>= 0
 
-cd test\cli\output\work_unicode_remote && echo 中文 Chinese content> test-chinese.txt
+cd test/cli/output/work_unicode_remote && echo 中文 Chinese content > test-chinese.txt
 <<<
 >>>= 0
 
-cd test\cli\output\work_unicode_remote && echo 😀 Emoji content> test-emoji.txt
+cd test/cli/output/work_unicode_remote && echo 😀 Emoji content > test-emoji.txt
 <<<
 >>>= 0
 
-cd test\cli\output\work_unicode_remote && echo café 日本語 Mixed> test-mixed.txt
+cd test/cli/output/work_unicode_remote && echo café 日本語 Mixed > test-mixed.txt
 <<<
 >>>= 0
 
 # ---- Add and commit all files ----
-cd test\cli\output\work_unicode_remote && bit add . & bit commit -m "Add Unicode files"
+cd test/cli/output/work_unicode_remote && bit add . && bit commit -m "Add Unicode files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
@@ -73,31 +73,31 @@ cd test\cli\output\work_unicode_remote && bit add . & bit commit -m "Add Unicode
 # ---- Push to remote (this is where the bug would occur) ----
 # Before the fix, if any file had Unicode in its name, rclone JSON parsing would fail
 # This should succeed without "Failed to parse rclone JSON output" error
-cd test\cli\output\work_unicode_remote && bit push -u origin
+cd test/cli/output/work_unicode_remote && bit push -u origin
 <<<
 >>> /Push complete/
 >>>= 0
 
 # ---- Verify files exist at remote ----
-if exist "test\cli\output\fs_unicode_remote\test-hebrew.txt" (echo hebrew exists) else (echo missing)
+test -f test/cli/output/fs_unicode_remote/test-hebrew.txt && echo hebrew exists || echo missing
 <<<
 >>>
 hebrew exists
 >>>= 0
 
-if exist "test\cli\output\fs_unicode_remote\test-chinese.txt" (echo chinese exists) else (echo missing)
+test -f test/cli/output/fs_unicode_remote/test-chinese.txt && echo chinese exists || echo missing
 <<<
 >>>
 chinese exists
 >>>= 0
 
-if exist "test\cli\output\fs_unicode_remote\test-emoji.txt" (echo emoji exists) else (echo missing)
+test -f test/cli/output/fs_unicode_remote/test-emoji.txt && echo emoji exists || echo missing
 <<<
 >>>
 emoji exists
 >>>= 0
 
-if exist "test\cli\output\fs_unicode_remote\test-mixed.txt" (echo mixed exists) else (echo missing)
+test -f test/cli/output/fs_unicode_remote/test-mixed.txt && echo mixed exists || echo missing
 <<<
 >>>
 mixed exists
@@ -108,36 +108,36 @@ mixed exists
 # ======================================================================
 
 # ---- Create a new workspace and pull from remote ----
-mkdir test\cli\output\work_unicode_remote_b
+mkdir -p test/cli/output/work_unicode_remote_b
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_unicode_remote_b && bit init
+cd test/cli/output/work_unicode_remote_b && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_unicode_remote_b && bit remote add origin ..\fs_unicode_remote
+cd test/cli/output/work_unicode_remote_b && bit remote add origin ../fs_unicode_remote
 <<<
 >>> /Remote 'origin' added/
 >>>= 0
 
 # Pull should succeed and parse rclone JSON correctly (explicit remote, no upstream)
 # Before the fix, this would fail with "Failed to parse rclone JSON output"
-cd test\cli\output\work_unicode_remote_b && bit pull origin
+cd test/cli/output/work_unicode_remote_b && bit pull origin
 <<<
 >>> /Pull|Updating/
 >>>= 0
 
 # Verify files were pulled correctly
-if exist "test\cli\output\work_unicode_remote_b\test-hebrew.txt" (echo hebrew pulled) else (echo missing)
+test -f test/cli/output/work_unicode_remote_b/test-hebrew.txt && echo hebrew pulled || echo missing
 <<<
 >>>
 hebrew pulled
 >>>= 0
 
-if exist "test\cli\output\work_unicode_remote_b\test-chinese.txt" (echo chinese pulled) else (echo missing)
+test -f test/cli/output/work_unicode_remote_b/test-chinese.txt && echo chinese pulled || echo missing
 <<<
 >>>
 chinese pulled
@@ -147,7 +147,7 @@ chinese pulled
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_unicode_remote 2>nul & rmdir /s /q test\cli\output\work_unicode_remote_b 2>nul & rmdir /s /q test\cli\output\fs_unicode_remote 2>nul & echo cleanup done
+rm -rf test/cli/output/work_unicode_remote 2>/dev/null; rm -rf test/cli/output/work_unicode_remote_b 2>/dev/null; rm -rf test/cli/output/fs_unicode_remote 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done

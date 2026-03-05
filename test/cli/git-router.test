@@ -10,7 +10,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_router 2>nul & rmdir /s /q test\cli\output\work_router_git 2>nul & echo cleanup done
+rm -rf test/cli/output/work_router 2>/dev/null; rm -rf test/cli/output/work_router_git 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
@@ -65,35 +65,35 @@ bit become-bit
 # ======================================================================
 
 # Setup: create a bit repo
-mkdir test\cli\output\work_router
+mkdir -p test/cli/output/work_router
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_router && bit init
+cd test/cli/output/work_router && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # Router in a .bit repo routes to bit (bit status output)
-cd test\cli\output\work_router && set "BIT_REAL_GIT=git" & bit-git-router status
+cd test/cli/output/work_router && BIT_REAL_GIT=git bit-git-router status
 <<<
 >>> /On branch main/
 >>>= 0
 
 # Router passes add/commit through to bit
-cd test\cli\output\work_router && echo hello> file.txt & set "BIT_REAL_GIT=git" & bit-git-router add file.txt
+cd test/cli/output/work_router && echo hello > file.txt && BIT_REAL_GIT=git bit-git-router add file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_router && set "BIT_REAL_GIT=git" & bit-git-router commit -m "test commit"
+cd test/cli/output/work_router && BIT_REAL_GIT=git bit-git-router commit -m "test commit"
 <<<
 >>> /main.*test commit/
 >>>= 0
 
 # Router passes log through to bit
-cd test\cli\output\work_router && set "BIT_REAL_GIT=git" & bit-git-router log --oneline
+cd test/cli/output/work_router && BIT_REAL_GIT=git bit-git-router log --oneline
 <<<
 >>> /test commit/
 >>>= 0
@@ -103,20 +103,20 @@ cd test\cli\output\work_router && set "BIT_REAL_GIT=git" & bit-git-router log --
 # ======================================================================
 
 # Create a git repo via router init (from root dir, not inside bit repo)
-set "BIT_REAL_GIT=git" & bit-git-router init test\cli\output\work_router_git 2>&1
+BIT_REAL_GIT=git bit-git-router init test/cli/output/work_router_git 2>&1
 <<<
 >>> /Initialized/
 >>>= 0
 
 # Verify .git was created (standard git repo)
-if exist "test\cli\output\work_router_git\.git\" (echo git-exists) else (echo no-git)
+test -d test/cli/output/work_router_git/.git && echo git-exists || echo no-git
 <<<
 >>>
 git-exists
 >>>= 0
 
 # Verify .bit was NOT created (should be a plain git repo)
-if exist "test\cli\output\work_router_git\.bit\" (echo bit-exists) else (echo no-bit)
+test -d test/cli/output/work_router_git/.bit && echo bit-exists || echo no-bit
 <<<
 >>>
 no-bit
@@ -127,7 +127,7 @@ no-bit
 # ======================================================================
 
 # Router in a .git repo (no .bit) routes to real git
-cd test\cli\output\work_router_git && set "BIT_REAL_GIT=git" & bit-git-router status
+cd test/cli/output/work_router_git && BIT_REAL_GIT=git bit-git-router status
 <<<
 >>> /On branch/
 >>>= 0
@@ -137,13 +137,13 @@ cd test\cli\output\work_router_git && set "BIT_REAL_GIT=git" & bit-git-router st
 # ======================================================================
 
 # git -c key=val init via router still goes to real git (run from .bit repo)
-cd test\cli\output\work_router && set "BIT_REAL_GIT=git" & bit-git-router -c init.defaultBranch=main init subgit 2>&1
+cd test/cli/output/work_router && BIT_REAL_GIT=git bit-git-router -c init.defaultBranch=main init subgit 2>&1
 <<<
 >>> /Initialized|Reinitialized/
 >>>= 0
 
 # Verify the subgit dir has .git (real git, not bit)
-if exist "test\cli\output\work_router\subgit\.git\" (echo git-exists) else (echo no-git)
+test -d test/cli/output/work_router/subgit/.git && echo git-exists || echo no-git
 <<<
 >>>
 git-exists
@@ -153,7 +153,7 @@ git-exists
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_router 2>nul & rmdir /s /q test\cli\output\work_router_git 2>nul & echo cleanup done
+rm -rf test/cli/output/work_router 2>/dev/null; rm -rf test/cli/output/work_router_git 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done

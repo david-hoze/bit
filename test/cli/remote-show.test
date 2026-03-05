@@ -3,13 +3,13 @@
 #
 # Tests:
 # - bit remote show with no remotes configured
-# - bit remote show after adding one remote  
+# - bit remote show after adding one remote
 # - bit remote show after adding multiple remotes
 # - bit remote show <name> for specific remote details
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs (timeout helps Windows release file handles) ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_remote_show 2>nul & rmdir /s /q test\cli\output\remote_show_a 2>nul & rmdir /s /q test\cli\output\remote_show_b 2>nul & echo cleanup done
+rm -rf test/cli/output/work_remote_show 2>/dev/null; rm -rf test/cli/output/remote_show_a 2>/dev/null; rm -rf test/cli/output/remote_show_b 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
@@ -19,18 +19,18 @@ cleanup done
 # SECTION 1: No remotes configured
 # ======================================================================
 
-mkdir test\cli\output\work_remote_show
+mkdir -p test/cli/output/work_remote_show
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_remote_show && bit init
+cd test/cli/output/work_remote_show && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Test: bit remote show with no remotes ----
-cd test\cli\output\work_remote_show && bit remote show
+cd test/cli/output/work_remote_show && bit remote show
 <<<
 >>> /No remotes configured.*bit remote add/
 >>>= 0
@@ -39,34 +39,34 @@ cd test\cli\output\work_remote_show && bit remote show
 # SECTION 2: Single remote
 # ======================================================================
 
-mkdir test\cli\output\remote_show_a
+mkdir -p test/cli/output/remote_show_a
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_remote_show && bit remote add dok1 ..\remote_show_a
+cd test/cli/output/work_remote_show && bit remote add dok1 ../remote_show_a
 <<<
 >>> /Remote.*added/
 >>>= 0
 
 # ---- Test: bit remote show lists the remote ----
-cd test\cli\output\work_remote_show && bit remote show
+cd test/cli/output/work_remote_show && bit remote show
 <<<
 >>> /dok1.*remote_show_a/
 >>>= 0
 
 # ---- Test: bit remote show <name> shows details ----
-cd test\cli\output\work_remote_show && bit remote show dok1
+cd test/cli/output/work_remote_show && bit remote show dok1
 <<<
 >>> /dok1.*remote_show_a/
 >>>= 0
 
 # ---- Test: push status line (up to date, fast-forwardable, local out of date, or diverged) ----
-cd test\cli\output\work_remote_show && echo x> f.txt & bit add f.txt & bit commit -m "Add f" & bit push dok1 & bit fetch dok1
+cd test/cli/output/work_remote_show && echo x > f.txt && bit add f.txt && bit commit -m "Add f" && bit push dok1 && bit fetch dok1
 <<<
 >>>= 0
 
-cd test\cli\output\work_remote_show && bit remote show dok1
+cd test/cli/output/work_remote_show && bit remote show dok1
 <<<
 >>> /main pushes to main \(up to date\)/
 >>>= 0
@@ -75,29 +75,29 @@ cd test\cli\output\work_remote_show && bit remote show dok1
 # SECTION 3: Multiple remotes
 # ======================================================================
 
-mkdir test\cli\output\remote_show_b
+mkdir -p test/cli/output/remote_show_b
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_remote_show && bit remote add backup ..\remote_show_b
+cd test/cli/output/work_remote_show && bit remote add backup ../remote_show_b
 <<<
 >>> /Remote.*added/
 >>>= 0
 
 # ---- Test: bit remote show lists all remotes ----
-cd test\cli\output\work_remote_show && bit remote show
+cd test/cli/output/work_remote_show && bit remote show
 <<<
 >>> /dok1.*remote_show_a/
 >>>= 0
 
-cd test\cli\output\work_remote_show && bit remote show
+cd test/cli/output/work_remote_show && bit remote show
 <<<
 >>> /backup.*remote_show_b/
 >>>= 0
 
 # ---- Test: bit remote show <name> still works for specific remote ----
-cd test\cli\output\work_remote_show && bit remote show backup
+cd test/cli/output/work_remote_show && bit remote show backup
 <<<
 >>> /backup.*remote_show_b/
 >>>= 0
@@ -106,7 +106,7 @@ cd test\cli\output\work_remote_show && bit remote show backup
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_remote_show 2>nul & rmdir /s /q test\cli\output\remote_show_a 2>nul & rmdir /s /q test\cli\output\remote_show_b 2>nul & echo cleanup done
+rm -rf test/cli/output/work_remote_show 2>/dev/null; rm -rf test/cli/output/remote_show_a 2>/dev/null; rm -rf test/cli/output/remote_show_b 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done

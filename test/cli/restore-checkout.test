@@ -1,129 +1,129 @@
 # Test restore and checkout commands (git-compatible syntax)
 # Setup: fresh repo with committed file
-rmdir /s /q test\cli\output\work_restore 2>nul & mkdir test\cli\output\work_restore & cd test\cli\output\work_restore & bit init
+rm -rf test/cli/output/work_restore 2>/dev/null; mkdir -p test/cli/output/work_restore && cd test/cli/output/work_restore && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_restore && echo original> file.txt & bit add file.txt & bit commit -m "Add file"
+cd test/cli/output/work_restore && echo original > file.txt && bit add file.txt && bit commit -m "Add file"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
 # Modify file, then restore (discard working tree changes)
-cd test\cli\output\work_restore && echo modified> file.txt
+cd test/cli/output/work_restore && echo modified > file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_restore && bit restore file.txt
+cd test/cli/output/work_restore && bit restore file.txt
 <<<
 >>>
 >>>= 0
 
-findstr /C:"original" test\cli\output\work_restore\file.txt >nul
+grep -q 'original' test/cli/output/work_restore/file.txt
 <<<
 >>>
 >>>= 0
 
 # Modify again, use restore -- (explicit pathspec separator, like git)
-cd test\cli\output\work_restore && echo changed> file.txt & bit restore -- file.txt
+cd test/cli/output/work_restore && echo changed > file.txt && bit restore -- file.txt
 <<<
 >>>
 >>>= 0
 
-findstr /C:"original" test\cli\output\work_restore\file.txt >nul
+grep -q 'original' test/cli/output/work_restore/file.txt
 <<<
 >>>
 >>>= 0
 
 # Modify, then checkout -- (legacy git syntax)
-cd test\cli\output\work_restore && echo discarded> file.txt & bit checkout -- file.txt
+cd test/cli/output/work_restore && echo discarded > file.txt && bit checkout -- file.txt
 <<<
 >>>
 >>>= 0
 
-findstr /C:"original" test\cli\output\work_restore\file.txt >nul
+grep -q 'original' test/cli/output/work_restore/file.txt
 <<<
 >>>
 >>>= 0
 
 # Test restore --staged (unstage without discarding working tree)
-cd test\cli\output\work_restore && echo staged change> file.txt & bit add file.txt
+cd test/cli/output/work_restore && echo staged change > file.txt && bit add file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_restore && bit restore --staged file.txt
+cd test/cli/output/work_restore && bit restore --staged file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_restore && bit status
+cd test/cli/output/work_restore && bit status
 <<<
 >>> /modified:.*file\.txt/
 >>>= 0
 
-findstr /C:"staged change" test\cli\output\work_restore\file.txt >nul
+grep -q 'staged change' test/cli/output/work_restore/file.txt
 <<<
 >>>
 >>>= 0
 
 # Restore working tree (discard the modification)
-cd test\cli\output\work_restore && bit restore file.txt
+cd test/cli/output/work_restore && bit restore file.txt
 <<<
 >>>
 >>>= 0
 
-findstr /C:"original" test\cli\output\work_restore\file.txt >nul
+grep -q 'original' test/cli/output/work_restore/file.txt
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_restore && bit status
+cd test/cli/output/work_restore && bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
 
 # Test restore . (all files)
-cd test\cli\output\work_restore && echo a> a.txt & echo b> b.txt & bit add . & bit commit -m "Add a and b"
+cd test/cli/output/work_restore && echo a > a.txt && echo b > b.txt && bit add . && bit commit -m "Add a and b"
 <<<
 >>> /\[master|main|files? changed/
 >>>= 0
 
-cd test\cli\output\work_restore && echo x> a.txt & echo y> b.txt & bit restore .
+cd test/cli/output/work_restore && echo x > a.txt && echo y > b.txt && bit restore .
 <<<
 >>>
 >>>= 0
 
-findstr /C:"a" test\cli\output\work_restore\a.txt >nul
+grep -q 'a' test/cli/output/work_restore/a.txt
 <<<
 >>>
 >>>= 0
 
-findstr /C:"b" test\cli\output\work_restore\b.txt >nul
+grep -q 'b' test/cli/output/work_restore/b.txt
 <<<
 >>>
 >>>= 0
 
 # Test checkout -- with multiple paths
-cd test\cli\output\work_restore && echo XX> a.txt & echo YY> b.txt & bit checkout -- a.txt b.txt
+cd test/cli/output/work_restore && echo XX > a.txt && echo YY > b.txt && bit checkout -- a.txt b.txt
 <<<
 >>>
 >>>= 0
 
-findstr /C:"a" test\cli\output\work_restore\a.txt >nul
+grep -q 'a' test/cli/output/work_restore/a.txt
 <<<
 >>>
 >>>= 0
 
-findstr /C:"b" test\cli\output\work_restore\b.txt >nul
+grep -q 'b' test/cli/output/work_restore/b.txt
 <<<
 >>>
 >>>= 0
 
 # Cleanup text tests
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_restore 2>nul & echo cleanup done
+rm -rf test/cli/output/work_restore 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
@@ -134,87 +134,87 @@ cleanup done
 # ======================================================================
 
 # Setup: solid mode repo with small CDC chunk sizes
-mkdir test\cli\output\work_restore_bin
+mkdir -p test/cli/output/work_restore_bin
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_restore_bin && bit init
+cd test/cli/output/work_restore_bin && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_restore_bin && bit config core.mode solid
+cd test/cli/output/work_restore_bin && bit config core.mode solid
 <<<
 >>> /[Ss]olid|Mode set/
 >>>= 0
 
-cd test\cli\output\work_restore_bin && bit config cdc.min-size 64
+cd test/cli/output/work_restore_bin && bit config cdc.min-size 64
 <<<
 >>>= 0
 
-cd test\cli\output\work_restore_bin && bit config cdc.avg-size 256
+cd test/cli/output/work_restore_bin && bit config cdc.avg-size 256
 <<<
 >>>= 0
 
-cd test\cli\output\work_restore_bin && bit config cdc.max-size 1024
+cd test/cli/output/work_restore_bin && bit config cdc.max-size 1024
 <<<
 >>>= 0
 
 # Create a deterministic binary file large enough for CDC chunking
-cd test\cli\output\work_restore_bin && powershell -Command "$b = New-Object byte[] 4096; for($i=0;$i -lt 4096;$i++){$b[$i]=$i%256}; [IO.File]::WriteAllBytes('data.bin',$b)"
+cd test/cli/output/work_restore_bin && dd if=/dev/urandom of=data.bin bs=1 count=4096 2>/dev/null
 <<<
 >>>= 0
 
-cd test\cli\output\work_restore_bin && bit add data.bin && bit commit -m "v1: original binary"
+cd test/cli/output/work_restore_bin && bit add data.bin && bit commit -m "v1: original binary"
 <<<
 >>> /\[main|master/
 >>>= 0
 
 # Modify first bytes of binary and commit v2
-cd test\cli\output\work_restore_bin && powershell -Command "$b = [IO.File]::ReadAllBytes('data.bin'); $e = [Text.Encoding]::ASCII.GetBytes('EDITED!!'); [Array]::Copy($e,$b,$e.Length); [IO.File]::WriteAllBytes('data.bin',$b)"
+cd test/cli/output/work_restore_bin && printf 'EDITED!!' | dd of=data.bin bs=1 count=8 conv=notrunc 2>/dev/null
 <<<
 >>>= 0
 
-cd test\cli\output\work_restore_bin && bit add data.bin && bit commit -m "v2: modified binary"
+cd test/cli/output/work_restore_bin && bit add data.bin && bit commit -m "v2: modified binary"
 <<<
 >>> /\[main|master/
 >>>= 0
 
 # Checkout v1 binary from HEAD~1 — should reassemble from CAS chunks
-cd test\cli\output\work_restore_bin && bit checkout HEAD~1 -- data.bin
+cd test/cli/output/work_restore_bin && bit checkout HEAD~1 -- data.bin
 <<<
 >>>= 0
 
 # Commit the checkout so HEAD matches working tree, then verify
-cd test\cli\output\work_restore_bin && bit commit -m "v3: restored to v1"
+cd test/cli/output/work_restore_bin && bit commit -m "v3: restored to v1"
 <<<
 >>> /\[main|master/
 >>>= 0
 
-cd test\cli\output\work_restore_bin && bit verify
+cd test/cli/output/work_restore_bin && bit verify
 <<<
 >>> /All .* files? match|Verified|0 issues/
 >>>= 0
 
 # Overwrite binary in working tree (don't stage/commit)
-cd test\cli\output\work_restore_bin && echo CORRUPT!> data.bin
+cd test/cli/output/work_restore_bin && echo CORRUPT! > data.bin
 <<<
 >>>= 0
 
 # Restore should reassemble from CAS (HEAD still has v1 metadata after checkout)
-cd test\cli\output\work_restore_bin && bit restore data.bin
+cd test/cli/output/work_restore_bin && bit restore data.bin
 <<<
 >>>= 0
 
 # Verify file matches committed metadata
-cd test\cli\output\work_restore_bin && bit verify
+cd test/cli/output/work_restore_bin && bit verify
 <<<
 >>> /All .* files? match|Verified|0 issues/
 >>>= 0
 
 # Cleanup
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_restore_bin 2>nul & echo cleanup done
+rm -rf test/cli/output/work_restore_bin 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done

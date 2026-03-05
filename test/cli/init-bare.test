@@ -9,7 +9,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_bare 2>nul & echo cleanup done
+rm -rf test/cli/output/work_bare 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
@@ -20,34 +20,34 @@ cleanup done
 # ======================================================================
 
 # ---- bit init --bare creates a standard git bare repo ----
-mkdir test\cli\output\work_bare & cd test\cli\output\work_bare & bit init --bare bare.git
+mkdir -p test/cli/output/work_bare && cd test/cli/output/work_bare && bit init --bare bare.git
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Bare repo has HEAD (standard git bare repo) ----
-if exist "test\cli\output\work_bare\bare.git\HEAD" (echo exists) else (echo missing)
+test -f test/cli/output/work_bare/bare.git/HEAD && echo exists || echo missing
 <<<
 >>>
 exists
 >>>= 0
 
 # ---- Bare repo has bit/cas/ directory ----
-if exist "test\cli\output\work_bare\bare.git\bit\cas\" (echo exists) else (echo missing)
+test -d test/cli/output/work_bare/bare.git/bit/cas && echo exists || echo missing
 <<<
 >>>
 exists
 >>>= 0
 
 # ---- Bare repo has objects/ (standard git structure) ----
-if exist "test\cli\output\work_bare\bare.git\objects\" (echo exists) else (echo missing)
+test -d test/cli/output/work_bare/bare.git/objects && echo exists || echo missing
 <<<
 >>>
 exists
 >>>= 0
 
 # ---- Bare repo does NOT have .bit/ (not a normal bit repo) ----
-if exist "test\cli\output\work_bare\bare.git\.bit\" (echo has-dotbit) else (echo no-dotbit)
+test -d test/cli/output/work_bare/bare.git/.bit && echo has-dotbit || echo no-dotbit
 <<<
 >>>
 no-dotbit
@@ -58,13 +58,13 @@ no-dotbit
 # ======================================================================
 
 # ---- Normal init creates .bit/cas/ ----
-mkdir test\cli\output\work_bare\normal & cd test\cli\output\work_bare\normal & bit init
+mkdir -p test/cli/output/work_bare/normal && cd test/cli/output/work_bare/normal && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Verify .bit/cas/ exists in normal repo ----
-if exist "test\cli\output\work_bare\normal\.bit\cas\" (echo exists) else (echo missing)
+test -d test/cli/output/work_bare/normal/.bit/cas && echo exists || echo missing
 <<<
 >>>
 exists
@@ -75,13 +75,13 @@ exists
 # ======================================================================
 
 # ---- Known bit commands rejected in bare repo ----
-cd test\cli\output\work_bare\bare.git && bit status
+cd test/cli/output/work_bare/bare.git && bit status
 <<<
 >>>2 /work tree/
 >>>= 128
 
 # ---- Git passthrough works in bare repo (e.g. git config) ----
-cd test\cli\output\work_bare\bare.git && bit config core.bare
+cd test/cli/output/work_bare/bare.git && bit config core.bare
 <<<
 >>>
 true
@@ -91,7 +91,7 @@ true
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_bare 2>nul & echo cleanup done
+rm -rf test/cli/output/work_bare 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done

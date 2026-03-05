@@ -10,7 +10,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_inittpl 2>nul & rmdir /s /q test\cli\output\tpl_source 2>nul & echo cleanup done
+rm -rf test/cli/output/work_inittpl 2>/dev/null; rm -rf test/cli/output/tpl_source 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
@@ -20,7 +20,7 @@ cleanup done
 # SETUP
 # ======================================================================
 
-mkdir test\cli\output\work_inittpl
+mkdir -p test/cli/output/work_inittpl
 <<<
 >>>= 0
 
@@ -29,44 +29,44 @@ mkdir test\cli\output\work_inittpl
 # ======================================================================
 
 # ---- Create a template source directory with a custom hook file ----
-mkdir test\cli\output\tpl_source & mkdir test\cli\output\tpl_source\hooks & echo custom-hook> test\cli\output\tpl_source\hooks\pre-commit.sample
+mkdir -p test/cli/output/tpl_source/hooks && echo custom-hook > test/cli/output/tpl_source/hooks/pre-commit.sample
 <<<
 >>>= 0
 
 # ---- Init with --template= pointing to relative path ----
-cd test\cli\output\work_inittpl && bit init -q --template=..\tpl_source repo_tpl1
+cd test/cli/output/work_inittpl && bit init -q --template=../tpl_source repo_tpl1
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Template hook was copied into the repo ----
-if exist "test\cli\output\work_inittpl\repo_tpl1\.bit\index\.git\hooks\pre-commit.sample" (echo TEMPLATE_COPIED) else (echo TEMPLATE_MISSING)
+test -f test/cli/output/work_inittpl/repo_tpl1/.bit/index/.git/hooks/pre-commit.sample && echo TEMPLATE_COPIED || echo TEMPLATE_MISSING
 <<<
 >>>
 TEMPLATE_COPIED
 >>>= 0
 
 # ---- Init with --template <space> form ----
-cd test\cli\output\work_inittpl && bit init -q --template ..\tpl_source repo_tpl2
+cd test/cli/output/work_inittpl && bit init -q --template ../tpl_source repo_tpl2
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Template hook was copied (space form) ----
-if exist "test\cli\output\work_inittpl\repo_tpl2\.bit\index\.git\hooks\pre-commit.sample" (echo TEMPLATE_COPIED) else (echo TEMPLATE_MISSING)
+test -f test/cli/output/work_inittpl/repo_tpl2/.bit/index/.git/hooks/pre-commit.sample && echo TEMPLATE_COPIED || echo TEMPLATE_MISSING
 <<<
 >>>
 TEMPLATE_COPIED
 >>>= 0
 
 # ---- Init with blank --template= (no templates copied) ----
-cd test\cli\output\work_inittpl && bit init -q --template= repo_tpl3
+cd test/cli/output/work_inittpl && bit init -q --template= repo_tpl3
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- Blank template means no default hooks ----
-if exist "test\cli\output\work_inittpl\repo_tpl3\.bit\index\.git\hooks\pre-commit.sample" (echo HAS_HOOK) else (echo NO_HOOK)
+test -f test/cli/output/work_inittpl/repo_tpl3/.bit/index/.git/hooks/pre-commit.sample && echo HAS_HOOK || echo NO_HOOK
 <<<
 >>>
 NO_HOOK
@@ -77,13 +77,13 @@ NO_HOOK
 # ======================================================================
 
 # ---- Init with --shared=group ----
-cd test\cli\output\work_inittpl && bit init -q --shared=group repo_shared
+cd test/cli/output/work_inittpl && bit init -q --shared=group repo_shared
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- core.sharedRepository should be set ----
-cd test\cli\output\work_inittpl\repo_shared && bit config core.sharedRepository
+cd test/cli/output/work_inittpl/repo_shared && bit config core.sharedRepository
 <<<
 >>> /1|group|true/
 >>>= 0
@@ -93,12 +93,12 @@ cd test\cli\output\work_inittpl\repo_shared && bit config core.sharedRepository
 # ======================================================================
 
 # ---- Create two temp files to diff ----
-echo file-a> test\cli\output\work_inittpl\a.txt & echo file-b> test\cli\output\work_inittpl\b.txt
+echo file-a > test/cli/output/work_inittpl/a.txt && echo file-b > test/cli/output/work_inittpl/b.txt
 <<<
 >>>= 0
 
 # ---- GIT_DIR=/dev/null bit diff --no-index should work (exit 1 = files differ) ----
-cd test\cli\output\work_inittpl && set "GIT_DIR=/dev/null" & bit diff --no-index --stat a.txt b.txt
+cd test/cli/output/work_inittpl && GIT_DIR=/dev/null bit diff --no-index --stat a.txt b.txt
 <<<
 >>> /a\.txt.*b\.txt/
 >>>= 1
@@ -108,29 +108,29 @@ cd test\cli\output\work_inittpl && set "GIT_DIR=/dev/null" & bit diff --no-index
 # ======================================================================
 
 # ---- Create a repo with --separate-git-dir (creates .git gitlink file) ----
-mkdir test\cli\output\work_inittpl\sgdir_db
+mkdir -p test/cli/output/work_inittpl/sgdir_db
 <<<
 >>>= 0
 
-cd test\cli\output\work_inittpl && bit init -q --separate-git-dir test\cli\output\work_inittpl\sgdir_db repo_junc
+cd test/cli/output/work_inittpl && bit init -q --separate-git-dir test/cli/output/work_inittpl/sgdir_db repo_junc
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- .git should be a file (gitlink), not directory ----
-cd test\cli\output\work_inittpl\repo_junc && if exist .git (if exist .git\NUL (echo IS_DIR) else (echo IS_FILE)) else (echo NO_GIT)
+cd test/cli/output/work_inittpl/repo_junc && if test -f .git; then if test -d .git; then echo IS_DIR; else echo IS_FILE; fi; else echo NO_GIT; fi
 <<<
 >>>
 IS_FILE
 >>>= 0
 
 # ---- Write a custom config file in CWD ----
-cd test\cli\output\work_inittpl\repo_junc && echo [test]> custom.cfg & echo     value = hello>> custom.cfg
+cd test/cli/output/work_inittpl/repo_junc && printf '[test]\n    value = hello\n' > custom.cfg
 <<<
 >>>= 0
 
 # ---- bit config -f custom.cfg should read relative to CWD, not .bit/index ----
-cd test\cli\output\work_inittpl\repo_junc && bit config -f custom.cfg test.value
+cd test/cli/output/work_inittpl/repo_junc && bit config -f custom.cfg test.value
 <<<
 >>>
 hello
@@ -140,7 +140,7 @@ hello
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_inittpl 2>nul & rmdir /s /q test\cli\output\tpl_source 2>nul & echo cleanup done
+rm -rf test/cli/output/work_inittpl 2>/dev/null; rm -rf test/cli/output/tpl_source 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done

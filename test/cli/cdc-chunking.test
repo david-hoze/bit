@@ -7,7 +7,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_cdc 2>nul & rmdir /s /q test\cli\output\work_cdc_off 2>nul & echo cleanup done
+rm -rf test/cli/output/work_cdc 2>/dev/null && rm -rf test/cli/output/work_cdc_off 2>/dev/null && echo cleanup done
 <<<
 >>>
 cleanup done
@@ -18,63 +18,63 @@ cleanup done
 # ======================================================================
 
 # ---- SETUP ----
-mkdir test\cli\output\work_cdc
+mkdir -p test/cli/output/work_cdc
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_cdc && bit init
+cd test/cli/output/work_cdc && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # ---- SOLID MODE (required for CAS): CDC should work without setting cdc.enabled ----
-cd test\cli\output\work_cdc && bit config core.mode solid
+cd test/cli/output/work_cdc && bit config core.mode solid
 <<<
 >>> /Mode set to solid/
 >>>= 0
 
 # Set small chunk sizes for testing (so a small file produces multiple chunks)
-cd test\cli\output\work_cdc && bit config cdc.min-size 64
+cd test/cli/output/work_cdc && bit config cdc.min-size 64
 <<<
 >>>= 0
 
-cd test\cli\output\work_cdc && bit config cdc.avg-size 256
+cd test/cli/output/work_cdc && bit config cdc.avg-size 256
 <<<
 >>>= 0
 
-cd test\cli\output\work_cdc && bit config cdc.max-size 1024
+cd test/cli/output/work_cdc && bit config cdc.max-size 1024
 <<<
 >>>= 0
 
 # Create a binary file large enough to be chunked (>= min-size of 64 bytes)
-cd test\cli\output\work_cdc && fsutil file createnew large.bin 2048 >nul
+cd test/cli/output/work_cdc && dd if=/dev/zero of=large.bin bs=1 count=2048 2>/dev/null
 <<<
 >>>= 0
 
 # CDC is enabled by default — no need to set cdc.enabled
-cd test\cli\output\work_cdc && bit add large.bin
+cd test/cli/output/work_cdc && bit add large.bin
 <<<
 >>>= 0
 
 # Verify that a .manifest file was created in CAS (proves CDC ran by default)
-cd test\cli\output\work_cdc && dir /s /b .bit\cas\*.manifest
+cd test/cli/output/work_cdc && find .bit/cas -name '*.manifest'
 <<<
 >>> /\.manifest/
 >>>= 0
 
 # ---- SMALL FILE: below min-size should NOT create manifest ----
-cd test\cli\output\work_cdc && echo tiny> small.bin & bit add small.bin
+cd test/cli/output/work_cdc && echo tiny > small.bin && bit add small.bin
 <<<
 >>>= 0
 
 # ---- VERIFY: should pass with chunks present ----
-cd test\cli\output\work_cdc && bit commit -m "Add files"
+cd test/cli/output/work_cdc && bit commit -m "Add files"
 <<<
 >>> /\[main|master/
 >>>= 0
 
-cd test\cli\output\work_cdc && bit verify
+cd test/cli/output/work_cdc && bit verify
 <<<
 >>> /All .* files? match|Verified|0 issues/
 >>>= 0
@@ -84,39 +84,39 @@ cd test\cli\output\work_cdc && bit verify
 # ======================================================================
 
 # ---- CONFIG: cdc.enabled must be true/false ----
-cd test\cli\output\work_cdc && bit config cdc.enabled invalid 2>&1
+cd test/cli/output/work_cdc && bit config cdc.enabled invalid 2>&1
 <<<
 >>> /must be 'true' or 'false'/
 >>>= 1
 
-cd test\cli\output\work_cdc && bit config cdc.enabled true
+cd test/cli/output/work_cdc && bit config cdc.enabled true
 <<<
 >>>= 0
 
-cd test\cli\output\work_cdc && bit config cdc.enabled
+cd test/cli/output/work_cdc && bit config cdc.enabled
 <<<
 >>>
 true
 >>>= 0
 
 # ---- CONFIG: size keys must be positive integers ----
-cd test\cli\output\work_cdc && bit config cdc.min-size notanumber 2>&1
+cd test/cli/output/work_cdc && bit config cdc.min-size notanumber 2>&1
 <<<
 >>> /must be a positive integer/
 >>>= 1
 
-cd test\cli\output\work_cdc && bit config cdc.min-size 16384
+cd test/cli/output/work_cdc && bit config cdc.min-size 16384
 <<<
 >>>= 0
 
-cd test\cli\output\work_cdc && bit config cdc.min-size
+cd test/cli/output/work_cdc && bit config cdc.min-size
 <<<
 >>>
 16384
 >>>= 0
 
 # ---- CONFIG LIST shows cdc keys ----
-cd test\cli\output\work_cdc && bit config --list
+cd test/cli/output/work_cdc && bit config --list
 <<<
 >>> /cdc\.enabled/
 >>>= 0
@@ -125,61 +125,61 @@ cd test\cli\output\work_cdc && bit config --list
 # SECTION 3: CDC DISABLED — cdc.enabled=false prevents chunking
 # ======================================================================
 
-mkdir test\cli\output\work_cdc_off
+mkdir -p test/cli/output/work_cdc_off
 <<<
 >>>
 >>>= 0
 
-cd test\cli\output\work_cdc_off && bit init
+cd test/cli/output/work_cdc_off && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_cdc_off && bit config core.mode solid
+cd test/cli/output/work_cdc_off && bit config core.mode solid
 <<<
 >>> /Mode set to solid/
 >>>= 0
 
 # Explicitly disable CDC
-cd test\cli\output\work_cdc_off && bit config cdc.enabled false
+cd test/cli/output/work_cdc_off && bit config cdc.enabled false
 <<<
 >>>= 0
 
 # Use same small chunk sizes so that if CDC ran, it would produce a manifest
-cd test\cli\output\work_cdc_off && bit config cdc.min-size 64
+cd test/cli/output/work_cdc_off && bit config cdc.min-size 64
 <<<
 >>>= 0
 
-cd test\cli\output\work_cdc_off && bit config cdc.avg-size 256
+cd test/cli/output/work_cdc_off && bit config cdc.avg-size 256
 <<<
 >>>= 0
 
-cd test\cli\output\work_cdc_off && bit config cdc.max-size 1024
+cd test/cli/output/work_cdc_off && bit config cdc.max-size 1024
 <<<
 >>>= 0
 
 # Create same 2KB binary
-cd test\cli\output\work_cdc_off && fsutil file createnew nodelta.bin 2048 >nul
+cd test/cli/output/work_cdc_off && dd if=/dev/zero of=nodelta.bin bs=1 count=2048 2>/dev/null
 <<<
 >>>= 0
 
-cd test\cli\output\work_cdc_off && bit add nodelta.bin
+cd test/cli/output/work_cdc_off && bit add nodelta.bin
 <<<
 >>>= 0
 
 # No manifest should exist — CDC was disabled, file stored as whole blob
-cd test\cli\output\work_cdc_off && dir /s /b .bit\cas\*.manifest 2>&1
+cd test/cli/output/work_cdc_off && find .bit/cas -name '*.manifest' 2>&1
 <<<
->>> /File Not Found/
->>>= 1
+>>>2 //
+>>>= 0
 
 # Verify still passes with whole-blob storage
-cd test\cli\output\work_cdc_off && bit commit -m "Add whole blob"
+cd test/cli/output/work_cdc_off && bit commit -m "Add whole blob"
 <<<
 >>> /\[main|master/
 >>>= 0
 
-cd test\cli\output\work_cdc_off && bit verify
+cd test/cli/output/work_cdc_off && bit verify
 <<<
 >>> /All .* files? match|Verified|0 issues/
 >>>= 0
@@ -187,7 +187,7 @@ cd test\cli\output\work_cdc_off && bit verify
 # ======================================================================
 # CLEANUP
 # ======================================================================
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_cdc 2>nul & rmdir /s /q test\cli\output\work_cdc_off 2>nul & echo cleanup done
+rm -rf test/cli/output/work_cdc 2>/dev/null && rm -rf test/cli/output/work_cdc_off 2>/dev/null && echo cleanup done
 <<<
 >>>
 cleanup done

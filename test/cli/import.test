@@ -5,7 +5,7 @@
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_import 2>nul & rmdir /s /q test\cli\output\work_import_ext 2>nul & rmdir /s /q test\cli\output\work_import_nobit 2>nul & echo cleanup done
+rm -rf test/cli/output/work_import 2>/dev/null; rm -rf test/cli/output/work_import_ext 2>/dev/null; rm -rf test/cli/output/work_import_nobit 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
@@ -15,7 +15,7 @@ cleanup done
 # SECTION 1: SETUP - create a git repo with history
 # ======================================================================
 
-mkdir test\cli\output\work_import & cd test\cli\output\work_import & git init & echo hello> file.txt & git add file.txt & git commit -m "initial commit" & echo world> file2.txt & git add file2.txt & git commit -m "second commit"
+mkdir -p test/cli/output/work_import && cd test/cli/output/work_import && git init && echo hello > file.txt && git add file.txt && git commit -m "initial commit" && echo world > file2.txt && git add file2.txt && git commit -m "second commit"
 <<<
 >>> /.*commit.*/
 >>>= 0
@@ -25,33 +25,33 @@ mkdir test\cli\output\work_import & cd test\cli\output\work_import & git init & 
 # ======================================================================
 
 # ---- Run bit import from inside the git repo ----
-cd test\cli\output\work_import && set "BIT_GIT_JUNCTION=1" & bit import
+cd test/cli/output/work_import && BIT_GIT_JUNCTION=1 bit import
 <<<
 >>> /Imported git repository/
 >>>= 0
 
 # ---- Verify .bit directory exists ----
-if exist "test\cli\output\work_import\.bit\" (echo bit-exists) else (echo bit-missing)
+test -d test/cli/output/work_import/.bit && echo bit-exists || echo bit-missing
 <<<
 >>>
 bit-exists
 >>>= 0
 
 # ---- Verify .git exists at root (hybrid layout: real dir) ----
-if exist "test\cli\output\work_import\.git\HEAD" (echo root-git-exists) else (echo root-git-missing)
+test -f test/cli/output/work_import/.git/HEAD && echo root-git-exists || echo root-git-missing
 <<<
 >>>
 root-git-exists
 >>>= 0
 
 # ---- Verify git history is preserved ----
-cd test\cli\output\work_import && git log --oneline
+cd test/cli/output/work_import && git log --oneline
 <<<
 >>> /initial commit/
 >>>= 0
 
 # ---- Verify bit status shows files need committing (metadata transition) ----
-cd test\cli\output\work_import && set "BIT_GIT_JUNCTION=1" & bit status
+cd test/cli/output/work_import && BIT_GIT_JUNCTION=1 bit status
 <<<
 >>> /Untracked|modified/
 >>>= 0
@@ -61,13 +61,13 @@ cd test\cli\output\work_import && set "BIT_GIT_JUNCTION=1" & bit status
 # ======================================================================
 
 # ---- Error: not a git repo ----
-mkdir test\cli\output\work_import_nobit & cd test\cli\output\work_import_nobit & bit import
+mkdir -p test/cli/output/work_import_nobit && cd test/cli/output/work_import_nobit && bit import
 <<<
 >>>2 /not a git repository/
 >>>= 1
 
 # ---- Error: already a bit repo ----
-cd test\cli\output\work_import && bit import
+cd test/cli/output/work_import && bit import
 <<<
 >>>2 /already a bit repository/
 >>>= 1
@@ -77,19 +77,19 @@ cd test\cli\output\work_import && bit import
 # ======================================================================
 
 # ---- Create another git repo for external import ----
-mkdir test\cli\output\work_import_ext & cd test\cli\output\work_import_ext & git init & echo test> f.txt & git add f.txt & git commit -m "ext commit"
+mkdir -p test/cli/output/work_import_ext && cd test/cli/output/work_import_ext && git init && echo test > f.txt && git add f.txt && git commit -m "ext commit"
 <<<
 >>> /.*commit.*/
 >>>= 0
 
 # ---- Import from outside the repo ----
-set "BIT_GIT_JUNCTION=1" & bit import test\cli\output\work_import_ext
+BIT_GIT_JUNCTION=1 bit import test/cli/output/work_import_ext
 <<<
 >>> /Imported git repository/
 >>>= 0
 
 # ---- Verify the external import worked (hybrid layout: .git at root) ----
-if exist "test\cli\output\work_import_ext\.git\HEAD" (echo ext-ok) else (echo ext-fail)
+test -f test/cli/output/work_import_ext/.git/HEAD && echo ext-ok || echo ext-fail
 <<<
 >>>
 ext-ok
@@ -99,7 +99,7 @@ ext-ok
 # CLEANUP
 # ======================================================================
 
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_import 2>nul & rmdir /s /q test\cli\output\work_import_ext 2>nul & rmdir /s /q test\cli\output\work_import_nobit 2>nul & echo cleanup done
+rm -rf test/cli/output/work_import 2>/dev/null; rm -rf test/cli/output/work_import_ext 2>/dev/null; rm -rf test/cli/output/work_import_nobit 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done

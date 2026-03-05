@@ -1,26 +1,26 @@
 # bit fsck tests — passthrough to git fsck on .bit/index metadata repository
 
 # --- fsck on fresh repo (unborn branch): git fsck notices but exits 0 ---
-rmdir /s /q test\cli\output\work_fsck 2>nul & mkdir test\cli\output\work_fsck & cd test\cli\output\work_fsck & bit init
+rm -rf test/cli/output/work_fsck 2>/dev/null && mkdir -p test/cli/output/work_fsck && cd test/cli/output/work_fsck && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_fsck && bit fsck
+cd test/cli/output/work_fsck && bit fsck
 <<<
 >>>= 0
 
 # --- fsck on repo with committed files: clean, exits 0 ---
-rmdir /s /q test\cli\output\work_fsck 2>nul & mkdir test\cli\output\work_fsck & cd test\cli\output\work_fsck & bit init & echo hello> a.txt & bit add a.txt & bit commit -m "Add a"
+rm -rf test/cli/output/work_fsck 2>/dev/null && mkdir -p test/cli/output/work_fsck && cd test/cli/output/work_fsck && bit init && echo hello > a.txt && bit add a.txt && bit commit -m "Add a"
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test\cli\output\work_fsck && bit fsck
+cd test/cli/output/work_fsck && bit fsck
 <<<
 >>>= 0
 
 # --- cleanup ---
-timeout /t 1 >nul & rmdir /s /q test\cli\output\work_fsck 2>nul
+rm -rf test/cli/output/work_fsck 2>/dev/null
 <<<
 >>>= 0

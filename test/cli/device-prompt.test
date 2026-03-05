@@ -1,33 +1,30 @@
 # Device name prompt integration tests
 # Tests the interactive path when BIT_USE_STDIN=1 (piped input for testing)
-# Uses subst on Windows to create a writable volume root for .bit-store
-
-# --- Setup: subst creates Z: -> test/cli so we can write .bit-store at volume root ---
-cd test\cli & subst Z: . & cd ..\..
-<<<
->>>
->>>= 0
+#
+# The Windows version (test/cli/device-prompt.test) uses `subst` to create
+# a virtual drive letter. This cross-platform version uses a plain filesystem
+# remote instead — the device prompt logic is the same either way.
 
 # --- Setup: create work dir, remote dir, init bit ---
-rmdir /s /q test\cli\output\work 2>nul & rmdir /s /q test\cli\output\device_prompt_remote 2>nul & mkdir test\cli\output\work & mkdir test\cli\output\device_prompt_remote & cd test\cli\output\work & bit init
+rm -rf test/cli/output/work_devprompt test/cli/output/device_prompt_remote 2>/dev/null; mkdir -p test/cli/output/work_devprompt test/cli/output/device_prompt_remote && cd test/cli/output/work_devprompt && bit init
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
 # --- Add remote with piped device name (BIT_USE_STDIN=1) ---
-cd test\cli\output\work && set BIT_USE_STDIN=1 & echo test_device| bit remote add origin Z:\output\device_prompt_remote
+cd test/cli/output/work_devprompt && echo test_device | BIT_USE_STDIN=1 bit remote add origin ../device_prompt_remote
 <<<
 >>> /Remote.*origin|Device.*registered/
 >>>= 0
 
-# --- Verify remote was stored: typed format (filesystem or device) or legacy (device:/local:) ---
-findstr /C:"type: " test\cli\output\work\.bit\remotes\origin >nul || findstr /C:"device:" test\cli\output\work\.bit\remotes\origin >nul || findstr /C:"local:" test\cli\output\work\.bit\remotes\origin >nul
+# --- Verify remote was stored ---
+grep -q 'type: ' test/cli/output/work_devprompt/.bit/remotes/origin || grep -q 'device:' test/cli/output/work_devprompt/.bit/remotes/origin || grep -q 'local:' test/cli/output/work_devprompt/.bit/remotes/origin
 <<<
 >>>
 >>>= 0
 
 # --- Cleanup ---
-subst Z: /D 2>nul & del test\cli\.bit-store 2>nul & rmdir /s /q test\cli\output\work 2>nul & rmdir /s /q test\cli\output\device_prompt_remote 2>nul
+rm -rf test/cli/output/work_devprompt test/cli/output/device_prompt_remote 2>/dev/null
 <<<
 >>>
 >>>= 0
