@@ -80,6 +80,10 @@ parseInitArgs = go Bit.defaultInitOptions Nothing
     go opts dir [] = (opts, dir)
     go opts dir ("-q":rest) = go opts { Bit.initQuiet = True } dir rest
     go opts dir ("--quiet":rest) = go opts { Bit.initQuiet = True } dir rest
+    -- Handle combined short flags: -qb VAL → -q -b VAL
+    go opts dir (f:rest)
+        | Just suffix <- stripPrefix "-q" f, not (null suffix), head suffix /= '-'
+        = go opts { Bit.initQuiet = True } dir (('-':suffix) : rest)
     go opts dir ("--bare":rest) = go opts { Bit.initBare = True, Bit.initGitFlags = Bit.initGitFlags opts ++ ["--bare"] } dir rest
     go opts dir ("--separate-git-dir":v:rest) = go opts { Bit.initSeparateGitDir = Just v } dir rest
     go opts dir (f:rest)

@@ -219,11 +219,15 @@ for f in "${scripts[@]}"; do
     # Clean trash directory before running (synchronous, prevents bail-outs)
     trash="trash directory.$name"
     if [ -d "$trash" ]; then
-        cmd //c "rmdir /s /q \"C:\\Users\\natanh\\repos\\bit\\extern\\git\\t\\$trash\"" 2>/dev/null
+        if [ -x "$(command -v cmd 2>/dev/null)" ]; then
+            cmd //c "rmdir /s /q \"$(cygpath -w "$trash" 2>/dev/null || echo "$trash")\"" 2>/dev/null
+        else
+            rm -rf "$trash" 2>/dev/null
+        fi
     fi
 
     # Run the test
-    result=$(BIT_GIT_JUNCTION=1 GIT_TEST_INSTALLED="$SHIM_DIR" \
+    result=$(BIT_GIT_JUNCTION=1 GIT_TEST_DEFAULT_HASH=sha1 GIT_TEST_INSTALLED="$SHIM_DIR" \
         timeout "$t" bash "$f" 2>&1 | tail -1 | tr -d '\r')
     exit_code=${PIPESTATUS[0]:-$?}
 
@@ -259,7 +263,11 @@ for f in "${scripts[@]}"; do
 
     # Clean trash directory after run (background, best-effort)
     if [ -d "$trash" ]; then
-        cmd //c "rmdir /s /q \"C:\\Users\\natanh\\repos\\bit\\extern\\git\\t\\$trash\"" 2>/dev/null &
+        if [ -x "$(command -v cmd 2>/dev/null)" ]; then
+            cmd //c "rmdir /s /q \"$(cygpath -w "$trash" 2>/dev/null || echo "$trash")\"" 2>/dev/null
+        else
+            rm -rf "$trash" 2>/dev/null
+        fi &
     fi
 done
 

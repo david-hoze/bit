@@ -18,6 +18,7 @@ NO_UNIX_SOCKETS=
 PAGER_ENV='LESS=FRX LV=-c'
 X=''
 TAR='tar'
+DIFF='diff'
 GIT_TEST_TEMPLATE_DIR='$GIT_DIR/templates/blt'
 EOF
 

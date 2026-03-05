@@ -18,10 +18,11 @@ import System.FilePath ((</>))
 import Control.Monad (unless, void, when)
 import qualified Bit.Git.Run as Git
 import System.Environment (lookupEnv)
-import System.Process (callCommand)
 import System.Exit (ExitCode(..), exitWith)
 import System.IO (hPutStr, stderr)
+import System.Info (os)
 import Bit.Utils (atomicWriteFileStr, toPosix)
+import Control.Exception (catch, IOException)
 import Bit.Path (RemotePath(..))
 import Data.List (isPrefixOf, stripPrefix)
 import Data.Char (isSpace)
@@ -153,9 +154,8 @@ initializeRepoAt targetDir opts = do
             (_, rawDir, _) <- Git.runGitAt targetBitIndexPath
                 ["rev-parse", "--absolute-git-dir"]
             let currentGitDir = filter (\c -> c /= '\n' && c /= '\r') rawDir
-            -- Remove junction (rmdir without /s doesn't follow)
-            absGit <- Dir.makeAbsolute gitPath
-            callCommand $ "rmdir \"" ++ absGit ++ "\" 2>nul"
+            -- Remove junction/symlink (removeDirectoryLink is cross-platform)
+            Dir.removeDirectoryLink gitPath
             -- Write gitlink to current git dir so git can discover the repo
             atomicWriteFileStr gitPath
                 ("gitdir: " ++ toPosix currentGitDir ++ "\n")
@@ -358,17 +358,18 @@ resolveTemplatePaths (f:rest)
         pure (f : rest')
 
 
--- | Remove a .git path that may be a junction, gitlink file, or directory.
--- Uses 'rmdir' without /s for junctions (safe, doesn't follow the target).
+-- | Remove a .git path that may be a symlink, junction, gitfile, or directory.
+-- Uses 'removeDirectoryLink' for symlinks (Linux) and junctions (Windows).
 removeGitPath :: FilePath -> IO ()
 removeGitPath path = do
+    isLink <- Dir.pathIsSymbolicLink path `catch` \(_ :: IOException) -> pure False
     isDir <- Platform.doesDirectoryExist path
     isFile <- Platform.doesFileExist path
-    when isDir $ do
-        absPath <- Dir.makeAbsolute path
-        callCommand $ "rmdir \"" ++ absPath ++ "\" 2>nul"
-    when (isFile && not isDir) $
-        Dir.removeFile path
+    if isLink
+        then Dir.removeDirectoryLink path      -- symlink or junction
+        else if isDir
+            then Dir.removeDirectoryLink path   -- junction (Windows)
+            else when isFile $ Dir.removeFile path  -- gitfile
 
 -- | Hybrid .git architecture for junction mode (BIT_GIT_JUNCTION=1).
 --
@@ -400,9 +401,14 @@ createGitJunction targetDir targetBitGitDir = do
         when (targetExists && not rootIsDir && not rootIsFile) $ do
             -- Move the real .git dir from .bit/index/.git to repo root
             Dir.renameDirectory targetBitGitDir rootGit
-            -- Write gitfile at .bit/index/.git pointing back to ../../.git
-            absRootGit <- Dir.makeAbsolute rootGit
-            atomicWriteFileStr targetBitGitDir ("gitdir: " ++ toPosix absRootGit ++ "\n")
+            -- Point .bit/index/.git back to ../../.git
+            -- On Windows: write a gitfile (text pointer)
+            -- On Linux: create a symlink (transparent to filesystem operations)
+            if os == "mingw32"
+                then do
+                    absRootGit <- Dir.makeAbsolute rootGit
+                    atomicWriteFileStr targetBitGitDir ("gitdir: " ++ toPosix absRootGit ++ "\n")
+                else Dir.createDirectoryLink "../../.git" targetBitGitDir
 
 -- | Initialize a bit repository at a remote filesystem location.
 -- Typed wrapper around 'initializeRepoAt' that accepts 'RemotePath'

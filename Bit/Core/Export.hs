@@ -10,6 +10,7 @@ import System.FilePath ((</>), takeFileName)
 import Control.Monad (when, forM_)
 import System.Exit (ExitCode(..))
 import System.IO (hPutStrLn, stderr)
+import Control.Exception (catch, IOException)
 
 -- | Export a bit repo back to a plain git repo.
 -- First arg: optional target path (copy export). Second arg: bit repo root.
@@ -31,11 +32,14 @@ exportInPlace root = do
     rootGitIsDir <- Platform.doesDirectoryExist rootGit
     indexGitIsDir <- Platform.doesDirectoryExist bitIndexGit
     indexGitIsFile <- Platform.doesFileExist bitIndexGit
-    if rootGitIsDir && indexGitIsFile
+    indexGitIsLink <- Dir.pathIsSymbolicLink bitIndexGit `catch` \(_ :: IOException) -> pure False
+    if rootGitIsDir && (indexGitIsFile || indexGitIsLink)
         then do
-            -- Hybrid layout: .git is already the real dir, .bit/index/.git is a gitfile.
-            -- Just remove the gitfile and delete .bit/
-            Dir.removeFile bitIndexGit
+            -- Hybrid layout: .git is already the real dir, .bit/index/.git is a gitfile or symlink.
+            -- Just remove it and delete .bit/
+            if indexGitIsLink
+                then Dir.removeDirectoryLink bitIndexGit
+                else Dir.removeFile bitIndexGit
             Dir.removeDirectoryRecursive (root </> ".bit")
             putStrLn $ "Exported bit repository to git: " ++ root
             putStrLn "The .bit directory has been removed. This is now a plain git repo."
@@ -84,9 +88,10 @@ exportToPath root target = do
     rootGitIsDir <- Platform.doesDirectoryExist rootGit
     indexGitIsDir <- Platform.doesDirectoryExist bitIndexGit
     indexGitIsFile <- Platform.doesFileExist bitIndexGit
+    indexGitIsLink <- Dir.pathIsSymbolicLink bitIndexGit `catch` \(_ :: IOException) -> pure False
     -- Determine the source git dir to copy
     let mGitSource
-          | rootGitIsDir && indexGitIsFile = Just rootGit     -- hybrid
+          | rootGitIsDir && (indexGitIsFile || indexGitIsLink) = Just rootGit     -- hybrid
           | indexGitIsDir                  = Just bitIndexGit  -- legacy (dir)
           | indexGitIsFile                 = Nothing           -- legacy (gitfile) - needs special handling
           | otherwise                      = Nothing
