@@ -160,12 +160,16 @@ filesystemFetchHistory _cwd remote = do
     Git.getRemoteTrackingHash name
 
 -- | Filesystem: pull local metadata into remote's index via git pull --ff-only.
+-- Disables filemode checks: the remote may be on a filesystem (NTFS, FAT,
+-- WSL /mnt/c) that doesn't support Unix permissions, causing spurious
+-- mode-change diffs that block the pull.
 filesystemPushMetadata :: FilePath -> Remote -> IO ()
 filesystemPushMetadata _cwd remote = do
     let remotePath = remoteUrl remote
         remoteIndex = remotePath </> ".bit" </> "index"
     localIndexPath <- Git.getIndexPath
     let localIndexGit = localIndexPath </> ".git"
+    void $ Git.runGitAt remoteIndex ["config", "core.fileMode", "false"]
     (code, _, err) <- Git.runGitAt remoteIndex
         ["pull", "--ff-only", localIndexGit, "main"]
     when (code /= ExitSuccess) $ do

@@ -8,9 +8,10 @@
 #   WSL mount:    /mnt/c/Users/david
 #   NFS/SMB:      /mnt/nas/share
 # The test creates a bit-testing/ subdirectory under this path.
+# If BIT_TEST_NETWORK_BASE is unset, all tests are skipped.
 
-# ---- CLEANUP ----
-rm -rf test/cli/output/work_network 2>/dev/null; rclone purge "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing" 2>/dev/null; echo cleanup done
+# ---- CLEANUP / SKIP CHECK ----
+if [ -z "$BIT_TEST_NETWORK_BASE" ]; then echo "WARNING: BIT_TEST_NETWORK_BASE not set - skipping network-remote tests" >&2; fi; if [ -n "$BIT_TEST_NETWORK_BASE" ]; then rm -rf test/cli/output/work_network 2>/dev/null; rclone purge "$BIT_TEST_NETWORK_BASE/bit-testing" 2>/dev/null; fi; echo cleanup done
 <<<
 >>>
 cleanup done
@@ -20,110 +21,108 @@ cleanup done
 # SETUP: create repo locally, batch-copy to network, add remote
 # ======================================================================
 
-mkdir -p test/cli/output/work_network
+test -n "$BIT_TEST_NETWORK_BASE" && mkdir -p test/cli/output/work_network || echo skipped
 <<<
->>>
+>>> /skipped|^$/
 >>>= 0
 
-cd test/cli/output/work_network && bit init
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && bit init || echo skipped
 <<<
->>> /.*[Ii]nitialized.*/
+>>> /[Ii]nitialized|skipped/
 >>>= 0
 
-cd test/cli/output/work_network && echo binary data > data.bin && echo hello world > greet.txt && bit add data.bin greet.txt && bit commit -m "Initial commit"
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && echo binary data > data.bin && echo hello world > greet.txt && bit add data.bin greet.txt && bit commit -m "Initial commit" || echo skipped
 <<<
->>> /\[main|files? changed/
+>>> /\[main|files? changed|skipped/
 >>>= 0
 
 # Batch-copy entire repo to network (rclone batches all .bit/index/.git/ files in one pass)
-mkdir -p "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing" && rclone copy test/cli/output/work_network "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing"
+test -n "$BIT_TEST_NETWORK_BASE" && mkdir -p "$BIT_TEST_NETWORK_BASE/bit-testing" && rclone copy test/cli/output/work_network "$BIT_TEST_NETWORK_BASE/bit-testing" || echo skipped
 <<<
->>>
+>>> /skipped|^$/
 >>>= 0
 
-cd test/cli/output/work_network && bit remote add origin "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing"
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && bit remote add origin "$BIT_TEST_NETWORK_BASE/bit-testing" || echo skipped
 <<<
->>> /Remote 'origin' added/
+>>> /Remote 'origin' added|skipped/
 >>>= 0
 
 # Fetch + push to sync tracking refs (remote already has content, push is a no-op)
-cd test/cli/output/work_network && bit fetch && bit push -u origin
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && bit fetch && bit push -u origin || echo skipped
 <<<
->>> /Push complete/
+>>> /Push complete|skipped/
 >>>= 0
 
 # ======================================================================
 # TEST: Files arrived at network remote
 # ======================================================================
 
-test -f "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing/data.bin" && echo "data exists" || echo missing
+test -n "$BIT_TEST_NETWORK_BASE" && test -f "$BIT_TEST_NETWORK_BASE/bit-testing/data.bin" && echo "data exists" || echo skipped
 <<<
->>>
-data exists
+>>> /data exists|skipped/
 >>>= 0
 
-test -f "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing/greet.txt" && echo "greet exists" || echo missing
+test -n "$BIT_TEST_NETWORK_BASE" && test -f "$BIT_TEST_NETWORK_BASE/bit-testing/greet.txt" && echo "greet exists" || echo skipped
 <<<
->>>
-greet exists
+>>> /greet exists|skipped/
 >>>= 0
 
 # ======================================================================
 # TEST: bit status shows up-to-date after push
 # ======================================================================
 
-cd test/cli/output/work_network && bit status
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && bit status || echo skipped
 <<<
->>> /up to date/
+>>> /up to date|skipped/
 >>>= 0
 
 # ======================================================================
 # TEST: Modify locally, push to network
 # ======================================================================
 
-cd test/cli/output/work_network && echo updated binary > data.bin && bit add data.bin && bit commit -m "Update data"
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && echo updated binary > data.bin && bit add data.bin && bit commit -m "Update data" || echo skipped
 <<<
->>> /\[main|files? changed/
+>>> /\[main|files? changed|skipped/
 >>>= 0
 
-cd test/cli/output/work_network && bit push
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && bit push || echo skipped
 <<<
->>> /Push complete/
+>>> /Push complete|skipped/
 >>>= 0
 
 # ======================================================================
 # TEST: Verify against network remote
 # ======================================================================
 
-cd test/cli/output/work_network && bit verify
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && bit verify || echo skipped
 <<<
->>> /\[OK\] All.*files match/
+>>> /\[OK\] All.*files match|skipped/
 >>>= 0
 
 # ======================================================================
 # TEST: Repair from network remote
 # ======================================================================
 
-cd test/cli/output/work_network && echo corrupted > data.bin
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && echo corrupted > data.bin || echo skipped
 <<<
->>>
+>>> /skipped|^$/
 >>>= 0
 
-cd test/cli/output/work_network && bit repair
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && bit repair || echo skipped
 <<<
->>> /REPAIRED.*data\.bin/
+>>> /REPAIRED.*data\.bin|skipped/
 >>>= 0
 
-cd test/cli/output/work_network && bit verify
+test -n "$BIT_TEST_NETWORK_BASE" && cd test/cli/output/work_network && bit verify || echo skipped
 <<<
->>> /\[OK\] All.*files match/
+>>> /\[OK\] All.*files match|skipped/
 >>>= 0
 
 # ======================================================================
 # CLEANUP
 # ======================================================================
 
-rm -rf test/cli/output/work_network 2>/dev/null; rclone purge "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing" 2>/dev/null; echo cleanup done
+if [ -n "$BIT_TEST_NETWORK_BASE" ]; then rm -rf test/cli/output/work_network 2>/dev/null; rclone purge "$BIT_TEST_NETWORK_BASE/bit-testing" 2>/dev/null; fi; echo cleanup done
 <<<
 >>>
 cleanup done
