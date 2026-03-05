@@ -86,6 +86,19 @@ STUB
     chmod +x "$GIT_DIR/t/helper/test-tool"
 fi
 
+# 4. Create bit symlink in shim directory
+# The git shim runs 'exec bit "$@"', so bit must be findable from the shim dir.
+# GIT_TEST_INSTALLED points here, and the test harness uses it as PATH prefix,
+# so a symlink to the installed bit ensures the shim can invoke it.
+BIT_BIN="$(command -v bit 2>/dev/null)"
+if [ -n "$BIT_BIN" ]; then
+    rm -f "$SCRIPT_DIR/bit"
+    ln -s "$BIT_BIN" "$SCRIPT_DIR/bit"
+    echo "Symlinked bit -> $BIT_BIN"
+else
+    echo "WARNING: 'bit' not found on PATH — install it first (cabal install)"
+fi
+
 echo "Git test infrastructure ready."
 echo "Run tests with:"
 echo "  cd extern/git/t"
