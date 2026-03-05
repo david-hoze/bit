@@ -1,16 +1,23 @@
 # Network Remote Tests
-# Tests bit push/verify/repair to a UNC network path (//tsclient/c/users/david/bit-testing).
+# Tests bit push/verify/repair to a network/cross-filesystem path.
 # Uses rclone copy to batch-stage the remote and rclone purge for fast cleanup.
+#
+# Set BIT_TEST_NETWORK_BASE to the base path of a slow/network filesystem.
+# Examples:
+#   Windows RDP:  //tsclient/c/users/david
+#   WSL mount:    /mnt/c/Users/david
+#   NFS/SMB:      /mnt/nas/share
+# The test creates a bit-testing/ subdirectory under this path.
 
 # ---- CLEANUP ----
-rm -rf test/cli/output/work_network 2>/dev/null; rclone purge //tsclient/c/users/david/bit-testing 2>/dev/null; echo cleanup done
+rm -rf test/cli/output/work_network 2>/dev/null; rclone purge "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing" 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
 >>>= 0
 
 # ======================================================================
-# SETUP: create repo locally, batch-copy to UNC, add remote
+# SETUP: create repo locally, batch-copy to network, add remote
 # ======================================================================
 
 mkdir -p test/cli/output/work_network
@@ -28,13 +35,13 @@ cd test/cli/output/work_network && echo binary data > data.bin && echo hello wor
 >>> /\[main|files? changed/
 >>>= 0
 
-# Batch-copy entire repo to UNC (rclone batches all .bit/index/.git/ files in one pass)
-mkdir -p //tsclient/c/users/david/bit-testing && rclone copy test/cli/output/work_network //tsclient/c/users/david/bit-testing
+# Batch-copy entire repo to network (rclone batches all .bit/index/.git/ files in one pass)
+mkdir -p "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing" && rclone copy test/cli/output/work_network "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing"
 <<<
 >>>
 >>>= 0
 
-cd test/cli/output/work_network && bit remote add origin //tsclient/c/users/david/bit-testing
+cd test/cli/output/work_network && bit remote add origin "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing"
 <<<
 >>> /Remote 'origin' added/
 >>>= 0
@@ -49,13 +56,13 @@ cd test/cli/output/work_network && bit fetch && bit push -u origin
 # TEST: Files arrived at network remote
 # ======================================================================
 
-test -f //tsclient/c/users/david/bit-testing/data.bin && echo "data exists" || echo missing
+test -f "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing/data.bin" && echo "data exists" || echo missing
 <<<
 >>>
 data exists
 >>>= 0
 
-test -f //tsclient/c/users/david/bit-testing/greet.txt && echo "greet exists" || echo missing
+test -f "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing/greet.txt" && echo "greet exists" || echo missing
 <<<
 >>>
 greet exists
@@ -71,7 +78,7 @@ cd test/cli/output/work_network && bit status
 >>>= 0
 
 # ======================================================================
-# TEST: Modify locally, push to UNC
+# TEST: Modify locally, push to network
 # ======================================================================
 
 cd test/cli/output/work_network && echo updated binary > data.bin && bit add data.bin && bit commit -m "Update data"
@@ -116,7 +123,7 @@ cd test/cli/output/work_network && bit verify
 # CLEANUP
 # ======================================================================
 
-rm -rf test/cli/output/work_network 2>/dev/null; rclone purge //tsclient/c/users/david/bit-testing 2>/dev/null; echo cleanup done
+rm -rf test/cli/output/work_network 2>/dev/null; rclone purge "${BIT_TEST_NETWORK_BASE:-//tsclient/c/users/david}/bit-testing" 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
