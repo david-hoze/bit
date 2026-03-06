@@ -11,10 +11,9 @@
 # If BIT_TEST_NETWORK_BASE is unset, all tests are skipped.
 
 # ---- CLEANUP / SKIP CHECK ----
-if [ -z "$BIT_TEST_NETWORK_BASE" ]; then echo "WARNING: BIT_TEST_NETWORK_BASE not set - skipping network-remote tests" >&2; fi; if [ -n "$BIT_TEST_NETWORK_BASE" ]; then rm -rf test/cli/output/work_network 2>/dev/null; rclone purge "$BIT_TEST_NETWORK_BASE/bit-testing" 2>/dev/null; fi; echo cleanup done
+if [ -z "$BIT_TEST_NETWORK_BASE" ]; then echo "WARNING: BIT_TEST_NETWORK_BASE not set - skipping network-remote tests" >&2; fi; if [ -n "$BIT_TEST_NETWORK_BASE" ]; then rm -rf test/cli/output/work_network 2>/dev/null; rclone purge "$BIT_TEST_NETWORK_BASE/bit-testing" 2>/dev/null; fi; echo "cleanup done (network: ${BIT_TEST_NETWORK_TYPE:-unknown}, base: ${BIT_TEST_NETWORK_BASE:-unset})"
 <<<
->>>
-cleanup done
+>>> /cleanup done/
 >>>= 0
 
 # ======================================================================

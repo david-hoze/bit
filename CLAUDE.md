@@ -236,6 +236,8 @@ cd test/t && bash t0001-binary-add-commit.sh                   # Single binary t
 - **Use `rclone copy` to stage a bit repo** on the device instead of `bit push` for test setup — batches all `.bit/index/.git/` files in one pass
 - **Use `rclone purge`** for cleanup instead of `rmdir /s /q` — faster over network paths
 - **Only test transport-layer operations** (push, verify, repair) against slow devices — merge, conflict resolution, status, and multi-repo workflows are already covered by fast local filesystem tests
+- **Env vars**: `BIT_TEST_NETWORK_BASE` (path to slow device) and `BIT_TEST_NETWORK_TYPE` (label: `RDP`, `USB`, `NAS`, etc.) — set in shell profile
+- **When documenting network test results**, always include the network type from `BIT_TEST_NETWORK_TYPE` (visible in the first test case output). Tag results sections/tables by network type so different transport benchmarks are distinguishable.
 
 ## Commit Messages
 
