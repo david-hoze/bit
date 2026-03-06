@@ -13,7 +13,7 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Aeson (FromJSON(..), decodeStrict, withObject, (.:), (.:?))
 import System.Exit (ExitCode(..))
-import System.FilePath (normalise)
+import Bit.Utils (toPosix)
 import Data.Maybe
 import qualified Data.Text as T
 import Bit.Types
@@ -50,7 +50,7 @@ fetchRemoteFiles remote = do
 rcloneFileToFileEntry :: RcloneFile -> FileEntry
 rcloneFileToFileEntry rf =
   FileEntry
-    { path = Path (normalise rf.rfPath)
+    { path = Path (toPosix rf.rfPath)
     , kind = File { fHash = Hash (T.pack ("md5:" ++ md5)), fSize = rf.rfSize, fContentType = BinaryContent }
     }
     where

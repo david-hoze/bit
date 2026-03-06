@@ -419,7 +419,7 @@ verifyRemote cwd remote mCounter concurrency = do
         (\remoteFiles -> do
           let filteredRemoteFiles = filterOutBitPaths remoteFiles
               remoteFileMap = Map.fromList
-                [ (normalise (unPath e.path), (h, e.kind))
+                [ (toPosix (unPath e.path), (h, e.kind))
                 | e <- filteredRemoteFiles
                 , h <- maybeToList (syncHash e.kind)
                 ]
@@ -445,7 +445,7 @@ verifyRemote cwd remote mCounter concurrency = do
                     destFile = vremoteDir </> unPath p
                 case entry of
                   BinaryEntry _ _ _ ->
-                    case Map.lookup (normalise (unPath p)) remoteFileMap of
+                    case Map.lookup (toPosix (unPath p)) remoteFileMap of
                       Just (h, File _ sz _) ->
                         writeFile destFile (serializeMetadata (MetaContent h sz))
                       _ -> safeRemove destFile
@@ -459,7 +459,7 @@ verifyRemote cwd remote mCounter concurrency = do
           (_, diffOut, _) <- Git.runGitAt vremoteDir
             ["diff", "--ignore-cr-at-eol", "--name-status", "HEAD"]
           let entryMap = Map.fromList
-                [(normalise (unPath (entryPath e)), e) | e <- entries]
+                [(toPosix (unPath (entryPath e)), e) | e <- entries]
               issues = concatMap (parseDiffLine entryMap remoteFileMap)
                 (filter (not . null) (lines diffOut))
 
@@ -476,7 +476,7 @@ verifyRemote cwd remote mCounter concurrency = do
     parseDiffLine entryMap remoteFileMap line =
       let (status, rest) = break (== '\t') line
           path = drop 1 rest
-          npath = normalise path
+          npath = toPosix path
       in case status of
         "D" -> [Missing (Path path)]
         "M" -> case (Map.lookup npath entryMap, Map.lookup npath remoteFileMap) of

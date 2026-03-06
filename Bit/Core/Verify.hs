@@ -21,6 +21,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (asks)
 import Control.Exception (bracket, finally)
 import Control.Concurrent (forkIO, threadDelay, killThread)
+import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import System.IO (stderr, stdin, hPutStr, hPutStrLn, hFlush, hIsTerminalDevice)
 import System.Exit (ExitCode(..), exitWith)
@@ -577,14 +578,31 @@ issuePath (Verify.HashMismatch p _ _ _ _) = p
 issuePath (Verify.Missing p) = p
 
 verifyProgressLoop :: IORef Int -> Int -> IO ()
-verifyProgressLoop counter total = go
+verifyProgressLoop counter total = do
+    startTime <- getCurrentTime
+    go startTime
   where
-    go = do
+    go startTime = do
       n <- readIORef counter
+      now <- getCurrentTime
       let pct = (n * 100) `div` max 1 total
-      reportProgress $ "Checking files: " ++ show n ++ "/" ++ show total ++ " (" ++ show pct ++ "%)"
-      threadDelay 100000
-      when (n < total) go
+          elapsed = realToFrac (diffUTCTime now startTime) :: Double
+          etaStr = if n > 0 && elapsed > 1.0
+                   then let rate = fromIntegral n / elapsed
+                            remaining = fromIntegral (total - n) / rate
+                            secs = round remaining :: Int
+                        in ", " ++ formatEta secs ++ " remaining"
+                   else ""
+      reportProgress $ "Checking files: " ++ show n ++ "/" ++ show total
+                     ++ " (" ++ show pct ++ "%)" ++ etaStr
+      threadDelay 500000
+      when (n < total) (go startTime)
+
+    formatEta :: Int -> String
+    formatEta secs
+        | secs < 60  = show secs ++ "s"
+        | secs < 3600 = show (secs `div` 60) ++ "m " ++ show (secs `mod` 60) ++ "s"
+        | otherwise   = show (secs `div` 3600) ++ "h " ++ show ((secs `mod` 3600) `div` 60) ++ "m"
 
 -- | Truncate a hash string to 16 characters with ellipsis.
 truncateHash :: String -> String
