@@ -1,4 +1,4 @@
-# Test .bit/force-binary support (gitignore-style patterns)
+# Test .bit/force-binary and .bitbinary support (gitignore-style patterns)
 
 # Setup: fresh repo
 rm -rf test/cli/output/work_forcebinary 2>/dev/null; mkdir -p test/cli/output/work_forcebinary && cd test/cli/output/work_forcebinary && bit init
@@ -16,8 +16,8 @@ cd test/cli/output/work_forcebinary && echo "normal text" > notes.txt
 <<<
 >>>= 0
 
-# Create .bit/force-binary with books/** pattern
-cd test/cli/output/work_forcebinary && echo 'books/**' > .bit/force-binary
+# Test .bitbinary (shared, committed file) with books/** pattern
+cd test/cli/output/work_forcebinary && echo 'books/**' > .bitbinary
 <<<
 >>>= 0
 
@@ -27,7 +27,7 @@ cd test/cli/output/work_forcebinary && bit add .
 >>>= 0
 
 # Commit
-cd test/cli/output/work_forcebinary && bit commit -m "test force-binary"
+cd test/cli/output/work_forcebinary && bit commit -m "test bitbinary"
 <<<
 >>> /file.*changed/
 >>>= 0
@@ -55,62 +55,69 @@ cd test/cli/output/work_forcebinary && grep -q 'hash:' .bit/index/notes.txt && e
 <<<
 >>>= 0
 
-# Add a second file under books/ to verify pattern works broadly
-cd test/cli/output/work_forcebinary && echo "another book" > books/chapter1.txt
+# .bitbinary should be tracked as a text file in the index
+cd test/cli/output/work_forcebinary && cat .bit/index/.bitbinary
+<<<
+>>> /books/
+>>>= 0
+
+# Test .bit/force-binary (local, not committed) also works
+cd test/cli/output/work_forcebinary && rm .bitbinary && mkdir -p assets && echo "asset data" > assets/info.txt && echo 'assets/**' > .bit/force-binary
 <<<
 >>>= 0
 
-# Add and commit
-cd test/cli/output/work_forcebinary && bit add . && bit commit -m "add chapter"
-<<<
->>> /file.*changed/
->>>= 0
-
-# chapter1.txt should also be binary metadata
-cd test/cli/output/work_forcebinary && wc -l < .bit/index/books/chapter1.txt
-<<<
->>> /2/
->>>= 0
-
-# Test with a wildcard pattern: add *.csv to force-binary
-cd test/cli/output/work_forcebinary && printf 'books/**\n*.csv\n' > .bit/force-binary && echo "csv data" > report.csv
-<<<
->>>= 0
-
-# Add and commit
-cd test/cli/output/work_forcebinary && bit add . && bit commit -m "add csv"
+# Clear cache and re-add
+cd test/cli/output/work_forcebinary && rm -rf .bit/cache && bit add . && bit commit -m "add assets"
 <<<
 >>> /file.*changed/
 >>>= 0
 
-# report.csv should be binary metadata
-cd test/cli/output/work_forcebinary && wc -l < .bit/index/report.csv
+# assets/info.txt should be binary metadata
+cd test/cli/output/work_forcebinary && wc -l < .bit/index/assets/info.txt
 <<<
 >>> /2/
 >>>= 0
 
-# notes.txt should still be text
+# Test both files together: .bitbinary + .bit/force-binary
+cd test/cli/output/work_forcebinary && echo 'books/**' > .bitbinary && echo "new book" > books/chapter2.md && echo "new asset" > assets/extra.csv
+<<<
+>>>= 0
+
+# Clear cache and re-add
+cd test/cli/output/work_forcebinary && rm -rf .bit/cache && bit add . && bit commit -m "both patterns"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# books/chapter2.md matched by .bitbinary
+cd test/cli/output/work_forcebinary && wc -l < .bit/index/books/chapter2.md
+<<<
+>>> /2/
+>>>= 0
+
+# assets/extra.csv matched by .bit/force-binary
+cd test/cli/output/work_forcebinary && wc -l < .bit/index/assets/extra.csv
+<<<
+>>> /2/
+>>>= 0
+
+# notes.txt still text (not matched by either)
 cd test/cli/output/work_forcebinary && grep -q 'hash:' .bit/index/notes.txt && exit 1 || exit 0
 <<<
 >>>= 0
 
-# Without .bit/force-binary, files should be classified normally
-cd test/cli/output/work_forcebinary && rm .bit/force-binary && echo "new text" > books/intro.md
-<<<
->>>= 0
-
-# Delete cache so it reclassifies
-cd test/cli/output/work_forcebinary && rm -rf .bit/cache
+# Without either file, files are classified normally
+cd test/cli/output/work_forcebinary && rm .bitbinary .bit/force-binary && echo "new text" > books/intro.md && rm -rf .bit/cache
 <<<
 >>>= 0
 
 # Add and commit
-cd test/cli/output/work_forcebinary && bit add . && bit commit -m "no force-binary"
+cd test/cli/output/work_forcebinary && bit add . && bit commit -m "no patterns"
 <<<
 >>> /file.*changed/
 >>>= 0
 
-# books/intro.md should be text (no force-binary file)
+# books/intro.md should be text (no force-binary patterns)
 cd test/cli/output/work_forcebinary && grep -q 'hash:' .bit/index/books/intro.md && exit 1 || exit 0
 <<<
 >>>= 0

@@ -331,16 +331,23 @@ collectNonIgnoredPaths root = do
     isUnderSubrepo subrepos f =
         any (`Set.member` subrepos) (allParentDirs f)
 
--- | Load the force-binary set: if .bit/force-binary exists, pipe all file paths
--- through git check-ignore to find matches. Returns empty set if file doesn't exist.
-loadForceBinarySet :: FilePath -> [FilePath] -> IO (Set.Set FilePath)
-loadForceBinarySet bitRoot filePaths = do
-    let fbFile = bitRoot </> "force-binary"
-        gitDir = bitRoot </> "index" </> ".git"
-    exists <- doesFileExist fbFile
-    if not exists
-        then pure Set.empty
-        else Git.checkForceBinary gitDir fbFile filePaths
+-- | Load the force-binary set from .bit/force-binary (local) and .bitbinary (shared).
+-- Pipes all file paths through git check-ignore for each existing patterns file.
+-- Returns the union of matched paths.
+loadForceBinarySet :: FilePath -> FilePath -> [FilePath] -> IO (Set.Set FilePath)
+loadForceBinarySet root bitRoot filePaths = do
+    let gitDir = bitRoot </> "index" </> ".git"
+        localFile = bitRoot </> "force-binary"
+        sharedFile = root </> ".bitbinary"
+    localSet <- do
+        exists <- doesFileExist localFile
+        if exists then Git.checkForceBinary gitDir localFile filePaths
+                  else pure Set.empty
+    sharedSet <- do
+        exists <- doesFileExist sharedFile
+        if exists then Git.checkForceBinary gitDir sharedFile filePaths
+                  else pure Set.empty
+    pure (Set.union localSet sharedSet)
 
 -- | Bounded parallel map: runs up to @bound@ actions concurrently.
 mapConcurrentlyBounded :: Int -> (a -> IO b) -> [a] -> IO [b]
@@ -452,7 +459,7 @@ scanWorkingDir root concurrencyMode = do
       Just bitRoot -> do
         config <- ConfigFile.readTextConfig
         (filePaths, dirPaths) <- collectNonIgnoredPaths root
-        forceBinarySet <- loadForceBinarySet bitRoot filePaths
+        forceBinarySet <- loadForceBinarySet root bitRoot filePaths
 
         let dirEntries = [FileEntry { path = Path rel, kind = Directory } | rel <- dirPaths]
             filesToHash = [(rel, root </> rel) | rel <- filePaths]
@@ -522,7 +529,7 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
       Just bitRoot -> do
         config <- ConfigFile.readTextConfig
         (filePaths, dirPaths) <- collectNonIgnoredPaths root
-        forceBinarySet <- loadForceBinarySet bitRoot filePaths
+        forceBinarySet <- loadForceBinarySet root bitRoot filePaths
 
         let dirEntries = [FileEntry { path = Path rel, kind = Directory } | rel <- dirPaths]
             filesToProcess = [(rel, root </> rel) | rel <- filePaths]

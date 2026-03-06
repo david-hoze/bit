@@ -189,12 +189,18 @@ partitionFiles config = partition isBinary
 -- Files matching .bit/force-binary patterns are marked BinaryContent without downloading.
 classifyTextCandidates :: Remote -> TextConfig -> [FileEntry] -> IO [FileEntry]
 classifyTextCandidates remote config candidates = do
-    -- Check force-binary patterns against candidate paths (using local repo's patterns)
-    let fbFile = ".bit" </> "force-binary"
-        gitDir = ".bit" </> "index" </> ".git"
-    fbExists <- doesFileExist fbFile
-    forceBinarySet <- if not fbExists then pure Set.empty
-        else Git.checkForceBinary gitDir fbFile (map (unPath . path) candidates)
+    -- Check force-binary patterns from .bit/force-binary (local) and .bitbinary (shared)
+    let gitDir = ".bit" </> "index" </> ".git"
+        candidatePaths = map (unPath . path) candidates
+    localSet <- do
+        let f = ".bit" </> "force-binary"
+        exists <- doesFileExist f
+        if exists then Git.checkForceBinary gitDir f candidatePaths else pure Set.empty
+    sharedSet <- do
+        let f = ".bitbinary"
+        exists <- doesFileExist f
+        if exists then Git.checkForceBinary gitDir f candidatePaths else pure Set.empty
+    let forceBinarySet = Set.union localSet sharedSet
     let (fbMatched, needsDownload) = partition (\fe -> Set.member (unPath (path fe)) forceBinarySet) candidates
 
     tempDir <- getTemporaryDirectory >>= \t -> do
