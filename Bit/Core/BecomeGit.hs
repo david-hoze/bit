@@ -329,24 +329,6 @@ broadcastSettingChange = do
         ["delete", "HKCU\\Environment", "/v", "BIT_ROUTER_REFRESH", "/f"] ""
     pure ()
 
-#else
-addToPath dir = do
-    home <- getHome
-    let bashrc = home </> ".bashrc"
-        profile = home </> ".profile"
-        exportLine = "export PATH=\"" ++ dir ++ ":$PATH\"  # Added by bit become-git"
-    appendToFileIfMissing bashrc exportLine
-    appendToFileIfMissing profile exportLine
-    putStrLn $ "Added to PATH in ~/.bashrc and ~/.profile: " ++ dir
-
-removeFromPath _dir = do
-    home <- getHome
-    let bashrc = home </> ".bashrc"
-        profile = home </> ".profile"
-        marker = "# Added by bit become-git"
-    removeLineFromFile bashrc marker
-    removeLineFromFile profile marker
-    putStrLn "Removed PATH entries from ~/.bashrc and ~/.profile"
 #endif
 
 -- | Append a line to a file if it doesn't already contain the line.

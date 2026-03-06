@@ -10,6 +10,7 @@ module Bit.Scan.Local
   , ScanResult(..)
   , ScanPhase(..)
   , writeMetadataFiles
+  , cleanOrphanMetadata
   , readMetadataFile
   , listMetadataPaths
   , getFileHashAndSize
@@ -29,7 +30,9 @@ import System.Directory
       createDirectoryIfMissing,
       copyFileWithMetadata,
       getModificationTime,
-      makeAbsolute )
+      makeAbsolute,
+      removeFile,
+      removeDirectory )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, hFlush, stderr, stdin)
 import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf)
 import Data.Either (isRight)
@@ -722,6 +725,32 @@ writeMetadataFiles root entries = do
             reportProgress msg
             threadDelay 50000  -- 50ms
             when (n < total) go
+
+-- | Remove metadata files from .bit/index/ that no longer have corresponding
+-- working tree files. Called after writeMetadataFiles to clean up deleted files.
+cleanOrphanMetadata :: FilePath -> [FileEntry] -> IO ()
+cleanOrphanMetadata root entries = do
+    mBitRoot <- resolveBitRoot root
+    case mBitRoot of
+      Nothing -> pure ()
+      Just bitRoot -> do
+        let metaRoot = bitRoot </> "index"
+        existingMeta <- listMetadataPaths metaRoot
+        let scannedSet = Set.fromList [unPath (path e) | e <- entries]
+            orphans = filter (\p -> not (Set.member p scannedSet)) existingMeta
+        forM_ orphans $ \orphan -> do
+            let fullPath = metaRoot </> orphan
+            isFile <- doesFileExist fullPath
+            when isFile $ removeFile fullPath
+        -- Clean up empty directories left behind (bottom-up)
+        let orphanDirs = Set.fromList [takeDirectory (metaRoot </> o) | o <- orphans]
+        forM_ orphanDirs $ \dir ->
+            when (dir /= metaRoot) $ do
+                isDir <- doesDirectoryExist dir
+                when isDir $ do
+                    contents <- listDirectory dir
+                    let real = filter (\n -> n /= "." && n /= "..") contents
+                    when (null real) $ removeDirectory dir
 
 -- | Check if a metadata file needs to be written (returns True if write needed)
 shouldWriteFile :: FilePath -> FilePath -> FileEntry -> Hash 'MD5 -> Integer -> ContentType -> IO Bool
