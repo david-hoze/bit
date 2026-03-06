@@ -134,7 +134,11 @@ hashAndClassifyFile filePath size config mBytesRef = do
                 -- hGet may cut a multi-byte character in half at the chunk boundary,
                 -- which would make decodeUtf8' fail on valid UTF-8 text.
                 let trimmed = trimIncompleteUtf8 firstChunk
-                    contentType = if not (BS.elem 0 firstChunk) && isRight (decodeUtf8' trimmed)
+                    -- If trimming removed everything (e.g. file is just \xff),
+                    -- the file is binary, not valid UTF-8 text
+                    contentType = if not (BS.elem 0 firstChunk)
+                                    && not (BS.null trimmed && not (BS.null firstChunk))
+                                    && isRight (decodeUtf8' trimmed)
                                   then TextContent else BinaryContent
 
                 -- Continue streaming hash from where we left off
@@ -397,7 +401,7 @@ statAndCheckCache root (rel, fullPath) = do
     if not exists then pure Nothing else do
       size <- getFileSize fullPath
       mtime <- getModificationTime fullPath
-      let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+      let mtimeInt = round (utcTimeToPOSIXSeconds mtime * 1000000000) :: Integer
       cached <- loadCacheEntry root rel
       case cached of
           Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt ->
@@ -414,7 +418,7 @@ statNoCache _root (rel, fullPath) = do
     if not exists then pure Nothing else do
       size <- getFileSize fullPath
       mtime <- getModificationTime fullPath
-      let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+      let mtimeInt = round (utcTimeToPOSIXSeconds mtime * 1000000000) :: Integer
       pure $ Just $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
 
 -- | Hash a single file and save the result to cache.
@@ -477,7 +481,7 @@ scanWorkingDir root concurrencyMode = do
                 if not exists then pure Nothing else do
                   size <- getFileSize fullPath
                   mtime <- getModificationTime fullPath
-                  let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+                  let mtimeInt = round (utcTimeToPOSIXSeconds mtime * 1000000000) :: Integer
                   cached <- loadCacheEntry root rel
                   case cached of
                     Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
