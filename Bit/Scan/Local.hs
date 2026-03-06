@@ -44,7 +44,7 @@ import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
 import qualified Bit.Config.File as ConfigFile
 import Bit.Utils (atomicWriteFileStr, formatBytes)
-import Bit.Config.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
+import Bit.Config.Metadata (MetaContent(..), readMetadataOrComputeHash, parseMetadata, hashFile, serializeMetadata)
 import Bit.Core.Config (getCoreModeWithRoot, BitMode(..))
 import Bit.CAS (writeBlobToCas)
 import Bit.CDC.Config (getCdcConfig)
@@ -784,12 +784,15 @@ shouldWriteFile root metaPath entry fHash fSize fContentType = do
         -- Write if mtime or size differs
         pure (sourceMtime /= destMtime || sourceSize /= destSize)
       BinaryContent -> do
-        -- For binary files: read existing metadata and compare hash/size
-        existing <- readMetadataOrComputeHash metaPath
-        pure $ maybe True  -- Failed to read, must write
-          (\(MetaContent existingHash existingSize) ->
-            -- Write if hash or size differs
-            existingHash /= fHash || existingSize /= fSize) existing
+        -- For binary files: existing file must be metadata format (hash+size).
+        -- If it's a text content copy (from a previous text classification),
+        -- force a rewrite to replace it with metadata.
+        bs <- BS.readFile metaPath
+        let txt = either (const "") T.unpack (decodeUtf8' bs)
+        case parseMetadata txt of
+          Nothing -> pure True  -- Not metadata format, must rewrite
+          Just (MetaContent existingHash existingSize) ->
+            pure (existingHash /= fHash || existingSize /= fSize)
 
 -- | Parse a metadata file (hash/size lines) or read a text file and compute hash/size.
 -- Returns Nothing if file is missing or invalid.
