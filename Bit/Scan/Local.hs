@@ -34,16 +34,16 @@ import System.Directory
       removeFile,
       removeDirectory )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, hFlush, stderr, stdin)
-import Data.List (dropWhileEnd, isPrefixOf, isSuffixOf)
+import Data.List (dropWhileEnd, isPrefixOf)
 import Data.Either (isRight)
 import Data.Maybe (listToMaybe)
 import qualified Data.ByteString as BS
-import Control.Monad (void, when, forM_, foldM)
+import Control.Monad (void, when, forM_, filterM)
 import Data.Foldable (traverse_)
 import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
 import qualified Bit.Config.File as ConfigFile
-import Bit.Utils (atomicWriteFileStr, toPosix, formatBytes)
+import Bit.Utils (atomicWriteFileStr, formatBytes)
 import Bit.Config.Metadata (MetaContent(..), readMetadataOrComputeHash, hashFile, serializeMetadata)
 import Bit.Core.Config (getCoreModeWithRoot, BitMode(..))
 import Bit.CAS (writeBlobToCas)
@@ -64,6 +64,7 @@ import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Bit.IO.Concurrency (Concurrency(..), ioConcurrency)
 import System.Environment (lookupEnv)
+import qualified Bit.Git.Run as Git
 
 -- | Resolve the .bit root directory from a working directory root.
 -- Follows bitlink files (e.g. "bitdir: /abs/path") for separated git dirs.
@@ -85,10 +86,6 @@ resolveBitRoot root = do
 -- Binary file extensions that should never be treated as text (hardcoded, not configurable)
 binaryExtensions :: [String]
 binaryExtensions = [".mp4", ".zip", ".bin", ".exe", ".dll", ".so", ".dylib", ".jpg", ".jpeg", ".png", ".gif", ".pdf", ".gz", ".bz2", ".xz", ".tar", ".rar", ".7z", ".iso", ".img", ".dmg", ".deb", ".rpm", ".msi"]
-
--- | Internal: scanned path before hashing. Distinguishes dirs from files without boolean blindness.
-data ScannedEntry = ScannedFile FilePath | ScannedDir FilePath
-  deriving (Show, Eq)
 
 -- | Result of a scan that may skip some files.
 data ScanResult = ScanResult
@@ -132,7 +129,11 @@ hashAndClassifyFile filePath size config mBytesRef = do
             withFile filePath ReadMode $ \handle -> do
                 firstChunk <- BS.hGet handle 8192
                 bump firstChunk
-                let contentType = if not (BS.elem 0 firstChunk) && isRight (decodeUtf8' firstChunk)
+                -- Trim trailing incomplete UTF-8 sequence before decoding.
+                -- hGet may cut a multi-byte character in half at the chunk boundary,
+                -- which would make decodeUtf8' fail on valid UTF-8 text.
+                let trimmed = trimIncompleteUtf8 firstChunk
+                    contentType = if not (BS.elem 0 firstChunk) && isRight (decodeUtf8' trimmed)
                                   then TextContent else BinaryContent
 
                 -- Continue streaming hash from where we left off
@@ -165,6 +166,38 @@ hashAndClassifyFile filePath size config mBytesRef = do
                         bumpFn chunk
                         loop (MD5.update ctx chunk)
         loop MD5.init
+
+-- | Trim trailing bytes that form an incomplete UTF-8 sequence.
+-- Handles two cases: (1) trailing continuation bytes without enough to complete
+-- the sequence, and (2) a trailing lead byte with no continuation bytes at all.
+trimIncompleteUtf8 :: BS.ByteString -> BS.ByteString
+trimIncompleteUtf8 bs
+    | BS.null bs = bs
+    | otherwise =
+        let len = BS.length bs
+            lastByte = BS.index bs (len - 1)
+        in if lastByte < 0x80
+            then bs  -- ASCII — complete
+            else
+                -- Count trailing continuation bytes (10xxxxxx = 0x80..0xBF)
+                let trailingConts = length $ takeWhile isCont $
+                        map (BS.index bs) [len-1, len-2 .. 0]
+                    isCont b = b >= 0x80 && b < 0xC0
+                in if trailingConts == 0
+                    -- Last byte is a lead byte (0xC0+) with no continuations — incomplete
+                    then BS.take (len - 1) bs
+                    else
+                        let pos = len - trailingConts - 1  -- Position of the lead byte
+                        in if pos < 0 then BS.empty
+                           else let lead = BS.index bs pos
+                                    expected  -- How many continuation bytes this lead expects
+                                        | lead < 0xC0 = 0  -- Not a valid lead byte
+                                        | lead < 0xE0 = 1  -- 2-byte sequence
+                                        | lead < 0xF0 = 2  -- 3-byte sequence
+                                        | otherwise   = 3  -- 4-byte sequence
+                                in if trailingConts == expected
+                                    then bs  -- Complete sequence, nothing to trim
+                                    else BS.take pos bs  -- Incomplete: drop lead + continuations
 
 -- | Cache entry for file metadata to skip re-hashing unchanged files
 data CacheEntry = CacheEntry
@@ -247,45 +280,55 @@ saveCacheEntry root relPath entry = do
       -- Use strict bytestring writing to ensure file handle is closed immediately
       BS.writeFile cachePath (encodeUtf8 (T.pack (serializeCacheEntry entry)))
 
--- | Normalize a file path for consistent comparison (forward slashes, trimmed)
-normalizePath :: FilePath -> FilePath
-normalizePath = toPosix . filter (/= '\r')
-
--- | Check if a filename matches a gitignore-style pattern.
--- Supports: *.ext (extension match), filename (exact match)
-matchesPattern :: String -> FilePath -> Bool
-matchesPattern pattern path =
-    let filename = takeFileName path
-        whitespace = ['\r', '\n', ' '] :: [Char]
-        normalizedPattern = filter (`notElem` whitespace) pattern
-    in if "*." `isPrefixOf` normalizedPattern
-       then -- Extension pattern like *.log
-            let ext = drop 1 normalizedPattern  -- Remove the *
-            in ext `isSuffixOf` filename
-       else -- Exact filename match
-            normalizedPattern == filename
-
--- | Check which files should be ignored based on .gitignore patterns.
--- Reads patterns from .bit/index/.gitignore and matches against paths.
-checkIgnoredFiles :: FilePath -> [FilePath] -> IO (Set.Set FilePath)
-checkIgnoredFiles root paths = do
+-- | Collect all non-ignored file paths under root using git ls-files.
+-- Uses --work-tree to point git at the project root, so git handles
+-- .gitignore natively — globs, negation, **, directory patterns, everything.
+-- Filters out files inside subrepo boundaries (.git/ or .bit/ subdirs).
+-- Returns (files, dirs) where dirs are derived from the file paths.
+collectNonIgnoredPaths :: FilePath -> IO ([FilePath], [FilePath])
+collectNonIgnoredPaths root = do
     mBitRoot <- resolveBitRoot root
-    let gitignorePath = case mBitRoot of
-            Just bitRoot -> bitRoot </> "index" </> ".gitignore"
-            Nothing      -> root </> ".bit" </> "index" </> ".gitignore"
-    exists <- doesFileExist gitignorePath
-    if not exists
-        then pure Set.empty
-        else do
-            -- Use strict ByteString reading to avoid lazy file handle issues on Windows
-            bs <- BS.readFile gitignorePath
-            let content = either (const "") T.unpack (decodeUtf8' bs)
-            let whitespace = ['\r', '\n', ' '] :: [Char]
-            let patterns = filter (not . null) $ 
-                           filter (not . ("#" `isPrefixOf`)) $  -- Skip comments
-                           map (filter (`notElem` whitespace)) (lines content)
-            let isIgnored p = any (`matchesPattern` p) patterns
-            pure $ Set.fromList $ filter isIgnored paths
+    let gitDir = case mBitRoot of
+            Just bitRoot -> bitRoot </> "index" </> ".git"
+            Nothing      -> root </> ".bit" </> "index" </> ".git"
+    allFiles <- Git.listNonIgnoredFiles gitDir root
+    -- Detect subrepo boundaries: subdirectories containing .git/ or .bit/
+    -- Collect all unique first-level+ directory components from file paths
+    let allDirs = Set.toList $ Set.fromList
+                    [ d | f <- allFiles
+                    , d <- allParentDirs f ]
+    junctionMode <- lookupEnv "BIT_GIT_JUNCTION"
+    let isJunction = junctionMode == Just "1"
+    subrepos <- Set.fromList <$> filterM (isSubrepoDir isJunction root) allDirs
+    -- Filter out files under subrepo boundaries
+    let files = if Set.null subrepos then allFiles
+                else filter (not . isUnderSubrepo subrepos) allFiles
+        dirs = Set.toList $ Set.fromList
+                 [ d | f <- files
+                 , let d = takeDirectory f
+                 , d /= "." && d /= "" ]
+    pure (files, dirs)
+  where
+    -- All parent directory paths for a relative file path
+    -- e.g. "a/b/c.txt" -> ["a", "a/b"]
+    allParentDirs :: FilePath -> [FilePath]
+    allParentDirs f = go (takeDirectory f)
+      where
+        go d | d == "." || d == "" = []
+             | otherwise = go (takeDirectory d) ++ [d]
+
+    -- Check if a directory is a subrepo boundary
+    isSubrepoDir :: Bool -> FilePath -> FilePath -> IO Bool
+    isSubrepoDir isJunction r dir = do
+        hasGitDir <- doesDirectoryExist (r </> dir </> ".git")
+        if hasGitDir then pure True
+        else if isJunction then pure False  -- Skip .bit check in junction mode
+        else doesDirectoryExist (r </> dir </> ".bit")
+
+    -- Check if a file path is under any subrepo boundary
+    isUnderSubrepo :: Set.Set FilePath -> FilePath -> Bool
+    isUnderSubrepo subrepos f =
+        any (`Set.member` subrepos) (allParentDirs f)
 
 -- | Bounded parallel map: runs up to @bound@ actions concurrently.
 mapConcurrentlyBounded :: Int -> (a -> IO b) -> [a] -> IO [b]
@@ -326,54 +369,6 @@ formatElapsed secs
     | otherwise   = let mins = floor secs `div` 60 :: Int
                         remainSecs = round secs - mins * 60 :: Int
                     in show mins ++ " min " ++ show remainSecs ++ " s"
-
--- | Recursively collect all paths under root, excluding .bit and .git.
--- Directories that contain a .git/ directory or .bit/ directory (subrepos) are
--- treated as opaque boundaries — the scanner does not descend into them.
-collectScannedPaths :: FilePath -> IO [ScannedEntry]
-collectScannedPaths root = go root
-  where
-    go path = do
-      isDir <- doesDirectoryExist path
-      let rel = makeRelative root path
-      if rel == ".bit" || (".bit/" `isPrefixOf` rel) || (".bit\\" `isPrefixOf` rel)
-          || rel == ".git" || (".git/" `isPrefixOf` rel) || (".git\\" `isPrefixOf` rel)
-        then pure []
-        else if isDir
-          then do
-            -- Check if this subdirectory is a subrepo (contains .git/ dir or .bit/ dir).
-            -- The root directory is never treated as a subrepo boundary.
-            -- In junction mode (git test suite), detectAndHandleSubrepoJunction
-            -- removes .git junctions before scanning, so no special handling needed
-            -- here. Skip .bit check in junction mode — .bit dirs are bit internal
-            -- state, not subrepo markers, when bit acts as git.
-            isSubrepo <- if rel == "."
-                then pure False
-                else do
-                    hasGitDir <- doesDirectoryExist (path </> ".git")
-                    if hasGitDir
-                        then pure True  -- Real .git dir — subrepo boundary
-                        else do
-                            junctionMode <- lookupEnv "BIT_GIT_JUNCTION"
-                            case junctionMode of
-                                Just "1" -> pure False  -- Skip .bit check in junction mode
-                                _ -> doesDirectoryExist (path </> ".bit")
-            if isSubrepo
-                then pure []  -- Opaque boundary: don't descend
-                else do
-                    names <- listDirectory path
-                    -- Filter .bit at every level. For .git, only exclude directories
-                    -- (git internals); allow .git files through (gitlink pointers in submodules).
-                    let noBit = filter (/= ".bit") names
-                    gitFiltered <- foldM (\acc name ->
-                        if name /= ".git" then pure (acc ++ [name])
-                        else do
-                            gitIsDir <- doesDirectoryExist (path </> name)
-                            pure (if gitIsDir then acc else acc ++ [name])
-                        ) [] noBit
-                    childPaths <- concat <$> mapM (go . (path </>)) gitFiltered
-                    pure (ScannedDir rel : childPaths)
-        else pure [ScannedFile rel]
 
 -- | Stat a file and check the hash cache.
 -- Returns Right for cache hits, Left for files needing hashing.
@@ -437,14 +432,10 @@ scanWorkingDir root concurrencyMode = do
       Nothing -> pure []
       Just _bitRoot -> do
         config <- ConfigFile.readTextConfig
-        allPaths <- collectScannedPaths root
+        (filePaths, dirPaths) <- collectNonIgnoredPaths root
 
-        let filePaths = [p | ScannedFile p <- allPaths]
-        ignoredSet <- checkIgnoredFiles root filePaths
-
-        let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
-            filesToHash = [(rel, root </> rel) | ScannedFile rel <- allPaths
-                                               , not (Set.member (normalizePath rel) ignoredSet)]
+        let dirEntries = [FileEntry { path = Path rel, kind = Directory } | rel <- dirPaths]
+            filesToHash = [(rel, root </> rel) | rel <- filePaths]
 
         let total = length filesToHash
         counter <- newIORef (0 :: Int)
@@ -506,14 +497,10 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
       Nothing -> pure (ScanResult [] [])
       Just _bitRoot -> do
         config <- ConfigFile.readTextConfig
-        allPaths <- collectScannedPaths root
+        (filePaths, dirPaths) <- collectNonIgnoredPaths root
 
-        let filePaths = [p | ScannedFile p <- allPaths]
-        ignoredSet <- checkIgnoredFiles root filePaths
-
-        let dirEntries = [FileEntry { path = Path rel, kind = Directory } | ScannedDir rel <- allPaths]
-            filesToProcess = [(rel, root </> rel) | ScannedFile rel <- allPaths
-                                                  , not (Set.member (normalizePath rel) ignoredSet)]
+        let dirEntries = [FileEntry { path = Path rel, kind = Directory } | rel <- dirPaths]
+            filesToProcess = [(rel, root </> rel) | rel <- filePaths]
 
         -- Report collection phase
         traverse_ (\cb -> cb (PhaseCollected (length filesToProcess))) mCallback

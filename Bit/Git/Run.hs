@@ -62,6 +62,8 @@ module Bit.Git.Run
     , spawnGit
     , setIndexPath
     , getIndexPath
+    , checkIgnore
+    , listNonIgnoredFiles
     ) where
 
 import Data.Maybe (mapMaybe, listToMaybe)
@@ -685,3 +687,38 @@ runGitGlobal args = do
       (_, _, _, ph) <- createProcess (proc bin args)
         { std_in = Inherit, std_out = Inherit, std_err = Inherit }
       waitForProcess ph
+
+-- | Ask git which paths are ignored, using git check-ignore --stdin.
+-- Runs git with -C targeting the index directory so it reads .gitignore from there.
+-- Returns the set of paths that git says are ignored.
+checkIgnore :: FilePath -> [FilePath] -> IO [FilePath]
+checkIgnore indexDir paths
+    | null paths = pure []
+    | otherwise = do
+        bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
+        let gitArgs = ["-C", indexDir, "check-ignore", "--stdin"]
+            input = unlines paths
+        (code, out, _err) <- readProcessWithExitCode bin gitArgs input
+        case code of
+            ExitSuccess -> pure $ filter (not . null) $ map (filter (/= '\r')) (lines out)
+            _           -> pure []  -- exit 1 = no matches, other = error
+
+-- | List all non-ignored files under the project root using git ls-files.
+-- Uses --work-tree to point git at the project root while reading .gitignore
+-- from the index git dir. Returns file paths relative to the project root.
+-- One git call replaces both directory walking and ignore filtering.
+listNonIgnoredFiles :: FilePath -> FilePath -> IO [FilePath]
+listNonIgnoredFiles gitDir workTree = do
+    bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
+    let gitArgs = [ "--git-dir=" ++ gitDir
+                  , "--work-tree=" ++ workTree
+                  , "ls-files"
+                  , "--cached", "--others"
+                  , "--exclude-standard"
+                  , "--exclude=.bit"
+                  , "--deduplicate"
+                  ]
+    (code, out, _err) <- readProcessWithExitCode bin gitArgs ""
+    case code of
+        ExitSuccess -> pure $ filter (not . null) $ map (filter (/= '\r')) (lines out)
+        _           -> pure []
