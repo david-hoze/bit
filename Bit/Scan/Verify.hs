@@ -30,7 +30,7 @@ import Bit.Utils (filterOutBitPaths, toPosix)
 import Bit.IO.Concurrency (Concurrency(..), runConcurrently, ioConcurrency)
 import System.FilePath ((</>), makeRelative, normalise, takeDirectory)
 import System.Directory (doesFileExist, listDirectory, doesDirectoryExist, removeFile, createDirectoryIfMissing, removeDirectoryRecursive, getPermissions, setPermissions, setOwnerWritable)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, partition)
 import Data.Maybe (maybeToList, isJust)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -43,8 +43,11 @@ import Bit.Config.Paths (bundleForRemote, bundleCwdPath, fromCwdPath, BundleName
 -- System.Process no longer needed: all git calls go through Git.spawnGit
 import System.Exit (ExitCode(..))
 import Data.Char (isSpace)
-import System.IO (hPutStrLn, stderr)
-import Control.Monad (when, unless, void)
+import System.IO (hPutStrLn, hPutStr, hClose, hSetEncoding, utf8, stderr)
+import System.Process (readProcessWithExitCode)
+import System.Directory (getTemporaryDirectory)
+import System.IO (openTempFile)
+import Control.Monad (when, unless, void, forM_)
 import Data.Foldable (traverse_)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -85,6 +88,10 @@ data MetadataSource
 entryPath :: MetadataEntry -> Path
 entryPath (BinaryEntry p _ _) = p
 entryPath (TextEntry p) = p
+
+isTextEntry :: MetadataEntry -> Bool
+isTextEntry (TextEntry _) = True
+isTextEntry _             = False
 
 -- | Binary file metadata: path, hash, size. Replaces bare (Path, Hash, Integer) tuple.
 data BinaryFileMeta = BinaryFileMeta
@@ -437,10 +444,13 @@ verifyRemote cwd remote mCounter concurrency = do
           void $ Git.runGitAt vremoteDir ["checkout", "-q", "main"]
 
           -- 5. Overwrite working tree with actual remote state:
-          --    Binary: construct metadata from rclone ls data
-          --    Text: download actual content from remote
+          --    Binary: construct metadata from rclone ls data (instant)
+          --    Text: batch-download from remote in one rclone call
           --    Missing: delete the checked-out file
-          let processEntry entry = do
+
+          -- 5a. Process binary entries (no network I/O)
+          let (textEntries, binaryEntries') = partition isTextEntry entries
+          forM_ binaryEntries' $ \entry -> do
                 let p = entryPath entry
                     destFile = vremoteDir </> unPath p
                 case entry of
@@ -449,11 +459,33 @@ verifyRemote cwd remote mCounter concurrency = do
                       Just (h, File _ sz _) ->
                         writeFile destFile (serializeMetadata (MetaContent h sz))
                       _ -> safeRemove destFile
-                  TextEntry _ -> do
-                    code <- Transport.copyFromRemote remote (toPosix (unPath p)) destFile
-                    when (code /= ExitSuccess) $ safeRemove destFile
+                  _ -> pure ()
                 traverse_ (\ref -> atomicModifyIORef' ref (\n -> (n + 1, ()))) mCounter
-          void $ runConcurrently concurrency (\e -> processEntry e) entries
+
+          -- 5b. Batch-download text files in one rclone copy call
+          unless (null textEntries) $ do
+                let textPaths = [toPosix (unPath (entryPath e)) | e <- textEntries]
+                tmpDir <- getTemporaryDirectory
+                (tmpPath, tmpHandle) <- openTempFile tmpDir "bit-verify-.txt"
+                hSetEncoding tmpHandle utf8
+                mapM_ (\f -> hPutStr tmpHandle (f ++ "\n")) textPaths
+                hClose tmpHandle
+                let args = [ "copy"
+                           , toPosix (Bit.Remote.remoteUrl remote)
+                           , toPosix vremoteDir
+                           , "--files-from", tmpPath
+                           , "--no-traverse"
+                           ]
+                (code, _, _) <- readProcessWithExitCode "rclone" args ""
+                safeRemove tmpPath
+                -- Remove text files that failed to download
+                when (code /= ExitSuccess) $
+                    forM_ textEntries $ \entry -> do
+                        let destFile = vremoteDir </> unPath (entryPath entry)
+                        exists' <- doesFileExist destFile
+                        unless exists' $ safeRemove destFile
+                traverse_ (\ref -> atomicModifyIORef' ref
+                    (\n -> (n + length textEntries, ()))) mCounter
 
           -- 6. Single git diff: compares actual working tree against expected (HEAD)
           (_, diffOut, _) <- Git.runGitAt vremoteDir
@@ -464,7 +496,8 @@ verifyRemote cwd remote mCounter concurrency = do
                 (filter (not . null) (lines diffOut))
 
           -- 7. Extra files on remote not in bundle metadata
-          let filePaths = Set.fromList (map Path (Map.keys remoteFileMap))
+          --    Filter out files excluded from metadata (e.g. .gitignore, .gitattributes)
+          let filePaths = Set.fromList [Path k | k <- Map.keys remoteFileMap, isUserFile k]
               extraPaths = filePaths `Set.difference` allKnownPaths
               extraIssues = map (\p -> HashMismatch p "(not in metadata)" "(exists on remote)" 0 0) (Set.toList extraPaths)
 
