@@ -127,15 +127,15 @@ verifyFilesystem cwd bitDir targetPath mTargetRemote repairMode concurrency = do
     let label = maybe "local" (\r -> "remote '" ++ remoteName r ++ "'") mTargetRemote
     putStrLn $ "Verifying " ++ label ++ " files..."
 
-    -- Build verbose phase callback
+    -- Build verbose phase callback (verify always rehashes, so messages reflect that)
     let onPhase = \case
             Verify.PhaseCollected n ->
                 hPutStrLn stderr $ "Collecting files... " ++ show n ++ " found."
-            Verify.PhaseCacheResult cached toHash totalBytes ->
-                hPutStrLn stderr $ "Checking cache... " ++ show cached ++ " cached, "
-                    ++ show toHash ++ " need hashing (" ++ formatBytes totalBytes ++ ")."
+            Verify.PhaseCacheResult _cached toHash totalBytes ->
+                hPutStrLn stderr $ "Rehashing " ++ show toHash ++ " files ("
+                    ++ formatBytes totalBytes ++ ") for verification."
             Verify.PhaseAllCached n ->
-                hPutStrLn stderr $ "All " ++ show n ++ " files cached, no hashing needed."
+                hPutStrLn stderr $ "Rehashing " ++ show n ++ " files for verification."
 
     -- Verify with bandwidth detection
     (result, skipped) <- Verify.verifyWithAbort targetPath Nothing concurrency (Just onPhase)

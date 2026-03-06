@@ -35,7 +35,7 @@ import System.Directory
       removeFile,
       removeDirectory )
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, hFlush, stderr, stdin)
-import Data.List (dropWhileEnd, isPrefixOf)
+import Data.List (dropWhileEnd, isPrefixOf, maximumBy)
 import Data.Either (isRight)
 import Data.Maybe (catMaybes, listToMaybe)
 import qualified Data.ByteString as BS
@@ -555,7 +555,12 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
         shouldSkip <- if null needsHashing || totalBytesNeeded < 20 * 1024 * 1024
             then pure False
             else do
-                throughput <- measureThroughput (fthFull (head needsHashing))
+                -- Pick a large file for accurate throughput measurement
+                -- (tiny files give meaningless results due to timer granularity)
+                let sampleFile = case filter (\f -> fthSize f >= 1048576) needsHashing of
+                        (f:_) -> f
+                        []    -> maximumBy (\a b -> compare (fthSize a) (fthSize b)) needsHashing
+                throughput <- measureThroughput (fthFull sampleFile)
                 let estimatedSecs = fromIntegral totalBytesNeeded / throughput
                 if estimatedSecs <= 60
                     then pure False

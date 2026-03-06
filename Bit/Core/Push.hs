@@ -48,7 +48,7 @@ import Bit.Core.Init (initializeRemoteRepoAt)
 import Bit.Rclone.Sync (deriveActions, executeCommand)
 import Bit.Core.Fetch (classifyRemoteState, fetchBundle)
 import qualified Bit.Device.Identity as Device
-import Bit.CAS (casBlobPath, hasBlobInCas, writeBlobToCas)
+import Bit.CAS (casBlobPath, hasBlobInCas)
 import Bit.Config.Metadata (parseMetadataFile, MetaContent(..))
 import Bit.CDC.Manifest (readManifestFromCas, casManifestPath)
 import Bit.CDC.Types (ChunkRef(..), ChunkManifest(..))
@@ -411,15 +411,15 @@ collectCasPaths remoteBlobs cwd indexDir casDir filePath = do
                         manifestPath = casManifestPath "cas" (metaHash mc)
                     pure (newChunkPaths ++ [manifestPath])
                 Nothing -> do
-                    -- Whole blob — skip if already on remote
+                    -- Whole blob — skip if already on remote or not in local CAS
                     let h = metaHash mc
                     if Set.member h remoteBlobs
                         then pure []
                         else do
                             exists <- hasBlobInCas casDir h
-                            unless exists $
-                                writeBlobToCas (cwd </> filePath) casDir h
-                            pure [casBlobPath "cas" h]
+                            if exists
+                                then pure [casBlobPath "cas" h]
+                                else pure []
         Nothing -> pure []
 
 -- ============================================================================

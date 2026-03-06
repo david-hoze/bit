@@ -6,11 +6,13 @@
 module Bit.Rclone.Progress
     ( SyncProgress(..)
     , newSyncProgress
+    , newSyncProgressWithBytes
     , rcloneCopyFiles
     , rcloneCopyFilesWithFlags
     , rcloneCopyto
     , withSyncProgressReporter
     , incrementFilesComplete
+    , computeTotalBytes
     ) where
 
 import System.IO
@@ -25,9 +27,12 @@ import Control.Concurrent (forkIO, threadDelay, killThread)
 import Control.Concurrent.Async (async, wait)
 import Control.Exception (finally, bracket, try, SomeException, throwIO)
 import Control.Monad (when, void, unless)
+import Data.List (foldl')
+import System.FilePath ((</>))
 import Bit.Utils (formatBytes, toPosix)
-import System.Directory (getTemporaryDirectory, removeFile)
+import System.Directory (getTemporaryDirectory, removeFile, getFileSize)
 import System.IO (openTempFile)
+import Data.Time.Clock (UTCTime, getCurrentTime, diffUTCTime)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -42,21 +47,28 @@ data SyncProgress = SyncProgress
     , spBytesTotal     :: !(IORef Integer)  -- Total bytes to sync (sum of known file sizes)
     , spBytesCopied    :: !(IORef Integer)  -- Bytes copied so far
     , spCurrentFile    :: !(IORef String)   -- Currently copying file name
+    , spStartTime      :: !UTCTime          -- When the sync started
     }
 
 -- | Create a new sync progress tracker.
 newSyncProgress :: Int -> IO SyncProgress
-newSyncProgress total = do
+newSyncProgress total = newSyncProgressWithBytes total 0
+
+-- | Create a sync progress tracker with a known total byte count.
+newSyncProgressWithBytes :: Int -> Integer -> IO SyncProgress
+newSyncProgressWithBytes total totalBytes = do
     complete <- newIORef 0
-    bytesTotal <- newIORef 0
+    bytesTotalRef <- newIORef totalBytes
     bytesCopied <- newIORef 0
     currentFile <- newIORef ""
+    startTime <- getCurrentTime
     pure SyncProgress
         { spFilesTotal = total
         , spFilesComplete = complete
-        , spBytesTotal = bytesTotal
+        , spBytesTotal = bytesTotalRef
         , spBytesCopied = bytesCopied
         , spCurrentFile = currentFile
+        , spStartTime = startTime
         }
 
 -- | Increment the files complete counter.
@@ -109,12 +121,26 @@ instance Aeson.FromJSON RcloneStats where
 rcloneCopyFiles :: String -> String -> [FilePath] -> SyncProgress -> IO ()
 rcloneCopyFiles = rcloneCopyFilesWithFlags []
 
+-- | Compute total bytes for a list of files relative to a source root.
+-- Silently skips files that don't exist (e.g. missing CAS blobs in lite mode).
+computeTotalBytes :: FilePath -> [FilePath] -> IO Integer
+computeTotalBytes srcRoot files = foldl' (+) 0 <$> mapM getSize files
+  where
+    getSize f = do
+        result <- try (getFileSize (srcRoot </> f)) :: IO (Either SomeException Integer)
+        pure $ either (const 0) id result
+
 -- | Like 'rcloneCopyFiles' but with extra rclone flags prepended to the command.
 -- Use this when chunk uploads need different parallelism than whole-file copies,
 -- e.g. @["--transfers", "32"]@ for many small CAS chunks.
 rcloneCopyFilesWithFlags :: [String] -> String -> String -> [FilePath] -> SyncProgress -> IO ()
 rcloneCopyFilesWithFlags _ _ _ [] _ = pure ()
 rcloneCopyFilesWithFlags extraFlags src dst files progress = do
+    -- Set total bytes upfront if not already set
+    currentTotal <- readIORef (spBytesTotal progress)
+    when (currentTotal == 0) $ do
+        total <- computeTotalBytes src files
+        writeIORef (spBytesTotal progress) total
     tmpDir <- getTemporaryDirectory
     bracket (openTempFile tmpDir "bit-files-.txt") cleanupTmpFile $ \(tmpPath, tmpHandle) -> do
         -- Write one posix-style path per line (UTF-8 for rclone compatibility)
@@ -257,14 +283,17 @@ drainStderr h progress errorsRef = do
                                     atomicModifyIORef' (spBytesCopied progress) (\n -> (n + delta, ()))
                                 writeIORef lastBytesRef b
                             Nothing -> pure ()
-                        case rsTotalBytes stats of
-                            Just tb -> do
-                                lastTB <- readIORef lastTotalBytesRef
-                                let delta = tb - lastTB
-                                when (delta /= 0) $
-                                    atomicModifyIORef' (spBytesTotal progress) (\n -> (n + delta, ()))
-                                writeIORef lastTotalBytesRef tb
-                            Nothing -> pure ()
+                        -- Update total bytes from rclone only if we don't have a precomputed total
+                        precomputed <- readIORef (spBytesTotal progress)
+                        when (precomputed == 0) $
+                            case rsTotalBytes stats of
+                                Just tb -> do
+                                    lastTB <- readIORef lastTotalBytesRef
+                                    let delta = tb - lastTB
+                                    when (delta /= 0) $
+                                        atomicModifyIORef' (spBytesTotal progress) (\n -> (n + delta, ()))
+                                    writeIORef lastTotalBytesRef tb
+                                Nothing -> pure ()
                         case rsTransfers stats of
                             Just t -> do
                                 lastT <- readIORef lastTransfersRef
@@ -318,7 +347,15 @@ syncProgressLoop progress = go
         filesCompleted <- readIORef (spFilesComplete progress)
         bytesCopied <- readIORef (spBytesCopied progress)
         totalBytes <- readIORef (spBytesTotal progress)
-        _currentFile <- readIORef (spCurrentFile progress)
+
+        now <- getCurrentTime
+        let elapsed = realToFrac (diffUTCTime now (spStartTime progress)) :: Double
+            mbps = if elapsed > 0.5
+                   then fromIntegral bytesCopied / (1024 * 1024 * elapsed)
+                   else 0 :: Double
+            etaSecs = if mbps > 0.01 && totalBytes > bytesCopied
+                      then round (fromIntegral (totalBytes - bytesCopied) / (mbps * 1024 * 1024)) :: Int
+                      else 0
 
         -- Use bytes for percentage when available, fall back to file count
         let pct = if totalBytes > 0
@@ -327,18 +364,37 @@ syncProgressLoop progress = go
                        then (filesCompleted * 100) `div` spFilesTotal progress
                        else 0
 
-        -- Show aggregate progress
-        let progressLine = "Syncing files: " ++ show filesCompleted ++ "/" ++ show (spFilesTotal progress)
+        -- Show aggregate progress with speed and ETA
+        let speedStr = if mbps > 0.01
+                       then ", " ++ showSpeed mbps ++ " MB/s"
+                       else ""
+            etaStr = if etaSecs > 0
+                     then ", " ++ formatEta etaSecs ++ " remaining"
+                     else ""
+            progressLine = "Syncing files: " ++ show filesCompleted ++ "/" ++ show (spFilesTotal progress)
                          ++ " files, " ++ formatBytes bytesCopied
-                         ++ if totalBytes > 0
-                            then " / " ++ formatBytes totalBytes ++ " (" ++ show pct ++ "%)"
-                            else ""
+                         ++ (if totalBytes > 0
+                             then " / " ++ formatBytes totalBytes ++ " (" ++ show pct ++ "%)"
+                             else "")
+                         ++ speedStr ++ etaStr
 
         reportProgress progressLine
 
-        threadDelay 100000  -- 100ms update interval
+        threadDelay 500000  -- 500ms update interval
 
         when (filesCompleted < spFilesTotal progress) go
+
+    showSpeed :: Double -> String
+    showSpeed n
+        | n >= 10   = show (round n :: Int)
+        | otherwise = let d = round (n * 10) :: Int
+                      in show (d `div` 10) ++ "." ++ show (d `mod` 10)
+
+    formatEta :: Int -> String
+    formatEta secs
+        | secs < 60  = show secs ++ "s"
+        | secs < 3600 = show (secs `div` 60) ++ "m " ++ show (secs `mod` 60) ++ "s"
+        | otherwise   = show (secs `div` 3600) ++ "h " ++ show ((secs `mod` 3600) `div` 60) ++ "m"
 
 -- | Run action with per-file print for non-TTY environments.
 actionWithPerFilePrint :: SyncProgress -> IO a -> IO a
