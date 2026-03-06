@@ -723,8 +723,11 @@ cleanOrphanMetadata root entries = do
       Just bitRoot -> do
         let metaRoot = bitRoot </> "index"
         existingMeta <- listMetadataPaths metaRoot
-        let scannedSet = Set.fromList [unPath (path e) | e <- entries]
-            orphans = filter (\p -> not (Set.member p scannedSet)) existingMeta
+        -- Normalize to forward slashes: git ls-files returns "/" paths but
+        -- listMetadataPaths uses </> which produces "\" on Windows.
+        let toFwd = map (\c -> if c == '\\' then '/' else c)
+            scannedSet = Set.fromList [toFwd (unPath (path e)) | e <- entries]
+            orphans = filter (\p -> not (Set.member (toFwd p) scannedSet)) existingMeta
         forM_ orphans $ \orphan -> do
             let fullPath = metaRoot </> orphan
             isFile <- doesFileExist fullPath
