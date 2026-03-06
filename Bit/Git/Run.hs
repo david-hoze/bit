@@ -63,6 +63,7 @@ module Bit.Git.Run
     , setIndexPath
     , getIndexPath
     , checkIgnore
+    , checkForceBinary
     , listNonIgnoredFiles
     ) where
 
@@ -83,6 +84,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (evaluate, catch, IOException)
 import System.Environment (lookupEnv)
+import qualified Data.Set as Set
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -702,6 +704,28 @@ checkIgnore indexDir paths
         case code of
             ExitSuccess -> pure $ filter (not . null) $ map (filter (/= '\r')) (lines out)
             _           -> pure []  -- exit 1 = no matches, other = error
+
+-- | Check which paths match patterns in a force-binary file (gitignore syntax).
+-- Uses git --git-dir=<gitDir> -c core.excludesFile=<file> check-ignore --no-index -z --stdin.
+-- Returns the set of paths that matched.
+checkForceBinary :: FilePath -> FilePath -> [FilePath] -> IO (Set.Set FilePath)
+checkForceBinary gitDir patternsFile paths
+    | null paths = pure Set.empty
+    | otherwise = do
+        bin <- maybe "git" id <$> lookupEnv "BIT_REAL_GIT"
+        let gitArgs = ["--git-dir=" ++ gitDir,
+                       "-c", "core.excludesFile=" ++ patternsFile,
+                       "check-ignore", "--no-index", "-z", "--stdin"]
+            -- Null-separated input for -z
+            input = concatMap (\p -> p ++ "\0") paths
+        (code, out, _err) <- readProcessWithExitCode bin gitArgs input
+        case code of
+            ExitSuccess -> pure $ Set.fromList $ filter (not . null) $ splitNul out
+            _           -> pure Set.empty  -- exit 1 = no matches
+  where
+    splitNul s = case break (== '\0') s of
+        (_, [])      -> if null s then [] else [s]
+        (x, _:rest)  -> x : splitNul rest
 
 -- | List all non-ignored files under the project root using git ls-files.
 -- Uses --work-tree to point git at the project root while reading .gitignore

@@ -1,0 +1,121 @@
+# Test .bit/force-binary support (gitignore-style patterns)
+
+# Setup: fresh repo
+rm -rf test/cli/output/work_forcebinary 2>/dev/null; mkdir -p test/cli/output/work_forcebinary && cd test/cli/output/work_forcebinary && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Create a books directory with a small UTF-8 text file
+cd test/cli/output/work_forcebinary && mkdir -p books && printf 'שלום עולם\n' > books/greeting.md
+<<<
+>>>= 0
+
+# Create a normal text file outside books/
+cd test/cli/output/work_forcebinary && echo "normal text" > notes.txt
+<<<
+>>>= 0
+
+# Create .bit/force-binary with books/** pattern
+cd test/cli/output/work_forcebinary && echo 'books/**' > .bit/force-binary
+<<<
+>>>= 0
+
+# Add all files
+cd test/cli/output/work_forcebinary && bit add .
+<<<
+>>>= 0
+
+# Commit
+cd test/cli/output/work_forcebinary && bit commit -m "test force-binary"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# books/greeting.md should have 2-line binary metadata (hash + size)
+cd test/cli/output/work_forcebinary && wc -l < .bit/index/books/greeting.md
+<<<
+>>> /2/
+>>>= 0
+
+# books/greeting.md metadata should contain hash: and size: lines
+cd test/cli/output/work_forcebinary && grep -c 'hash:\|size:' .bit/index/books/greeting.md
+<<<
+>>> /2/
+>>>= 0
+
+# notes.txt should have full text content (not binary metadata)
+cd test/cli/output/work_forcebinary && cat .bit/index/notes.txt
+<<<
+>>> /normal text/
+>>>= 0
+
+# notes.txt should NOT have hash: metadata (it's text, not binary)
+cd test/cli/output/work_forcebinary && grep -q 'hash:' .bit/index/notes.txt && exit 1 || exit 0
+<<<
+>>>= 0
+
+# Add a second file under books/ to verify pattern works broadly
+cd test/cli/output/work_forcebinary && echo "another book" > books/chapter1.txt
+<<<
+>>>= 0
+
+# Add and commit
+cd test/cli/output/work_forcebinary && bit add . && bit commit -m "add chapter"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# chapter1.txt should also be binary metadata
+cd test/cli/output/work_forcebinary && wc -l < .bit/index/books/chapter1.txt
+<<<
+>>> /2/
+>>>= 0
+
+# Test with a wildcard pattern: add *.csv to force-binary
+cd test/cli/output/work_forcebinary && printf 'books/**\n*.csv\n' > .bit/force-binary && echo "csv data" > report.csv
+<<<
+>>>= 0
+
+# Add and commit
+cd test/cli/output/work_forcebinary && bit add . && bit commit -m "add csv"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# report.csv should be binary metadata
+cd test/cli/output/work_forcebinary && wc -l < .bit/index/report.csv
+<<<
+>>> /2/
+>>>= 0
+
+# notes.txt should still be text
+cd test/cli/output/work_forcebinary && grep -q 'hash:' .bit/index/notes.txt && exit 1 || exit 0
+<<<
+>>>= 0
+
+# Without .bit/force-binary, files should be classified normally
+cd test/cli/output/work_forcebinary && rm .bit/force-binary && echo "new text" > books/intro.md
+<<<
+>>>= 0
+
+# Delete cache so it reclassifies
+cd test/cli/output/work_forcebinary && rm -rf .bit/cache
+<<<
+>>>= 0
+
+# Add and commit
+cd test/cli/output/work_forcebinary && bit add . && bit commit -m "no force-binary"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# books/intro.md should be text (no force-binary file)
+cd test/cli/output/work_forcebinary && grep -q 'hash:' .bit/index/books/intro.md && exit 1 || exit 0
+<<<
+>>>= 0
+
+# Cleanup
+rm -rf test/cli/output/work_forcebinary 2>/dev/null; true
+<<<
+>>>= 0

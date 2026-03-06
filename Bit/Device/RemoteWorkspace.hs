@@ -18,6 +18,7 @@ import qualified Bit.Scan.Remote as Remote.Scan
 import Bit.Scan.Local (hashAndClassifyFile, binaryExtensions)
 import qualified Bit.Config.File as ConfigFile
 import Bit.Config.File (TextConfig)
+import qualified Data.Set as Set
 import qualified Bit.Rclone.Run as Transport
 import Bit.Utils (isBitPath, atomicWriteFileStr, trimGitOutput)
 import Bit.Config.Metadata (MetaContent(..), serializeMetadata)
@@ -25,6 +26,7 @@ import System.FilePath ((</>), takeExtension, takeDirectory)
 import System.Directory
     ( createDirectoryIfMissing
     , doesDirectoryExist
+    , doesFileExist
     , getTemporaryDirectory
     , listDirectory
     , removeDirectoryRecursive
@@ -184,13 +186,22 @@ partitionFiles config = partition isBinary
         _ -> True
 
 -- | Download text candidate files from remote, classify them.
+-- Files matching .bit/force-binary patterns are marked BinaryContent without downloading.
 classifyTextCandidates :: Remote -> TextConfig -> [FileEntry] -> IO [FileEntry]
 classifyTextCandidates remote config candidates = do
+    -- Check force-binary patterns against candidate paths (using local repo's patterns)
+    let fbFile = ".bit" </> "force-binary"
+        gitDir = ".bit" </> "index" </> ".git"
+    fbExists <- doesFileExist fbFile
+    forceBinarySet <- if not fbExists then pure Set.empty
+        else Git.checkForceBinary gitDir fbFile (map (unPath . path) candidates)
+    let (fbMatched, needsDownload) = partition (\fe -> Set.member (unPath (path fe)) forceBinarySet) candidates
+
     tempDir <- getTemporaryDirectory >>= \t -> do
         let d = t </> "bit-classify-remote"
         createDirectoryIfMissing True d
         pure d
-    classifiedEntries <- forM candidates $ \fe -> do
+    classifiedEntries <- forM needsDownload $ \fe -> do
         let remotePath = path fe
         let localPath = tempDir </> unPath (path fe)
         createDirectoryIfMissing True (takeDirectory localPath)
@@ -206,7 +217,7 @@ classifyTextCandidates remote config candidates = do
                 hPutStrLn stderr $ "Warning: Could not download " ++ unPath (path fe) ++ " for classification, treating as binary."
                 pure fe
     removeDirectoryRecursive tempDir `catch` (\(_ :: SomeException) -> pure ())
-    pure classifiedEntries
+    pure $ fbMatched ++ classifiedEntries
 
 ----------------------------------------------------------------------
 -- Workspace operations

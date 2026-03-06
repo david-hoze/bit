@@ -330,6 +330,17 @@ collectNonIgnoredPaths root = do
     isUnderSubrepo subrepos f =
         any (`Set.member` subrepos) (allParentDirs f)
 
+-- | Load the force-binary set: if .bit/force-binary exists, pipe all file paths
+-- through git check-ignore to find matches. Returns empty set if file doesn't exist.
+loadForceBinarySet :: FilePath -> [FilePath] -> IO (Set.Set FilePath)
+loadForceBinarySet bitRoot filePaths = do
+    let fbFile = bitRoot </> "force-binary"
+        gitDir = bitRoot </> "index" </> ".git"
+    exists <- doesFileExist fbFile
+    if not exists
+        then pure Set.empty
+        else Git.checkForceBinary gitDir fbFile filePaths
+
 -- | Bounded parallel map: runs up to @bound@ actions concurrently.
 mapConcurrentlyBounded :: Int -> (a -> IO b) -> [a] -> IO [b]
 mapConcurrentlyBounded bound f xs = do
@@ -399,9 +410,12 @@ statNoCache _root (rel, fullPath) = do
       pure $ Just $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
 
 -- | Hash a single file and save the result to cache.
-hashFileToEntry :: FilePath -> ConfigFile.TextConfig -> Maybe (IORef Integer) -> FileToHash -> IO FileEntry
-hashFileToEntry root config mBytesRef fth = do
-    (h, contentType) <- hashAndClassifyFile (fthFull fth) (fthSize fth) config mBytesRef
+-- When forceBinarySet is non-empty and the file's relative path is in it,
+-- the classification is overridden to BinaryContent.
+hashFileToEntry :: FilePath -> ConfigFile.TextConfig -> Set.Set FilePath -> Maybe (IORef Integer) -> FileToHash -> IO FileEntry
+hashFileToEntry root config forceBinarySet mBytesRef fth = do
+    (h, rawContentType) <- hashAndClassifyFile (fthFull fth) (fthSize fth) config mBytesRef
+    let contentType = if Set.member (fthRel fth) forceBinarySet then BinaryContent else rawContentType
     saveCacheEntry root (fthRel fth) (CacheEntry (fthMtime fth) (fthSize fth) h contentType)
     pure $ FileEntry
         { path = Path (fthRel fth)
@@ -434,9 +448,10 @@ scanWorkingDir root concurrencyMode = do
     mBitRoot <- resolveBitRoot root
     case mBitRoot of
       Nothing -> pure []
-      Just _bitRoot -> do
+      Just bitRoot -> do
         config <- ConfigFile.readTextConfig
         (filePaths, dirPaths) <- collectNonIgnoredPaths root
+        forceBinarySet <- loadForceBinarySet bitRoot filePaths
 
         let dirEntries = [FileEntry { path = Path rel, kind = Directory } | rel <- dirPaths]
             filesToHash = [(rel, root </> rel) | rel <- filePaths]
@@ -458,13 +473,15 @@ scanWorkingDir root concurrencyMode = do
                   cached <- loadCacheEntry root rel
                   case cached of
                     Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
+                      let ct = if Set.member rel forceBinarySet then BinaryContent else ceContentType ce
                       atomicModifyIORef' counter (\n -> (n + 1, ()))
                       pure $ Just $ FileEntry
                           { path = Path rel
-                          , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ceContentType ce }
+                          , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ct }
                           }
                     _ -> do
-                      (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config Nothing
+                      (h, rawCt) <- hashAndClassifyFile fullPath (fromIntegral size) config Nothing
+                      let contentType = if Set.member rel forceBinarySet then BinaryContent else rawCt
                       saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
                       atomicModifyIORef' counter (\n -> (n + 1, ()))
                       pure $ Just $ FileEntry
@@ -501,9 +518,10 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
     mBitRoot <- resolveBitRoot root
     case mBitRoot of
       Nothing -> pure (ScanResult [] [])
-      Just _bitRoot -> do
+      Just bitRoot -> do
         config <- ConfigFile.readTextConfig
         (filePaths, dirPaths) <- collectNonIgnoredPaths root
+        forceBinarySet <- loadForceBinarySet bitRoot filePaths
 
         let dirEntries = [FileEntry { path = Path rel, kind = Directory } | rel <- dirPaths]
             filesToProcess = [(rel, root </> rel) | rel <- filePaths]
@@ -565,7 +583,7 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
                     Parallel n  -> pure n
 
                 let hashWithProgress fth = do
-                        entry <- hashFileToEntry root config (Just bytesHashedRef) fth
+                        entry <- hashFileToEntry root config forceBinarySet (Just bytesHashedRef) fth
                         atomicModifyIORef' counter (\n -> (n + 1, ()))
                         pure entry
 
