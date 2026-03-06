@@ -199,22 +199,28 @@ cd test/t && bash t0001-binary-add-commit.sh                   # Single binary t
 - One-time setup: `extern/git-shim/setup.sh` then `bit become-git --init`
 - **Always use the throttled runner** (`extern/run-throttled-suite.sh`) — never raw for-loops.
   It handles special timeouts, skip prefixes, load-aware throttling, trash cleanup, and result tracking.
-- **Full suite** — always use a team of 4 agents with the batch split from the efficiency guide.
-  Clean trash directories first, then spawn agents that each run the throttled runner:
+- **Full suite** — use 4 parallel background Bash tasks (NOT agents) with the batch split.
+  Clean trash directories first, then launch each batch with `run_in_background: true`:
+  ```bash
+  # Clean first
+  rm -rf extern/git/t/trash-directory.* 2>/dev/null
+
+  # Launch 4 background Bash tasks (run_in_background: true, timeout: 600000):
+  cd /path/to/bit/extern && RESULTS_FILE=git-suite-batch-a.txt bash run-throttled-suite.sh t0*.sh t1*.sh t2*.sh
+  cd /path/to/bit/extern && RESULTS_FILE=git-suite-batch-b.txt bash run-throttled-suite.sh t3*.sh t4*.sh
+  cd /path/to/bit/extern && RESULTS_FILE=git-suite-batch-c.txt bash run-throttled-suite.sh t5*.sh
+  cd /path/to/bit/extern && RESULTS_FILE=git-suite-batch-d.txt bash run-throttled-suite.sh t6*.sh t7*.sh t8*.sh t9*.sh
   ```
-  Agent A: cd extern && RESULTS_FILE=git-suite-batch-a.txt bash run-throttled-suite.sh t0*.sh t1*.sh t2*.sh
-  Agent B: cd extern && RESULTS_FILE=git-suite-batch-b.txt bash run-throttled-suite.sh t3*.sh t4*.sh
-  Agent C: cd extern && RESULTS_FILE=git-suite-batch-c.txt bash run-throttled-suite.sh t5*.sh
-  Agent D: cd extern && RESULTS_FILE=git-suite-batch-d.txt bash run-throttled-suite.sh t6*.sh t7*.sh t8*.sh t9*.sh
-  ```
+  **Do NOT use Agent tool** — use the Bash tool with `run_in_background: true` for each batch.
+  Agents add unnecessary overhead; background Bash tasks run the same commands directly.
   The throttled runner's semaphore (`MAX_SLOTS=2`) ensures at most 2 heavy tests run concurrently
-  across all 4 agents, preventing I/O contention that causes false timeouts on Windows.
+  across all 4 batches, preventing I/O contention that causes false timeouts on Windows.
   Lightweight tests (<25 test cases) run freely without throttling.
-- **Rerunning timeouts** — collect timed-out scripts from results files and rerun with 2 agents
-  (not 4 — all timeout scripts are heavy, so match agents to `MAX_SLOTS=2`):
-  ```
-  Agent 1: cd extern && DEFAULT_TIMEOUT=600 RESULTS_FILE=rerun-1.txt bash run-throttled-suite.sh <scripts...>
-  Agent 2: cd extern && DEFAULT_TIMEOUT=600 RESULTS_FILE=rerun-2.txt bash run-throttled-suite.sh <scripts...>
+- **Rerunning timeouts** — collect timed-out scripts from results files and rerun with 2
+  background Bash tasks (not 4 — all timeout scripts are heavy, so match to `MAX_SLOTS=2`):
+  ```bash
+  cd /path/to/bit/extern && DEFAULT_TIMEOUT=600 RESULTS_FILE=rerun-1.txt bash run-throttled-suite.sh <scripts...>
+  cd /path/to/bit/extern && DEFAULT_TIMEOUT=600 RESULTS_FILE=rerun-2.txt bash run-throttled-suite.sh <scripts...>
   ```
 - **Single test** — run directly:
   ```bash
