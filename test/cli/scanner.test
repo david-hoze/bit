@@ -1,0 +1,222 @@
+# =============================================================================
+# Scanner Tests - .gitignore patterns, UTF-8 classification, subrepo boundaries
+#
+# Tests the scanner rewrite (git ls-files based):
+# - .gitignore glob/negation/double-star patterns
+# - UTF-8 text classification (multi-byte chars across chunk boundaries)
+# - Subrepo boundary detection (.git/ and .bit/ subdirs)
+# - Large ignored directories
+# - .gitattributes tracked as regular file
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+rm -rf test/cli/output/work_scanner 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP
+# ======================================================================
+
+mkdir -p test/cli/output/work_scanner && cd test/cli/output/work_scanner && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# ======================================================================
+# SECTION 1: .gitignore glob patterns
+# ======================================================================
+
+# Create .gitignore with glob, directory, negation, and double-star patterns
+cd test/cli/output/work_scanner && printf '*.log\nbuild/\n!important.log\n**/*.bak\n' > .gitignore
+<<<
+>>>= 0
+
+# Create test files
+cd test/cli/output/work_scanner && echo hello > file.txt && echo log1 > debug.log && echo log2 > important.log && mkdir -p build && echo obj > build/output.o && mkdir -p src/deep && echo bak > src/deep/notes.bak
+<<<
+>>>= 0
+
+# Add and commit
+cd test/cli/output/work_scanner && bit add . && bit commit -m "gitignore patterns"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# file.txt should be tracked (not ignored)
+test -f test/cli/output/work_scanner/.bit/index/file.txt && echo found || echo missing
+<<<
+>>>
+found
+>>>= 0
+
+# debug.log should NOT be tracked (matches *.log)
+test -f test/cli/output/work_scanner/.bit/index/debug.log && echo found || echo missing
+<<<
+>>>
+missing
+>>>= 0
+
+# important.log SHOULD be tracked (negation pattern !important.log)
+test -f test/cli/output/work_scanner/.bit/index/important.log && echo found || echo missing
+<<<
+>>>
+found
+>>>= 0
+
+# build/output.o should NOT be tracked (build/ directory pattern)
+test -f test/cli/output/work_scanner/.bit/index/build/output.o && echo found || echo missing
+<<<
+>>>
+missing
+>>>= 0
+
+# src/deep/notes.bak should NOT be tracked (**/*.bak pattern)
+test -f test/cli/output/work_scanner/.bit/index/src/deep/notes.bak && echo found || echo missing
+<<<
+>>>
+missing
+>>>= 0
+
+# .gitignore itself should be tracked
+test -f test/cli/output/work_scanner/.bit/index/.gitignore && echo found || echo missing
+<<<
+>>>
+found
+>>>= 0
+
+# ======================================================================
+# SECTION 2: UTF-8 text classification
+# ======================================================================
+
+# Create Hebrew text >8192 bytes (2-byte UTF-8 chars, tests chunk boundary splitting)
+cd test/cli/output/work_scanner && printf 'שלום עולם הזה הוא גדול מאוד\n%.0s' $(seq 1 500) > hebrew.txt
+<<<
+>>>= 0
+
+# Create CJK text >8192 bytes (3-byte UTF-8 chars)
+cd test/cli/output/work_scanner && printf '这是一个测试文件用于验证文本分类功能\n%.0s' $(seq 1 300) > cjk.txt
+<<<
+>>>= 0
+
+# Create genuine binary file (contains null bytes)
+cd test/cli/output/work_scanner && printf 'BINARY\x00\x01\x02DATA\x00MORE' > genuine.bin
+<<<
+>>>= 0
+
+# Add and commit the new files
+cd test/cli/output/work_scanner && bit add hebrew.txt cjk.txt genuine.bin && bit commit -m "utf8 and binary files"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# Hebrew text metadata should have >2 lines (text content copied, not binary metadata)
+cd test/cli/output/work_scanner && lines=$(wc -l < .bit/index/hebrew.txt) && [ "$lines" -gt 2 ] && echo "text: $lines lines" || echo "binary: $lines lines"
+<<<
+>>> /text: .* lines/
+>>>= 0
+
+# CJK text metadata should also have >2 lines
+cd test/cli/output/work_scanner && lines=$(wc -l < .bit/index/cjk.txt) && [ "$lines" -gt 2 ] && echo "text: $lines lines" || echo "binary: $lines lines"
+<<<
+>>> /text: .* lines/
+>>>= 0
+
+# Genuine binary metadata should have exactly 2 lines (hash + size)
+cd test/cli/output/work_scanner && lines=$(wc -l < .bit/index/genuine.bin) && [ "$lines" -eq 2 ] && echo "binary: 2 lines" || echo "unexpected: $lines lines"
+<<<
+>>>
+binary: 2 lines
+>>>= 0
+
+# ======================================================================
+# SECTION 3: Subrepo boundaries
+# ======================================================================
+
+# Create a subdirectory that looks like a git repo (has .git/)
+cd test/cli/output/work_scanner && mkdir -p subrepo_git/.git && echo "ref: refs/heads/main" > subrepo_git/.git/HEAD && echo "subrepo content" > subrepo_git/data.txt
+<<<
+>>>= 0
+
+# Create a subdirectory that looks like a bit repo (has .bit/)
+cd test/cli/output/work_scanner && mkdir -p subrepo_bit/.bit && echo "bit repo marker" > subrepo_bit/.bit/config && echo "bit content" > subrepo_bit/data.txt
+<<<
+>>>= 0
+
+# Add (subrepo contents should be excluded, so commit may have nothing new)
+cd test/cli/output/work_scanner && bit add . && bit commit -m "subrepo boundaries" 2>&1; echo "done"
+<<<
+>>> /done/
+>>>= 0
+
+# Files inside .git subrepo should NOT be tracked
+test -f test/cli/output/work_scanner/.bit/index/subrepo_git/data.txt && echo found || echo missing
+<<<
+>>>
+missing
+>>>= 0
+
+# Files inside .bit subrepo should NOT be tracked
+test -f test/cli/output/work_scanner/.bit/index/subrepo_bit/data.txt && echo found || echo missing
+<<<
+>>>
+missing
+>>>= 0
+
+# ======================================================================
+# SECTION 4: Large ignored directory
+# ======================================================================
+
+# Create directory with 100 files and add to .gitignore
+cd test/cli/output/work_scanner && mkdir -p bigdir && for i in $(seq 1 100); do echo "file $i" > bigdir/file_$i.txt; done && echo 'bigdir/' >> .gitignore
+<<<
+>>>= 0
+
+# Add and commit
+cd test/cli/output/work_scanner && bit add . && bit commit -m "ignore bigdir"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# None of the 100 files should be tracked
+cd test/cli/output/work_scanner && count=$(find .bit/index/bigdir -type f 2>/dev/null | wc -l) && echo "tracked: $count"
+<<<
+>>>
+tracked: 0
+>>>= 0
+
+# ======================================================================
+# SECTION 5: .gitattributes as regular file
+# ======================================================================
+
+# Create .gitattributes and commit
+cd test/cli/output/work_scanner && echo '*.bin binary' > .gitattributes && bit add .gitattributes && bit commit -m "add gitattributes"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# .gitattributes should be tracked and metadata present
+test -f test/cli/output/work_scanner/.bit/index/.gitattributes && echo found || echo missing
+<<<
+>>>
+found
+>>>= 0
+
+# .gitattributes content should be copied (text file)
+cd test/cli/output/work_scanner && grep -q 'binary' .bit/index/.gitattributes && echo "content matches" || echo "content missing"
+<<<
+>>>
+content matches
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+rm -rf test/cli/output/work_scanner 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
