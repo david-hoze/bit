@@ -1,0 +1,127 @@
+# =============================================================================
+# CDC Default - CDC is off by default, must be explicitly enabled
+#
+# Tests: solid mode without cdc.enabled stores whole blobs (no manifest),
+# enabling CDC with cdc.enabled=true creates manifests.
+# Uses small chunk sizes so test files produce visible chunking.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+rm -rf test/cli/output/work_cdcdefault 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP
+# ======================================================================
+
+mkdir -p test/cli/output/work_cdcdefault
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_cdcdefault && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Switch to solid mode (required for CAS writes)
+cd test/cli/output/work_cdcdefault && bit config core.mode solid
+<<<
+>>> /Mode set to solid/
+>>>= 0
+
+# Set small chunk sizes (if CDC were on, these would cause chunking)
+cd test/cli/output/work_cdcdefault && bit config cdc.min-size 64
+<<<
+>>>= 0
+
+cd test/cli/output/work_cdcdefault && bit config cdc.avg-size 256
+<<<
+>>>= 0
+
+cd test/cli/output/work_cdcdefault && bit config cdc.max-size 1024
+<<<
+>>>= 0
+
+# ======================================================================
+# SECTION 2: CDC OFF BY DEFAULT - whole blob, no manifest
+# ======================================================================
+
+# Create a binary file large enough to be chunked (2KB > max-size of 1024)
+cd test/cli/output/work_cdcdefault && printf '\x00\x01\x02\x03%.0s' $(seq 1 512) > nochunk.bin
+<<<
+>>>= 0
+
+# Add file — CDC should NOT run (off by default), no manifest
+cd test/cli/output/work_cdcdefault && bit add nochunk.bin
+<<<
+>>>= 0
+
+# No manifest should exist (CDC off by default = whole blob storage)
+cd test/cli/output/work_cdcdefault && find .bit/cas -name '*.manifest' | wc -l
+<<<
+>>> /^0$/
+>>>= 0
+
+# CAS should still have files (whole blob stored in solid mode)
+cd test/cli/output/work_cdcdefault && test "$(find .bit/cas -type f 2>/dev/null | wc -l)" -gt 0 && echo has-blobs || echo empty
+<<<
+>>>
+has-blobs
+>>>= 0
+
+cd test/cli/output/work_cdcdefault && bit commit -m "Add whole blob"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+cd test/cli/output/work_cdcdefault && bit verify
+<<<
+>>> /All .* files? match|Verified|0 issues/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: ENABLE CDC - manifest should now appear
+# ======================================================================
+
+cd test/cli/output/work_cdcdefault && bit config cdc.enabled true
+<<<
+>>>= 0
+
+# Create another binary file
+cd test/cli/output/work_cdcdefault && printf '\x00\x01\x02\x03%.0s' $(seq 1 512) > chunked.bin
+<<<
+>>>= 0
+
+cd test/cli/output/work_cdcdefault && bit add chunked.bin
+<<<
+>>>= 0
+
+# Now a manifest should exist (CDC is explicitly enabled)
+cd test/cli/output/work_cdcdefault && find .bit/cas -name '*.manifest'
+<<<
+>>> /\.manifest/
+>>>= 0
+
+cd test/cli/output/work_cdcdefault && bit commit -m "Add chunked file"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+cd test/cli/output/work_cdcdefault && bit verify
+<<<
+>>> /All .* files? match|Verified|0 issues/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+rm -rf test/cli/output/work_cdcdefault 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

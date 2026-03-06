@@ -1,7 +1,7 @@
 # =============================================================================
 # CDC Chunking - content-defined chunking for large binary files
 #
-# Tests: CDC enabled by default, cdc.enabled config validation,
+# Tests: CDC (must be explicitly enabled), cdc.enabled config validation,
 # chunked CAS writes, manifest files, disabling CDC,
 # verify with chunked files.
 # =============================================================================
@@ -52,12 +52,16 @@ cd test/cli/output/work_cdc && dd if=/dev/zero of=large.bin bs=1 count=2048 2>/d
 <<<
 >>>= 0
 
-# CDC is enabled by default — no need to set cdc.enabled
+# CDC must be explicitly enabled (off by default)
+cd test/cli/output/work_cdc && bit config cdc.enabled true
+<<<
+>>>= 0
+
 cd test/cli/output/work_cdc && bit add large.bin
 <<<
 >>>= 0
 
-# Verify that a .manifest file was created in CAS (proves CDC ran by default)
+# Verify that a .manifest file was created in CAS (CDC explicitly enabled)
 cd test/cli/output/work_cdc && find .bit/cas -name '*.manifest'
 <<<
 >>> /\.manifest/

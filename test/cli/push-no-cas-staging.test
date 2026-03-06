@@ -1,0 +1,91 @@
+# =============================================================================
+# Push No CAS Staging - lite mode does NOT populate local CAS
+#
+# Tests: add/commit in lite mode keeps .bit/cas/ empty,
+# switching to solid mode populates CAS on add.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+rm -rf test/cli/output/work_nocas 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP
+# ======================================================================
+
+mkdir -p test/cli/output/work_nocas
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_nocas && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Ensure lite mode (default)
+cd test/cli/output/work_nocas && bit config core.mode lite
+<<<
+>>> /Mode set to lite/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: LITE MODE - CAS should stay empty
+# ======================================================================
+
+# Create a binary file > 1MB
+cd test/cli/output/work_nocas && dd if=/dev/zero of=big.bin bs=1024 count=1100 2>/dev/null
+<<<
+>>>= 0
+
+# Add and commit in lite mode
+cd test/cli/output/work_nocas && bit add big.bin && bit commit -m "Add big binary"
+<<<
+>>> /\[main|master|file.*changed/
+>>>= 0
+
+# CAS should have no files (lite mode does not write to CAS)
+cd test/cli/output/work_nocas && find .bit/cas -type f 2>/dev/null | wc -l
+<<<
+>>> /^0$/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: SOLID MODE - CAS should be populated on add
+# ======================================================================
+
+# Switch to solid mode
+cd test/cli/output/work_nocas && bit config core.mode solid
+<<<
+>>> /Mode set to solid/
+>>>= 0
+
+# Create another binary file
+cd test/cli/output/work_nocas && dd if=/dev/zero of=big2.bin bs=1024 count=1100 2>/dev/null
+<<<
+>>>= 0
+
+# Add in solid mode — CAS should now have files
+cd test/cli/output/work_nocas && bit add big2.bin
+<<<
+>>>= 0
+
+# CAS should now contain at least one file
+cd test/cli/output/work_nocas && test "$(find .bit/cas -type f 2>/dev/null | wc -l)" -gt 0 && echo cas-populated || echo cas-empty
+<<<
+>>>
+cas-populated
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+rm -rf test/cli/output/work_nocas 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

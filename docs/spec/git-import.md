@@ -46,6 +46,21 @@ Both are validated before any changes are made.
 
 7. **Create `.git` junction** at the repo root pointing to `.bit/index/.git` (only when `BIT_GIT_JUNCTION=1`). This allows git commands to discover the repo without `-C`.
 
+## Remote Registration
+
+After relocating `.git`, `bit import` reads the existing git remotes and creates corresponding `.bit/remotes/<name>` files so that `bit push`/`bit pull` work immediately after import.
+
+Each remote URL is classified via `classifyRemotePath`:
+
+| URL pattern | Remote type | Layout |
+|-------------|-------------|--------|
+| SSH URLs (`git@...`, `ssh://...`) | `git` | `metadata` |
+| HTTPS git URLs (`https://github.com/...`) | `git` | `metadata` |
+| Local filesystem paths | `filesystem` | (full repo) |
+| rclone remotes (`remote:path`) | `cloud` | `full` |
+
+This ensures the correct transport seam is used for each remote after import.
+
 ## Post-Import Workflow
 
 After `bit import`, the typical next step is:

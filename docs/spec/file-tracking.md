@@ -24,6 +24,23 @@ Parsing and serialization are handled by a single canonical module which enforce
 - Device files, sockets, named pipes -- **ignored**
 - Empty directories -- **ignored** (not tracked; many cloud backends don't support them)
 
+## Binary Classification Override (`.bitbinary`)
+
+`.bitbinary` is a project-root file (committed and shared across clones) that contains gitignore-style glob patterns. Files matching any pattern are classified as binary regardless of their content.
+
+```
+# Example .bitbinary
+*.db
+*.sqlite
+data/**/*.csv
+```
+
+This works alongside `.bit/force-binary`, which is a local (not committed) file with the same pattern syntax. Patterns from both files are unioned -- a file matching either source is treated as binary.
+
+**Implementation**: Classification uses `git check-ignore --no-index -c core.excludesFile=<file>` with `--git-dir=.bit/index/.git` to leverage git's glob engine. Each file (`.bitbinary` and `.bit/force-binary`) is checked separately, and matching either is sufficient.
+
+If neither file exists, classification is unchanged from default behavior (content-based heuristic).
+
 ## Command Line Interface (Git-Compatible)
 
 **CRITICAL**: The CLI mirrors Git's interface. Users familiar with Git should feel immediately at home. Exit codes follow git's convention: 0 for success, 1 for failure.

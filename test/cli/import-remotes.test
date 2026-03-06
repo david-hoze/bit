@@ -1,0 +1,106 @@
+# =============================================================================
+# Import Remotes - bit import registers git remotes in .bit/remotes/
+#
+# Tests: git remotes are classified and registered during import.
+# - SSH git remote -> type: git
+# - Local path remote -> type: filesystem
+# - bit remote show lists both
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+rm -rf test/cli/output/work_import_remotes 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP - create a git repo with remotes
+# ======================================================================
+
+mkdir -p test/cli/output/work_import_remotes
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_import_remotes && git init && echo hello > file.txt && git add file.txt && git commit -m "initial"
+<<<
+>>> /.*commit.*/
+>>>= 0
+
+# Add a git SSH remote (classified as type: git)
+cd test/cli/output/work_import_remotes && git remote add origin git@github.com:example/test.git
+<<<
+>>>= 0
+
+# Add a local filesystem remote (classified as type: filesystem)
+cd test/cli/output/work_import_remotes && git remote add localfs /tmp/test-remote
+<<<
+>>>= 0
+
+# ======================================================================
+# SECTION 2: IMPORT
+# ======================================================================
+
+cd test/cli/output/work_import_remotes && BIT_GIT_JUNCTION=1 bit import
+<<<
+>>> /Imported git repository/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: VERIFY REMOTES REGISTERED
+# ======================================================================
+
+# origin remote file should exist
+test -f test/cli/output/work_import_remotes/.bit/remotes/origin && echo exists || echo missing
+<<<
+>>>
+exists
+>>>= 0
+
+# origin should be type: git
+cd test/cli/output/work_import_remotes && cat .bit/remotes/origin
+<<<
+>>> /type: git/
+>>>= 0
+
+# localfs remote file should exist
+test -f test/cli/output/work_import_remotes/.bit/remotes/localfs && echo exists || echo missing
+<<<
+>>>
+exists
+>>>= 0
+
+# localfs should be type: filesystem
+cd test/cli/output/work_import_remotes && cat .bit/remotes/localfs
+<<<
+>>> /type: filesystem/
+>>>= 0
+
+# bit remote show origin should display the remote
+cd test/cli/output/work_import_remotes && bit remote show origin
+<<<
+>>> /Remote: origin/
+>>>= 0
+
+# bit remote show origin should show type git
+cd test/cli/output/work_import_remotes && bit remote show origin
+<<<
+>>> /Type: git/
+>>>= 0
+
+# bit remote show localfs should display filesystem type
+cd test/cli/output/work_import_remotes && bit remote show localfs
+<<<
+>>> /localfs.*filesystem/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+rm -rf test/cli/output/work_import_remotes 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

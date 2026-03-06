@@ -61,7 +61,7 @@
 | `Bit/CDC/FastCDC.hs` | FastCDC boundary detection + streaming file chunking |
 | `Bit/CDC/Gear.hs` | 256-entry gear hash table (MD5-generated, deterministic) |
 | `Bit/CDC/Types.hs` | `ChunkConfig`, `Chunk`, `ChunkRef`, `ChunkManifest` |
-| `Bit/CDC/Config.hs` | Read CDC config from `.bit/config`; enabled by default |
+| `Bit/CDC/Config.hs` | Read CDC config from `.bit/config`; disabled by default |
 | `Bit/CDC/Manifest.hs` | Serialize/parse/read/write chunk manifests |
 | `Bit/CDC/Reassemble.hs` | Reassemble files from CAS chunks |
 | `Bit/CDC/Store.hs` | Write chunked blobs to CAS |
@@ -127,7 +127,9 @@
 - Concurrent file scanning with bounded parallelism and progress reporting
 - HLint enforcement of IO safety rules
 - Proof of possession verification for push and pull
-- CDC (content-defined chunking) -- enabled by default in solid mode; FastCDC with gear hash; batch CAS upload/download via `rclone --files-from`; manifest-based reassembly on pull; push dedup via `queryRemoteBlobs` (skips chunks already on remote); pull dedup via `hasBlobInCas` (skips chunks already in local CAS); parallel chunk transfers (`--transfers 32`) for CAS uploads/downloads to overcome per-chunk latency
+- CDC (content-defined chunking) -- disabled by default (`cdc.enabled = false`); FastCDC with gear hash; batch CAS upload/download via `rclone --files-from`; manifest-based reassembly on pull; push dedup via `queryRemoteBlobs` (skips chunks already on remote); pull dedup via `hasBlobInCas` (skips chunks already in local CAS); parallel chunk transfers (`--transfers 32`) for CAS uploads/downloads to overcome per-chunk latency
+- `.bitbinary` -- project-root file with gitignore-style glob patterns for forcing binary classification; unioned with `.bit/force-binary` (local-only); uses `git check-ignore` engine
+- `bit import` remote registration -- reads existing git remotes and creates `.bit/remotes/<name>` files with correct type/layout classification via `classifyRemotePath`
 
 ---
 

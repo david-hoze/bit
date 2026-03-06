@@ -73,7 +73,7 @@ gdrive:Backup/foo/
     └── ...
 ```
 
-**Push behavior (both layouts):** bit always uploads content into the remote's CAS layout (`cas/<first-2-chars>/<full-hash>`), then uploads the metadata bundle. For full-layout remotes, bit additionally syncs files to human-readable paths. This works regardless of local mode -- a lite-mode repo streams content directly to the remote CAS without populating local CAS.
+**Push behavior (both layouts):** bit uploads any CAS blobs that exist locally into the remote's CAS layout (`cas/<first-2-chars>/<full-hash>`), then uploads the metadata bundle. For full-layout remotes, bit additionally syncs files to human-readable paths. In lite mode with no local CAS data, only readable copies are uploaded (for full-layout remotes) -- push does not populate local CAS. Progress reporting shows MB/s speed and estimated time remaining.
 
 **Pull behavior (both layouts):** bit fetches the metadata bundle and merges. For full remotes, uses diff-based sync from readable paths. For bare remotes, downloads blobs from `cas/<prefix>/<hash>` and places them at working tree paths.
 
