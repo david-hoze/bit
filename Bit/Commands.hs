@@ -710,6 +710,7 @@ runCommand args = do
     let scanAndWrite = do
             localFiles <- Scan.scanWorkingDir cwd concurrency
             Scan.writeMetadataFiles cwd localFiles
+            Scan.cleanOrphanGitConfig cwd
 
     -- Helper functions for running commands
     let runScanned action = do { scanAndWrite; env <- baseEnv; runBitM env action }

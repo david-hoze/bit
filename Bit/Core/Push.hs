@@ -324,7 +324,7 @@ handleNonBit seam remote samples layout = do
 -- mRemoteHash: the remote's HEAD hash (Nothing for first push / empty remote).
 executePush :: PushSeam -> Remote -> Maybe String -> Device.RemoteLayout -> BitM ()
 executePush seam remote mRemoteHash layout = do
-    unless (layout == Device.LayoutMetadata || layout == Device.LayoutBare) $
+    unless (layout == Device.LayoutMetadata) $
         syncRemoteFiles mRemoteHash layout
     -- Skip metadata push when remote is already at our HEAD (avoids slow
     -- no-op git pull over network paths like \\tsclient\...)

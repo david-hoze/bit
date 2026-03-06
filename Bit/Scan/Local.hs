@@ -11,6 +11,7 @@ module Bit.Scan.Local
   , ScanPhase(..)
   , writeMetadataFiles
   , cleanOrphanMetadata
+  , cleanOrphanGitConfig
   , readMetadataFile
   , listMetadataPaths
   , getFileHashAndSize
@@ -766,6 +767,26 @@ cleanOrphanMetadata root entries = do
                     contents <- listDirectory dir
                     let real = filter (\n -> n /= "." && n /= "..") contents
                     when (null real) $ removeDirectory dir
+
+-- | Remove .gitattributes and .gitignore from .bit/index/ when they no longer
+-- exist in the working tree. These git config files need index sync so that
+-- git operations in .bit/index/ see the correct attributes/ignores.
+-- Unlike generic cleanOrphanMetadata, this preserves all other metadata files
+-- so that verify can detect missing files via stale metadata.
+cleanOrphanGitConfig :: FilePath -> IO ()
+cleanOrphanGitConfig root = do
+    mBitRoot <- resolveBitRoot root
+    case mBitRoot of
+      Nothing -> pure ()
+      Just bitRoot -> do
+        let metaRoot = bitRoot </> "index"
+        forM_ [".gitattributes", ".gitignore"] $ \name -> do
+            let workPath = root </> name
+            let indexPath = metaRoot </> name
+            workExists <- doesFileExist workPath
+            indexExists <- doesFileExist indexPath
+            when (not workExists && indexExists) $
+                removeFile indexPath
 
 -- | Check if a metadata file needs to be written (returns True if write needed)
 shouldWriteFile :: FilePath -> FilePath -> FileEntry -> Hash 'MD5 -> Integer -> ContentType -> IO Bool
