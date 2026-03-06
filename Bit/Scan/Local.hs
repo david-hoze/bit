@@ -262,7 +262,7 @@ matchesPattern pattern path =
        else -- Exact filename match
             normalizedPattern == filename
 
--- | Check which files should be ignored based on .bitignore patterns.
+-- | Check which files should be ignored based on .gitignore patterns.
 -- Reads patterns from .bit/index/.gitignore and matches against paths.
 checkIgnoredFiles :: FilePath -> [FilePath] -> IO (Set.Set FilePath)
 checkIgnoredFiles root paths = do
@@ -324,7 +324,7 @@ formatElapsed secs
                         remainSecs = round secs - mins * 60 :: Int
                     in show mins ++ " min " ++ show remainSecs ++ " s"
 
--- | Recursively collect all paths under root, excluding .bit, .git, .bitignore, .gitignore.
+-- | Recursively collect all paths under root, excluding .bit and .git.
 -- Directories that contain a .git/ directory or .bit/ directory (subrepos) are
 -- treated as opaque boundaries — the scanner does not descend into them.
 collectScannedPaths :: FilePath -> IO [ScannedEntry]
@@ -333,10 +333,8 @@ collectScannedPaths root = go root
     go path = do
       isDir <- doesDirectoryExist path
       let rel = makeRelative root path
-      if rel == ".bit" || (".bit" `isPrefixOf` rel)
-          || rel == ".git" || (".git" `isPrefixOf` rel)
-          || rel == ".bitignore"
-          || rel == ".gitignore"
+      if rel == ".bit" || (".bit/" `isPrefixOf` rel) || (".bit\\" `isPrefixOf` rel)
+          || rel == ".git" || (".git/" `isPrefixOf` rel) || (".git\\" `isPrefixOf` rel)
         then pure []
         else if isDir
           then do
@@ -755,7 +753,7 @@ shouldWriteFile root metaPath entry fHash fSize fContentType = do
 readMetadataFile :: FilePath -> IO (Maybe MetaContent)
 readMetadataFile = readMetadataOrComputeHash
 
--- | List all metadata file paths under index dir, relative to index root. Excludes .gitattributes.
+-- | List all metadata file paths under index dir, relative to index root.
 listMetadataPaths :: FilePath -> IO [FilePath]
 listMetadataPaths indexRoot = go indexRoot ""
   where
@@ -765,7 +763,7 @@ listMetadataPaths indexRoot = go indexRoot ""
       if isDir
         then do
           names <- listDirectory full
-          let staticSkip name = name == "." || name == ".." || name == ".gitattributes"
+          let staticSkip name = name == "." || name == ".."
           gitIsDir <- doesDirectoryExist (full </> ".git")
           let skip name = staticSkip name || (name == ".git" && gitIsDir)
           let children = [ (full </> name, if null rel then name else rel </> name) | name <- names, not (skip name) ]

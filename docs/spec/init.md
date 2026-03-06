@@ -6,8 +6,7 @@ Creates `.bit/` with an internal Git repo in `.bit/index/.git`. Git repository i
 
 ### Git Configuration
 
-- **Ignore rules**: User creates `.bitignore` in the project root. Before any command that uses working tree state (add, commit, status, diff, restore, checkout, merge, reset, mv), bit runs **syncBitignoreToIndex**: if `.bitignore` exists it is copied to `.bit/index/.gitignore` with normalization (line endings, trim, drop empty lines); if `.bitignore` does not exist, `.bit/index/.gitignore` is removed if present.
-- **Attribute rules**: Same commands also run **syncGitattributesToIndex**: if `.gitattributes` exists in the project root, it is copied verbatim to `.bit/index/.gitattributes`; if not, `.bit/index/.gitattributes` is removed.
+- **Ignore and attribute rules**: `.gitignore` and `.gitattributes` in the project root are scanned and copied to `.bit/index/` like any other text file. Git sees them natively inside the index working tree — no special sync step required.
 
 ### Init Steps
 

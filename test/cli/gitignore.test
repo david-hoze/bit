@@ -1,0 +1,74 @@
+# Test .gitignore support
+
+# Setup: fresh repo
+rm -rf test/cli/output/work_gitignore 2>/dev/null; mkdir -p test/cli/output/work_gitignore && cd test/cli/output/work_gitignore && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Create .gitignore with *.log pattern
+cd test/cli/output/work_gitignore && echo '*.log' > .gitignore
+<<<
+>>>= 0
+
+# Create test files: file.txt and debug.log
+cd test/cli/output/work_gitignore && echo hello > file.txt && echo debug content > debug.log
+<<<
+>>>= 0
+
+# Add all files - should only stage file.txt
+cd test/cli/output/work_gitignore && bit add .
+<<<
+>>>= 0
+
+# Status should show file.txt as staged
+cd test/cli/output/work_gitignore && bit status
+<<<
+>>> /file\.txt/
+>>>= 0
+
+# Verify debug.log is NOT shown in status
+cd test/cli/output/work_gitignore && bit status | grep -q debug.log && exit 1 || exit 0
+<<<
+>>>= 0
+
+# Commit
+cd test/cli/output/work_gitignore && bit commit -m "test commit"
+<<<
+>>> /file.*changed/
+>>>= 0
+
+# Check that debug.log is NOT in git log after commit
+cd test/cli/output/work_gitignore && bit log --name-only --oneline | grep -q debug.log && exit 1 || exit 0
+<<<
+>>>= 0
+
+# Check that file.txt metadata DOES exist
+test -f test/cli/output/work_gitignore/.bit/index/file.txt && exit 0 || exit 1
+<<<
+>>>= 0
+
+# Modify .gitignore to also ignore *.tmp
+cd test/cli/output/work_gitignore && echo '*.tmp' >> .gitignore
+<<<
+>>>= 0
+
+# Create test.tmp file
+cd test/cli/output/work_gitignore && echo temp content > test.tmp
+<<<
+>>>= 0
+
+# Add all - test.tmp should be ignored
+cd test/cli/output/work_gitignore && bit add .
+<<<
+>>>= 0
+
+# Verify test.tmp is NOT shown in status
+cd test/cli/output/work_gitignore && bit status | grep -q test.tmp && exit 1 || exit 0
+<<<
+>>>= 0
+
+# Cleanup
+rm -rf test/cli/output/work_gitignore
+<<<
+>>>= 0

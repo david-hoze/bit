@@ -109,7 +109,7 @@ Submodules are preserved. Their entries in `.git/config` and `.gitmodules` carry
 
 **Q: What about `.gitignore`?**
 
-Your `.gitignore` continues to work. bit also supports `.bitignore` for bit-specific ignore patterns. If you have a `.bitignore`, it gets synced to `.bit/index/.gitignore` on the next scan.
+Your `.gitignore` continues to work. bit scans it like any other text file and copies it to `.bit/index/.gitignore`, where git uses it natively.
 
 **Q: Can I import a bare repo?**
 

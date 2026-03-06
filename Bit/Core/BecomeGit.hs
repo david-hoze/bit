@@ -225,7 +225,7 @@ bitExeName = "bit"
 addToPath :: FilePath -> IO ()
 #ifdef mingw32_HOST_OS
 addToPath dir = do
-    -- Read current user PATH from registry via reg query
+    -- Windows registry PATH (for cmd.exe, PowerShell, GUI apps)
     currentPath <- readWindowsUserPath
     if dir `isInfixOf` currentPath
         then putStrLn $ "PATH already contains: " ++ dir
@@ -233,7 +233,15 @@ addToPath dir = do
             let newPath = dir ++ ";" ++ currentPath
             writeWindowsUserPath newPath
             broadcastSettingChange
-            putStrLn $ "Added to PATH: " ++ dir
+            putStrLn $ "Added to PATH (Windows registry): " ++ dir
+    -- Also update bash profile for MSYS2/MinGW shells
+    home <- getHome
+    let bashrc = home </> ".bashrc"
+        exportLine = "export PATH=\"" ++ dir ++ ":$PATH\"  # Added by bit become-git"
+    appendToFileIfMissing bashrc exportLine
+    putStrLn $ "Added to PATH in ~/.bashrc: " ++ dir
+    -- Also update PowerShell profile
+    addToPowerShellProfile dir
 #else
 addToPath dir = do
     home <- getHome
@@ -257,6 +265,12 @@ removeFromPath dir = do
         writeWindowsUserPath newPath
         broadcastSettingChange
     putStrLn $ "Removed from PATH: " ++ dir
+    -- Also clean up bash profile and PowerShell profile
+    home <- getHome
+    let bashrc = home </> ".bashrc"
+        marker = "# Added by bit become-git"
+    removeLineFromFile bashrc marker
+    removeFromPowerShellProfile
 #else
 removeFromPath _dir = do
     home <- getHome
@@ -316,6 +330,25 @@ broadcastSettingChange = do
     pure ()
 
 #else
+addToPath dir = do
+    home <- getHome
+    let bashrc = home </> ".bashrc"
+        profile = home </> ".profile"
+        exportLine = "export PATH=\"" ++ dir ++ ":$PATH\"  # Added by bit become-git"
+    appendToFileIfMissing bashrc exportLine
+    appendToFileIfMissing profile exportLine
+    putStrLn $ "Added to PATH in ~/.bashrc and ~/.profile: " ++ dir
+
+removeFromPath _dir = do
+    home <- getHome
+    let bashrc = home </> ".bashrc"
+        profile = home </> ".profile"
+        marker = "# Added by bit become-git"
+    removeLineFromFile bashrc marker
+    removeLineFromFile profile marker
+    putStrLn "Removed PATH entries from ~/.bashrc and ~/.profile"
+#endif
+
 -- | Append a line to a file if it doesn't already contain the line.
 appendToFileIfMissing :: FilePath -> String -> IO ()
 appendToFileIfMissing path line = do
@@ -336,7 +369,48 @@ removeLineFromFile path marker = do
         content <- readFile path
         let filtered = filter (\l -> not (marker `isInfixOf` l)) (lines content)
         length filtered `seq` writeFile path (unlines filtered)
-#endif
+
+-- | Add directory to the PowerShell profile's $extraPaths array.
+-- If the profile doesn't exist or doesn't use $extraPaths, appends a PATH
+-- prepend line instead.
+addToPowerShellProfile :: FilePath -> IO ()
+addToPowerShellProfile dir = do
+    home <- getHome
+    let psProfile = home </> "Documents" </> "WindowsPowerShell"
+                         </> "Microsoft.PowerShell_profile.ps1"
+        dirBS = map (\c -> if c == '/' then '\\' else c) dir
+        marker = "# Added by bit become-git"
+    exists <- doesFileExist psProfile
+    if exists
+        then do
+            content <- readFile psProfile
+            if dirBS `isInfixOf` content || dir `isInfixOf` content
+                then putStrLn $ "PowerShell profile already contains: " ++ dir
+                else do
+                    -- Try to insert into $extraPaths = @( ... ) block
+                    let ls = lines content
+                        newEntry = "    \"" ++ dirBS ++ "\",  " ++ marker
+                        (before, after) = break (\l -> "$extraPaths" `isInfixOf` l && "@(" `isInfixOf` l) ls
+                    case after of
+                        (header:rest) -> do
+                            let newLines = before ++ [header, newEntry] ++ rest
+                            length newLines `seq` writeFile psProfile (unlines newLines)
+                            putStrLn $ "Added to PowerShell profile $extraPaths: " ++ dir
+                        [] -> do
+                            -- No $extraPaths block; append a raw PATH prepend
+                            let psLine = "$env:PATH = \"" ++ dirBS ++ ";$env:PATH\"  " ++ marker
+                            appendFile psProfile ("\n" ++ psLine ++ "\n")
+                            putStrLn $ "Added to PowerShell profile: " ++ dir
+        else putStrLn "No PowerShell profile found, skipping."
+
+-- | Remove bit become-git entries from the PowerShell profile.
+removeFromPowerShellProfile :: IO ()
+removeFromPowerShellProfile = do
+    home <- getHome
+    let psProfile = home </> "Documents" </> "WindowsPowerShell"
+                         </> "Microsoft.PowerShell_profile.ps1"
+        marker = "# Added by bit become-git"
+    removeLineFromFile psProfile marker
 
 -- | Split a string on a separator character.
 splitOn :: Char -> String -> [String]

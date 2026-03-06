@@ -33,23 +33,44 @@ main = do
             bitExe <- findBit
             exec bitExe args
         else do
-            -- Normal mode: init → real git, bit repos → bit, else → real git
+            -- Normal mode: init → real git, import/export → bit,
+            -- bit repos → bit, else → real git
             if isGitInit args
                 then exec realGit args
-                else do
-                    isBit <- walkUpForBitDir
-                    if isBit
-                        then do
-                            setEnv "BIT_REAL_GIT" realGit
-                            bitExe <- findBit
-                            exec bitExe args
-                        else exec realGit args
+                else if isBitOnlyCommand args
+                    then do
+                        setEnv "BIT_REAL_GIT" realGit
+                        bitExe <- findBit
+                        exec bitExe args
+                    else do
+                        isBit <- walkUpForBitDir
+                        if isBit
+                            then do
+                                setEnv "BIT_REAL_GIT" realGit
+                                bitExe <- findBit
+                                exec bitExe args
+                            else exec realGit args
 
 -- | Check if junction mode is enabled via BIT_GIT_JUNCTION=1.
 isJunctionMode :: IO Bool
 isJunctionMode = do
     mVal <- lookupEnv "BIT_GIT_JUNCTION"
     pure (mVal == Just "1")
+
+-- | Check if the command is a bit-only command (import, export, become-git).
+-- These must route to bit even from a non-bit repo.
+isBitOnlyCommand :: [String] -> Bool
+isBitOnlyCommand = go
+  where
+    go [] = False
+    go ("import":_) = True
+    go ("export":_) = True
+    go ("become-git":_) = True
+    go ("-c":_:rest) = go rest
+    go ("-C":_:rest) = go rest
+    go (x:rest)
+        | "-" `isPrefixOf` x = go rest
+        | otherwise = False
 
 -- | Check if the command is @git init@.
 -- Skips leading flags (-c, -C, --bare) to find the subcommand.

@@ -11,7 +11,7 @@ import System.Info (os)
 cliFastTests :: [FilePath]
 cliFastTests =
   [ "000-cleanup.test"
-  , "bitignore.test"
+  , "gitignore.test"
   , "init.test"
   , "init-config.test"
   , "no-repo.test"

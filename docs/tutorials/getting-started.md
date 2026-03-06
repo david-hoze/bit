@@ -170,7 +170,7 @@ bit merge feature              # merge branches
 
 ## Ignoring Files
 
-Create a `.bitignore` file in the project root (same syntax as `.gitignore`):
+Create a `.gitignore` file in the project root:
 
 ```
 *.tmp
@@ -178,9 +178,7 @@ build/
 .DS_Store
 ```
 
-bit syncs this to `.bit/index/.gitignore` automatically before any command that needs it.
-
-If you already have a `.gitignore`, it works too — bit copies `.gitattributes` from the project root into the index.
+bit scans `.gitignore` like any other text file and copies it to `.bit/index/.gitignore`, where git uses it natively. Same for `.gitattributes`.
 
 ## Working from Subdirectories
 

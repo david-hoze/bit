@@ -11,7 +11,6 @@ import qualified Bit.Scan.Local as Scan  -- Only for the pre-scan in runCommand
 import qualified Bit.Core.Submodule as Submodule
 import Bit.Remote (getDefaultRemote, getUpstreamRemote, resolveRemote)
 import qualified Bit.Device.Identity as Device
-import Bit.Utils (atomicWriteFileStr)
 import Bit.IO.Concurrency (Concurrency(..))
 import qualified Bit.Device.RemoteWorkspace as RemoteWorkspace
 import System.Environment (getArgs, lookupEnv, setEnv)
@@ -463,52 +462,6 @@ pushWithUpstream env cwd name = do
     void $ Git.setupBranchTrackingFor name
     putStrLn $ "branch 'main' set up to track '" ++ name ++ "/main'."
 
--- | Sync .bitignore to .bit/index/.gitignore with normalization
-syncBitignoreToIndex :: FilePath -> FilePath -> IO ()
-syncBitignoreToIndex cwd bitDir = do
-    let bitignoreSrc = cwd </> ".bitignore"
-        bitignoreDest = bitDir </> "index" </> ".gitignore"
-    bitignoreExists <- Dir.doesFileExist bitignoreSrc
-    if bitignoreExists
-        then writeBitignore bitignoreSrc bitignoreDest
-        else removeStaleGitignore bitignoreDest
-  where
-    writeBitignore :: FilePath -> FilePath -> IO ()
-    writeBitignore src dest = do
-        bs <- BS.readFile src
-        let content = either (const "") T.unpack (decodeUtf8' bs)
-            normalizedLines = filter (not . null) $
-              map (trim . filter (/= '\r')) (lines content)
-        atomicWriteFileStr dest (unlines normalizedLines)
-    
-    removeStaleGitignore :: FilePath -> IO ()
-    removeStaleGitignore dest = do
-        destExists <- Dir.doesFileExist dest
-        when destExists $ Dir.removeFile dest
-    
-    trim :: String -> String
-    trim = dropWhile (== ' ') . dropWhileEnd (== ' ')
-
--- | Sync user's .gitattributes to .bit/index/.gitattributes.
--- If the user has no .gitattributes, remove the stale copy from .bit/index/.
--- This runs AFTER writeMetadataFiles (which copies text files from the
--- working tree) to handle the cleanup case where the user deletes their
--- .gitattributes — the scan wouldn't include it and listMetadataPaths
--- skips .gitattributes, so without this the stale copy would persist.
-syncGitattributesToIndex :: FilePath -> FilePath -> IO ()
-syncGitattributesToIndex cwd bitDir = do
-    let userSrc = cwd </> ".gitattributes"
-        dest    = bitDir </> "index" </> ".gitattributes"
-    userExists <- Dir.doesFileExist userSrc
-    if userExists
-        then do
-            bs <- BS.readFile userSrc
-            let content = either (const "") T.unpack (decodeUtf8' bs)
-            atomicWriteFileStr dest content
-        else do
-            destExists <- Dir.doesFileExist dest
-            when destExists $ Dir.removeFile dest
-
 -- | Resolve the .bit directory from a repo root.
 -- For normal repos, .bit is a directory. For separated repos, .bit is a file
 -- (bitlink) containing "bitdir: <path>" pointing to the real bit directory.
@@ -753,12 +706,10 @@ runCommand args = do
             mRemote <- getUpstreamRemote cwd
             pure $ BitEnv cwd bitDir prefix mRemote forceMode
 
-    -- Scan + bitignore sync + metadata write — for write commands (add, commit, etc.)
+    -- Scan + metadata write — for write commands (add, commit, etc.)
     let scanAndWrite = do
-            syncBitignoreToIndex cwd bitDir
             localFiles <- Scan.scanWorkingDir cwd concurrency
             Scan.writeMetadataFiles cwd localFiles
-            syncGitattributesToIndex cwd bitDir
 
     -- Helper functions for running commands
     let runScanned action = do { scanAndWrite; env <- baseEnv; runBitM env action }
