@@ -14,7 +14,10 @@ cleanup done
 >>>= 0
 
 # ======================================================================
-# BARE + LITE: push and pull
+# BARE + SOLID: push and pull
+# Bare remotes store files only in CAS, so solid mode is required —
+# lite mode has no CAS data and no readable paths, so binary files
+# cannot be synced via bare remotes in lite mode.
 # ======================================================================
 
 mkdir -p test/cli/output/work_bare_a
@@ -27,9 +30,9 @@ cd test/cli/output/work_bare_a && bit init
 >>> /.*[Ii]nitialized.*/
 >>>= 0
 
-cd test/cli/output/work_bare_a && bit config core.mode lite
+cd test/cli/output/work_bare_a && bit config core.mode solid
 <<<
->>> /[Mm]ode set to lite|lite/
+>>> /[Ss]olid|Mode set/
 >>>= 0
 
 cd test/cli/output/work_bare_a && bit remote add origin gdrive-test:bit-test-bare --bare
@@ -37,7 +40,7 @@ cd test/cli/output/work_bare_a && bit remote add origin gdrive-test:bit-test-bar
 >>> /Remote.*added.*bare layout/
 >>>= 0
 
-cd test/cli/output/work_bare_a && echo bare lite content > file.txt && printf '\x00binary' > x.bin && bit add file.txt x.bin && bit commit -m "Add files"
+cd test/cli/output/work_bare_a && echo bare solid content > file.txt && printf '\x00binary' > x.bin && bit add file.txt x.bin && bit commit -m "Add files"
 <<<
 >>> /\[main|files? changed/
 >>>= 0
@@ -52,7 +55,7 @@ mkdir -p test/cli/output/work_bare_b
 >>>
 >>>= 0
 
-cd test/cli/output/work_bare_b && bit init && bit config core.mode lite && bit remote add origin gdrive-test:bit-test-bare --bare
+cd test/cli/output/work_bare_b && bit init && bit config core.mode solid && bit remote add origin gdrive-test:bit-test-bare --bare
 <<<
 >>> /.*[Ii]nitialized.*/
 >>>= 0
@@ -62,26 +65,21 @@ cd test/cli/output/work_bare_b && bit fetch && bit pull origin
 >>> /first pull|Checking out|Syncing|Merge made|Pulling|remote: Counting/
 >>>= 0
 
-cd test/cli/output/work_bare_b && grep -q 'bare lite content' .bit/index/file.txt
+cd test/cli/output/work_bare_b && grep -q 'bare solid content' .bit/index/file.txt
 <<<
 >>>
 >>>= 0
 
 # ======================================================================
-# BARE + SOLID: push and pull
+# BARE + SOLID: second push and pull
 # ======================================================================
-
-cd test/cli/output/work_bare_a && bit config core.mode solid
-<<<
->>> /[Ss]olid|Mode set/
->>>= 0
 
 cd test/cli/output/work_bare_a && echo solid add > y.bin && bit add y.bin && bit commit -m "Add y" && bit push origin
 <<<
 >>> /Push complete/
 >>>= 0
 
-cd test/cli/output/work_bare_b && bit config core.mode solid && bit pull origin
+cd test/cli/output/work_bare_b && bit pull origin
 <<<
 >>> /Merge made|Updating|Syncing|already up to date/
 >>>= 0

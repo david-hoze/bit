@@ -98,10 +98,12 @@ registerGitRemotes repoRoot indexDir = do
             when (urlCode == ExitSuccess) $ do
                 let url = filter (/= '\n') urlOut
                 pathType <- Device.classifyRemotePath url
+                -- All imported remotes are metadata-only: they come from a git repo
+                -- and have no bit binary data to sync.
                 case pathType of
                     Device.GitRemote u ->
                         Device.writeRemoteFile repoRoot name Device.RemoteGit (Just u) (Just Device.LayoutMetadata)
-                    Device.FilesystemPath _ ->
-                        Device.writeRemoteFile repoRoot name Device.RemoteFilesystem Nothing Nothing
+                    Device.FilesystemPath p ->
+                        Device.writeRemoteFile repoRoot name Device.RemoteGit (Just p) (Just Device.LayoutMetadata)
                     Device.CloudRemote u ->
-                        Device.writeRemoteFile repoRoot name Device.RemoteCloud (Just u) (Just Device.LayoutFull)
+                        Device.writeRemoteFile repoRoot name Device.RemoteGit (Just u) (Just Device.LayoutMetadata)

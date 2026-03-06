@@ -53,6 +53,13 @@ Existing CAS data is preserved.
 
 **Push does NOT populate local CAS.** Push only uploads CAS blobs that already exist locally (from solid-mode `bit add`). In lite mode with no local CAS data, nothing is uploaded to remote CAS -- only readable copies are uploaded (for full-layout remotes).
 
+**Bare remotes require solid mode for binary file sync.** Bare-layout remotes store files exclusively in CAS (`cas/<prefix>/<hash>`) -- there are no readable paths. In lite mode, CAS is empty, so there is nothing to upload. Bare+lite is effectively metadata-only for binary files. Use solid mode when pushing to bare remotes.
+
+| Mode   | Full layout remote | Bare layout remote |
+|--------|--------------------|--------------------|
+| **Lite**   | Push uploads readable copies (no CAS) | **No binary sync** — metadata-only |
+| **Solid**  | Push uploads CAS blobs + readable copies | Push uploads CAS blobs |
+
 **The mode is local-only.** It is not committed or tracked in git. Different clones of the same project can run in different modes -- a laptop might use lite to save space while a NAS uses solid for full history.
 
 **CAS garbage collection:** `bit cas gc` (future) can prune blobs that are not referenced by any reachable commit. The safe default is to never delete CAS data automatically.

@@ -50,16 +50,7 @@ Both are validated before any changes are made.
 
 After relocating `.git`, `bit import` reads the existing git remotes and creates corresponding `.bit/remotes/<name>` files so that `bit push`/`bit pull` work immediately after import.
 
-Each remote URL is classified via `classifyRemotePath`:
-
-| URL pattern | Remote type | Layout |
-|-------------|-------------|--------|
-| SSH URLs (`git@...`, `ssh://...`) | `git` | `metadata` |
-| HTTPS git URLs (`https://github.com/...`) | `git` | `metadata` |
-| Local filesystem paths | `filesystem` | (full repo) |
-| rclone remotes (`remote:path`) | `cloud` | `full` |
-
-This ensures the correct transport seam is used for each remote after import.
+**All imported remotes are metadata-only.** An imported repo comes from git — all its remotes are git remotes with no bit binary data to sync. Every imported remote is registered as `type: git, layout: metadata`, regardless of whether the URL is SSH, HTTPS, a filesystem path to a bare git repo, or anything else.
 
 ## Post-Import Workflow
 

@@ -44,6 +44,17 @@ Commands.hs → Core/*.hs ──→ Rclone/Sync.hs → Rclone/Run.hs → rclone 
 - **Proof of possession**: a repo must not transfer metadata it cannot back up with actual content. Verify before push; verify remote before pull.
 - **Index invariant**: git is the sole authority over `.bit/index/`. After any git operation that changes HEAD, `.bit/index/` is correct by definition.
 - `.bit/index/` files are mutable working state — every scan overwrites them. To read what the user **committed**, use git (`git diff`, `git show HEAD:<path>`), not the filesystem files.
+- **CAS is only populated by `bit add` in solid mode.** Push never stages files to local CAS — it only uploads CAS blobs that already exist. In lite mode with no CAS data: full-layout remotes sync readable copies, bare-layout remotes have nothing to upload (bare requires solid mode to transfer binary files).
+- **Imported remotes are always metadata-only.** `bit import` converts a git repo — all its remotes are git remotes with no bit binary data. Every imported remote is registered as `type: git, layout: metadata`.
+
+### Mode × Layout Matrix
+
+| Mode   | Full layout remote | Bare layout remote |
+|--------|--------------------|--------------------|
+| **Lite**   | Push uploads readable copies (no CAS) | **No binary sync** — no CAS, no readable paths |
+| **Solid**  | Push uploads CAS blobs + readable copies | Push uploads CAS blobs |
+
+Bare remotes store files exclusively in CAS (`cas/<prefix>/<hash>`). Without solid mode populating local CAS, there is nothing to upload — bare+lite is effectively metadata-only for binary files.
 
 ## Build Tool
 
