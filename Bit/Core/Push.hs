@@ -213,7 +213,7 @@ push = withRemote $ \remote -> do
 
     -- 3. For git/metadata-only remotes, skip classifyRemoteState (uses rclone listing).
     -- Instead, try fetch directly and dispatch based on result.
-    if layout == Device.LayoutMetadata
+    if layout == Device.LayoutMetadata || layout == Device.LayoutBare
         then do
             liftIO $ putStrLn $ "Pushing metadata to: " ++ displayRemote remote
             preHash <- liftIO $ Git.getRemoteTrackingHash (remoteName remote)
@@ -324,7 +324,7 @@ handleNonBit seam remote samples layout = do
 -- mRemoteHash: the remote's HEAD hash (Nothing for first push / empty remote).
 executePush :: PushSeam -> Remote -> Maybe String -> Device.RemoteLayout -> BitM ()
 executePush seam remote mRemoteHash layout = do
-    unless (layout == Device.LayoutMetadata) $
+    unless (layout == Device.LayoutMetadata || layout == Device.LayoutBare) $
         syncRemoteFiles mRemoteHash layout
     -- Skip metadata push when remote is already at our HEAD (avoids slow
     -- no-op git pull over network paths like \\tsclient\...)

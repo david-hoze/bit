@@ -36,7 +36,7 @@ import System.Directory
 import System.IO (withFile, IOMode(ReadMode), hIsEOF, hPutStr, hPutStrLn, hIsTerminalDevice, hFlush, stderr, stdin)
 import Data.List (dropWhileEnd, isPrefixOf)
 import Data.Either (isRight)
-import Data.Maybe (listToMaybe)
+import Data.Maybe (catMaybes, listToMaybe)
 import qualified Data.ByteString as BS
 import Control.Monad (void, when, forM_, filterM)
 import Data.Foldable (traverse_)
@@ -372,27 +372,31 @@ formatElapsed secs
 
 -- | Stat a file and check the hash cache.
 -- Returns Right for cache hits, Left for files needing hashing.
-statAndCheckCache :: FilePath -> (FilePath, FilePath) -> IO (Either FileToHash FileEntry)
+statAndCheckCache :: FilePath -> (FilePath, FilePath) -> IO (Maybe (Either FileToHash FileEntry))
 statAndCheckCache root (rel, fullPath) = do
-    size <- getFileSize fullPath
-    mtime <- getModificationTime fullPath
-    let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
-    cached <- loadCacheEntry root rel
-    case cached of
-        Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt ->
-            pure $ Right $ FileEntry
-                { path = Path rel
-                , kind = File (ceHash ce) (fromIntegral size) (ceContentType ce)
-                }
-        _ -> pure $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
+    exists <- doesFileExist fullPath
+    if not exists then pure Nothing else do
+      size <- getFileSize fullPath
+      mtime <- getModificationTime fullPath
+      let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+      cached <- loadCacheEntry root rel
+      case cached of
+          Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt ->
+              pure $ Just $ Right $ FileEntry
+                  { path = Path rel
+                  , kind = File (ceHash ce) (fromIntegral size) (ceContentType ce)
+                  }
+          _ -> pure $ Just $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
 
 -- | Stat a file without checking cache — always requires hashing.
-statNoCache :: FilePath -> (FilePath, FilePath) -> IO (Either FileToHash FileEntry)
+statNoCache :: FilePath -> (FilePath, FilePath) -> IO (Maybe (Either FileToHash FileEntry))
 statNoCache _root (rel, fullPath) = do
-    size <- getFileSize fullPath
-    mtime <- getModificationTime fullPath
-    let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
-    pure $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
+    exists <- doesFileExist fullPath
+    if not exists then pure Nothing else do
+      size <- getFileSize fullPath
+      mtime <- getModificationTime fullPath
+      let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+      pure $ Just $ Left $ FileToHash rel fullPath (fromIntegral size) mtimeInt
 
 -- | Hash a single file and save the result to cache.
 hashFileToEntry :: FilePath -> ConfigFile.TextConfig -> Maybe (IORef Integer) -> FileToHash -> IO FileEntry
@@ -446,30 +450,32 @@ scanWorkingDir root concurrencyMode = do
           Parallel n  -> pure n
 
         let hashWithProgress (rel, fullPath) = do
-                size <- getFileSize fullPath
-                mtime <- getModificationTime fullPath
-                let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
-                cached <- loadCacheEntry root rel
-                case cached of
-                  Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
-                    atomicModifyIORef' counter (\n -> (n + 1, ()))
-                    pure $ FileEntry
-                        { path = Path rel
-                        , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ceContentType ce }
-                        }
-                  _ -> do
-                    (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config Nothing
-                    saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
-                    atomicModifyIORef' counter (\n -> (n + 1, ()))
-                    pure $ FileEntry
-                        { path = Path rel
-                        , kind = File { fHash = h, fSize = fromIntegral size, fContentType = contentType }
-                        }
+                exists <- doesFileExist fullPath
+                if not exists then pure Nothing else do
+                  size <- getFileSize fullPath
+                  mtime <- getModificationTime fullPath
+                  let mtimeInt = floor (utcTimeToPOSIXSeconds mtime) :: Integer
+                  cached <- loadCacheEntry root rel
+                  case cached of
+                    Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
+                      atomicModifyIORef' counter (\n -> (n + 1, ()))
+                      pure $ Just $ FileEntry
+                          { path = Path rel
+                          , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ceContentType ce }
+                          }
+                    _ -> do
+                      (h, contentType) <- hashAndClassifyFile fullPath (fromIntegral size) config Nothing
+                      saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
+                      atomicModifyIORef' counter (\n -> (n + 1, ()))
+                      pure $ Just $ FileEntry
+                          { path = Path rel
+                          , kind = File { fHash = h, fSize = fromIntegral size, fContentType = contentType }
+                          }
 
         let hashingAction = mapConcurrentlyBounded concurrency hashWithProgress filesToHash
 
         isTTY <- hIsTerminalDevice stderr
-        fileEntries <- if total > 50 && isTTY
+        mFileEntries <- if total > 50 && isTTY
             then do
                 reporterThread <- forkIO (progressLoop counter total)
                 finally hashingAction $ do
@@ -479,7 +485,7 @@ scanWorkingDir root concurrencyMode = do
             else
                 hashingAction
 
-        pure $ dirEntries ++ fileEntries
+        pure $ dirEntries ++ catMaybes mFileEntries
 
 -- | Scan with bandwidth detection. Measures storage throughput before committing
 -- to hash all files. If estimated time exceeds 60 seconds, prompts the user.
@@ -506,10 +512,11 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
         traverse_ (\cb -> cb (PhaseCollected (length filesToProcess))) mCallback
 
         -- Phase 1: stat all files and check cache (skip cache when forceRehash)
-        statResults <- if forceRehash
+        mStatResults <- if forceRehash
             then mapM (statNoCache root) filesToProcess
             else mapM (statAndCheckCache root) filesToProcess
-        let cacheHits    = [e | Right e <- statResults]
+        let statResults = catMaybes mStatResults
+            cacheHits    = [e | Right e <- statResults]
             needsHashing = [fth | Left fth <- statResults]
             totalBytesNeeded = sum [fthSize fth | fth <- needsHashing]
 

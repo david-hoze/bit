@@ -183,6 +183,13 @@ initializeRepoAt targetDir opts = do
     case code of
         ExitFailure _ -> pure code
         ExitSuccess -> do
+            -- After git init with --separate-git-dir, set core.worktree so that
+            -- git commands via gitlink can find the working tree.
+            when isFreshInit $ case mAbsSgdir of
+                Just _sgdir -> void $ Git.runGitAt targetBitIndexPath
+                    ["config", "core.worktree", toPosix targetBitIndexPath]
+                Nothing -> pure ()
+
             -- Post-init setup ONLY on fresh init
             when isFreshInit $ do
                 -- Fix for Windows external/USB drives: add to safe.directory

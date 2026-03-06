@@ -82,12 +82,33 @@ detectAndHandleSubrepo' cwd bitDir args = do
         when (not isRepoRoot) $ do
           -- Git subrepo — has .git/ directory
           hasGitDir <- Dir.doesDirectoryExist (fullPath </> ".git")
+          -- Git subrepo with gitlink — has .git file pointing to actual git dir
+          hasGitFile <- Dir.doesFileExist (fullPath </> ".git")
           when hasGitDir $ do
               let indexTarget = bitDir </> "index" </> p </> ".git"
               targetExists <- Dir.doesDirectoryExist indexTarget
               when (not targetExists) $ do
                   Dir.createDirectoryIfMissing True (takeDirectory indexTarget)
                   Dir.renameDirectory (fullPath </> ".git") indexTarget
+          -- Gitlink file: resolve the real git dir and move it to index
+          when (hasGitFile && not hasGitDir) $ do
+              let gitlinkPath = fullPath </> ".git"
+              mGitdir <- readGitlinkContent gitlinkPath
+              case mGitdir of
+                  Just gitdir -> do
+                      -- Resolve relative gitdir path against the submodule directory
+                      let realGitDir = if isAbsolute gitdir then gitdir
+                                       else fullPath </> gitdir
+                      realExists <- Dir.doesDirectoryExist realGitDir
+                      when realExists $ do
+                          let indexTarget = bitDir </> "index" </> p </> ".git"
+                          targetExists <- Dir.doesDirectoryExist indexTarget
+                          when (not targetExists) $ do
+                              Dir.createDirectoryIfMissing True (takeDirectory indexTarget)
+                              Dir.renameDirectory realGitDir indexTarget
+                              -- Remove the gitlink file so scanner can descend
+                              Dir.removeFile gitlinkPath
+                  Nothing -> pure ()
 
           -- Bit subrepo — has .bit/ directory with index/.git/
           hasBitDir <- Dir.doesDirectoryExist (fullPath </> ".bit")
