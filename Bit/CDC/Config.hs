@@ -7,14 +7,13 @@ import Bit.Core.Config (getConfigKey)
 import Bit.CDC.Types (ChunkConfig(..), defaultChunkConfig)
 
 -- | Read CDC configuration from .bit/config.
--- CDC is enabled by default.  Returns Nothing only when cdc.enabled
--- is explicitly set to "false".  Size parameters fall back to defaults.
+-- CDC is off by default.  Returns Just only when cdc.enabled
+-- is explicitly set to "true".  Size parameters fall back to defaults.
 getCdcConfig :: FilePath -> IO (Maybe ChunkConfig)
 getCdcConfig bitRoot = do
   mEnabled <- getConfigKey bitRoot "cdc.enabled"
   case mEnabled of
-    Just "false" -> pure Nothing
-    _ -> do
+    Just "true" -> do
       mMin <- readIntKey "cdc.min-size"
       mAvg <- readIntKey "cdc.avg-size"
       mMax <- readIntKey "cdc.max-size"
@@ -24,6 +23,7 @@ getCdcConfig bitRoot = do
         , ccAvgSize = maybe (ccAvgSize def) id mAvg
         , ccMaxSize = maybe (ccMaxSize def) id mMax
         }
+    _ -> pure Nothing
   where
     readIntKey key = do
       mVal <- getConfigKey bitRoot key
