@@ -66,6 +66,7 @@ module Bit.Git.Run
     , checkForceBinary
     , listNonIgnoredFiles
     , fixDubiousOwnership
+    , withOwnershipFix
     ) where
 
 import Data.Maybe (mapMaybe, listToMaybe)
@@ -484,6 +485,16 @@ fixDubiousOwnership err
             else -- Try unquoted: last token on the line
                 let ws = words line
                 in if null ws then Nothing else Just (last ws)
+
+-- | Run a git action, auto-fix dubious ownership errors, and retry once.
+-- The action should return (ExitCode, stdout, stderr).
+withOwnershipFix :: IO (ExitCode, String, String) -> IO (ExitCode, String, String)
+withOwnershipFix action = do
+    result@(code, _, err) <- action
+    if code /= ExitSuccess then do
+        fixed <- fixDubiousOwnership err
+        if fixed then action else pure result
+    else pure result
 
 -- | Abort an in-progress merge.
 mergeAbort :: IO ExitCode

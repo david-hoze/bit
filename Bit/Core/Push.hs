@@ -89,32 +89,16 @@ mkGitSeam :: Remote -> PushSeam
 mkGitSeam remote = PushSeam
     { ptFetchHistory = do
         let name = remoteName remote
-        (fetchCode, _, fetchErr) <- Git.runGitWithOutput ["fetch", name]
-        if fetchCode == ExitSuccess
+        (code, _, _) <- Git.withOwnershipFix $ Git.runGitWithOutput ["fetch", name]
+        if code == ExitSuccess
             then Git.getRemoteTrackingHash name
-            else do
-                fixed <- Git.fixDubiousOwnership fetchErr
-                if fixed
-                    then do
-                        (retryCode, _, _) <- Git.runGitWithOutput ["fetch", name]
-                        if retryCode == ExitSuccess
-                            then Git.getRemoteTrackingHash name
-                            else pure Nothing
-                    else pure Nothing
+            else pure Nothing
     , ptPushMetadata = do
         let name = remoteName remote
-        (code, _, err) <- Git.runGitWithOutput ["push", name, "main"]
+        (code, _, err) <- Git.withOwnershipFix $ Git.runGitWithOutput ["push", name, "main"]
         when (code /= ExitSuccess) $ do
-            fixed <- Git.fixDubiousOwnership err
-            if fixed
-                then do
-                    (retryCode, _, retryErr) <- Git.runGitWithOutput ["push", name, "main"]
-                    when (retryCode /= ExitSuccess) $ do
-                        hPutStrLn stderr $ "error: git push failed: " ++ retryErr
-                        exitWith retryCode
-                else do
-                    hPutStrLn stderr $ "error: git push failed: " ++ err
-                    exitWith code
+            hPutStrLn stderr $ "error: git push failed: " ++ err
+            exitWith code
     }
 
 -- ============================================================================
@@ -169,7 +153,7 @@ filesystemFetchHistory _cwd remote = do
     -- Ensure git remote URL is current (device may have moved)
     void $ Git.addRemote name (remotePath </> ".bit" </> "index")
     -- Native git fetch
-    (fetchCode, _, fetchErr) <- Git.runGitWithOutput ["fetch", name]
+    (fetchCode, _, fetchErr) <- Git.withOwnershipFix $ Git.runGitWithOutput ["fetch", name]
     when (fetchCode /= ExitSuccess) $ do
         hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
         exitWith fetchCode
@@ -185,8 +169,8 @@ filesystemPushMetadata _cwd remote = do
         remoteIndex = remotePath </> ".bit" </> "index"
     localIndexPath <- Git.getIndexPath
     let localIndexGit = localIndexPath </> ".git"
-    void $ Git.runGitAt remoteIndex ["config", "core.fileMode", "false"]
-    (code, _, err) <- Git.runGitAt remoteIndex
+    void $ Git.withOwnershipFix $ Git.runGitAt remoteIndex ["config", "core.fileMode", "false"]
+    (code, _, err) <- Git.withOwnershipFix $ Git.runGitAt remoteIndex
         ["pull", "--ff-only", localIndexGit, "main"]
     when (code /= ExitSuccess) $ do
         hPutStrLn stderr $ "error: Failed to update remote metadata: " ++ err
