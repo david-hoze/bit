@@ -11,8 +11,8 @@ import Control.Monad (when, forM_)
 import System.Exit (ExitCode(..))
 import System.IO (hPutStrLn, stderr)
 import Control.Exception (catch, IOException)
-import Data.List (isInfixOf)
 import qualified Bit.Git.Run as Git
+import qualified Bit.Device.Identity as Device
 
 -- | Export a bit repo back to a plain git repo.
 -- First arg: optional target path (copy export). Second arg: bit repo root.
@@ -39,7 +39,7 @@ exportInPlace root = do
         then do
             -- Hybrid layout: .git is already the real dir, .bit/index/.git is a gitfile or symlink.
             -- Remove bundle remotes before deleting .bit/
-            removeBundleRemotes (root </> ".bit" </> "index")
+            removeBitRemotes root
             if indexGitIsLink
                 then Dir.removeDirectoryLink bitIndexGit
                 else Dir.removeFile bitIndexGit
@@ -57,7 +57,7 @@ exportInPlace root = do
                     then Dir.renameDirectory bitIndexGit rootGit
                     else Dir.copyFile bitIndexGit rootGit  -- gitfile: just copy
                 -- Remove bundle remotes before deleting .bit/
-                removeBundleRemotes (root </> ".bit" </> "index")
+                removeBitRemotes root
                 -- Delete .bit/
                 Dir.removeDirectoryRecursive (root </> ".bit")
                 putStrLn $ "Exported bit repository to git: " ++ root
@@ -139,22 +139,20 @@ copyDirectoryRecursive src dst = do
             then copyDirectoryRecursive srcPath dstPath
             else Dir.copyFile srcPath dstPath
 
--- | Remove git remotes that point to bit's internal bundle paths.
--- These are cloud transport artifacts that won't work in a plain git repo.
-removeBundleRemotes :: FilePath -> IO ()
-removeBundleRemotes indexDir = do
+-- | Remove git remotes that are not metadata-only.
+-- Non-metadata remotes (cloud, filesystem) use bit-internal git remote URLs
+-- (bundle paths, .bit/index paths) that don't work in a plain git repo.
+-- Only metadata-only remotes (real git remotes) are preserved.
+removeBitRemotes :: FilePath -> IO ()
+removeBitRemotes root = do
+    let indexDir = root </> ".bit" </> "index"
     (code, out, _) <- Git.runGitAt indexDir ["remote"]
     when (code == ExitSuccess) $ do
         let names = filter (not . null) (lines out)
         forM_ names $ \name -> do
-            (urlCode, urlOut, _) <- Git.runGitAt indexDir
-                ["config", "--get", "remote." ++ name ++ ".url"]
-            when (urlCode == ExitSuccess) $ do
-                let url = filter (/= '\n') urlOut
-                when (isBundlePath url) $
-                    Git.runGitAt indexDir ["remote", "remove", name] >> pure ()
-  where
-    isBundlePath url = ".git/bundles/" `isInfixOf` url || ".git\\bundles/" `isInfixOf` url
+            layout <- Device.readRemoteLayout root name
+            when (layout /= Device.LayoutMetadata) $
+                Git.runGitAt indexDir ["remote", "remove", name] >> pure ()
 
 -- | Copy working directory files from root to target, skipping .bit and .git.
 copyWorkingFiles :: FilePath -> FilePath -> IO ()

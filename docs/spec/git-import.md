@@ -52,6 +52,14 @@ After relocating `.git`, `bit import` reads the existing git remotes and creates
 
 **All imported remotes are metadata-only.** An imported repo comes from git — all its remotes are git remotes with no bit binary data to sync. Every imported remote is registered as `type: git, layout: metadata`, regardless of whether the URL is SSH, HTTPS, a filesystem path to a bare git repo, or anything else.
 
+**Auto-detection of bit filesystem remotes:** In some cases (e.g. after export/import cycles), git remotes may point to `.bit/index` paths — these are bit filesystem remotes, not plain git remotes. Import detects URLs containing `.bit/index` and registers them as `type: filesystem` so push/pull use the correct transport seam.
+
+**Bundle remotes are removed.** Git remotes pointing to `.git/bundles/<name>.bundle` are bit's internal cloud transport artifacts. Import removes these from git since the actual cloud remote URL cannot be reconstructed — the user must re-add cloud remotes manually.
+
+## Export Remote Cleanup
+
+`bit export` removes all non-metadata git remotes before converting to a plain git repo. Non-metadata remotes (cloud, filesystem, bare) use bit-internal URLs (bundle paths, `.bit/index` paths) that don't work outside bit. Only metadata-only remotes (real git remotes like SSH, HTTPS, bare repos) are preserved.
+
 ## Post-Import Workflow
 
 After `bit import`, the typical next step is:

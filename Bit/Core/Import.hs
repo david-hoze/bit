@@ -8,7 +8,7 @@ import qualified System.Directory as Dir
 import qualified Bit.IO.Platform as Platform
 import System.FilePath ((</>))
 import Control.Monad (void, when, unless, forM_)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, isPrefixOf)
 import qualified Bit.Git.Run as Git
 import qualified Bit.Device.Identity as Device
 import System.Exit (ExitCode(..))
@@ -103,11 +103,33 @@ registerGitRemotes repoRoot indexDir = do
                 -- The actual cloud remote URL is lost on export; user must re-add.
                 if isBundlePath url
                     then void $ Git.runGitAt indexDir ["remote", "remove", name]
-                    else
-                        -- All imported remotes are metadata-only: they come from a git repo
-                        -- and have no bit binary data to sync.
-                        Device.writeRemoteFile repoRoot name Device.RemoteGit (Just url) (Just Device.LayoutMetadata)
+                    else if isBitIndexPath url
+                        -- .bit/index in URL = bit filesystem remote, not a plain git remote.
+                        -- Recover the parent bit repo path and register as filesystem.
+                        then do
+                            let remotePath = stripBitIndex url
+                            Device.writeRemoteFile repoRoot name Device.RemoteFilesystem (Just remotePath) Nothing
+                            -- Update git remote to point to the correct .bit/index path
+                            void $ Git.runGitAt indexDir ["remote", "set-url", name, url]
+                        else
+                            -- All other imported remotes are metadata-only: they come from
+                            -- a git repo and have no bit binary data to sync.
+                            Device.writeRemoteFile repoRoot name Device.RemoteGit (Just url) (Just Device.LayoutMetadata)
 
 -- | Check if a git remote URL is a bit-internal bundle path (.git/bundles/ or .git\bundles/).
 isBundlePath :: String -> Bool
 isBundlePath url = ".git/bundles/" `isInfixOf` url || ".git\\bundles/" `isInfixOf` url
+
+-- | Check if a git remote URL points to a .bit/index — a bit filesystem remote.
+isBitIndexPath :: String -> Bool
+isBitIndexPath url = ".bit/index" `isInfixOf` url || ".bit\\index" `isInfixOf` url
+
+-- | Strip .bit/index (or .bit\index) suffix to recover the parent bit repo path.
+stripBitIndex :: String -> String
+stripBitIndex url = go url
+  where
+    go [] = url  -- fallback: return original if pattern not found
+    go s@(_:rest)
+        | ".bit/index" `isPrefixOf` s  = take (length url - length s) url
+        | ".bit\\index" `isPrefixOf` s = take (length url - length s) url
+        | otherwise = go rest
