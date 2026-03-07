@@ -7,7 +7,8 @@ module Bit.Core.Import
 import qualified System.Directory as Dir
 import qualified Bit.IO.Platform as Platform
 import System.FilePath ((</>))
-import Control.Monad (void, when, forM_)
+import Control.Monad (void, when, unless, forM_)
+import Data.List (isInfixOf)
 import qualified Bit.Git.Run as Git
 import qualified Bit.Device.Identity as Device
 import System.Exit (ExitCode(..))
@@ -97,13 +98,16 @@ registerGitRemotes repoRoot indexDir = do
                 ["config", "--get", "remote." ++ name ++ ".url"]
             when (urlCode == ExitSuccess) $ do
                 let url = filter (/= '\n') urlOut
-                pathType <- Device.classifyRemotePath url
-                -- All imported remotes are metadata-only: they come from a git repo
-                -- and have no bit binary data to sync.
-                case pathType of
-                    Device.GitRemote u ->
-                        Device.writeRemoteFile repoRoot name Device.RemoteGit (Just u) (Just Device.LayoutMetadata)
-                    Device.FilesystemPath p ->
-                        Device.writeRemoteFile repoRoot name Device.RemoteGit (Just p) (Just Device.LayoutMetadata)
-                    Device.CloudRemote u ->
-                        Device.writeRemoteFile repoRoot name Device.RemoteGit (Just u) (Just Device.LayoutMetadata)
+                -- Skip and remove bit's internal bundle remotes (.git/bundles/<name>.bundle).
+                -- These are cloud transport artifacts, not real git remotes.
+                -- The actual cloud remote URL is lost on export; user must re-add.
+                if isBundlePath url
+                    then void $ Git.runGitAt indexDir ["remote", "remove", name]
+                    else
+                        -- All imported remotes are metadata-only: they come from a git repo
+                        -- and have no bit binary data to sync.
+                        Device.writeRemoteFile repoRoot name Device.RemoteGit (Just url) (Just Device.LayoutMetadata)
+
+-- | Check if a git remote URL is a bit-internal bundle path (.git/bundles/ or .git\bundles/).
+isBundlePath :: String -> Bool
+isBundlePath url = ".git/bundles/" `isInfixOf` url || ".git\\bundles/" `isInfixOf` url
