@@ -332,7 +332,9 @@ executePush seam remote mRemoteHash layout = do
     let alreadyAtHead = case (localHead, mRemoteHash) of
             (Just lh, Just rh) -> lh == rh
             _                  -> False
-    unless alreadyAtHead $ liftIO $ ptPushMetadata seam
+    unless alreadyAtHead $ liftIO $ do
+        putStrLn "Updating remote metadata..."
+        ptPushMetadata seam
     liftIO $ void $ Git.updateRemoteTrackingBranchToHead (remoteName remote)
     liftIO $ putStrLn "Push complete."
 
