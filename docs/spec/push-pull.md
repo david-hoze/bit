@@ -102,6 +102,18 @@ For filesystem remotes, file sync distinguishes text from binary by examining th
 - **Text files**: Content lives in `.bit/index/path`. After git merge/checkout, copy from index to working tree.
 - **Binary files**: Content lives in working tree. Copy from source working tree to destination working tree.
 
+### Git Transport (Metadata-Only)
+
+For `RemoteGit` remotes (SSH, HTTPS, bare repos on filesystem), bit uses native `git fetch` and `git push` directly. No rclone, no bundles, no file sync — only metadata (git history) is transferred.
+
+All imported remotes are metadata-only by definition (they come from a git repo with no bit binary data).
+
+#### Dubious Ownership Auto-Fix
+
+When accessing remotes on network paths (UNC, USB, NAS), git may report "dubious ownership" because the remote filesystem doesn't record ownership. Bit automatically detects this error, runs `git config --global --add safe.directory <path>`, and retries the operation. If the fix fails, bit prints the error so the user can run the command manually.
+
+This applies to both `git fetch` and `git push` in the git seam, and to filesystem fetch.
+
 ### The `git push` Antipattern
 
 Do NOT use `git push` to a non-bare repo. Git refuses to update the checked-out branch. The correct approach: Have the remote **fetch** from local, then **merge --ff-only**.
