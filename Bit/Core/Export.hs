@@ -11,6 +11,8 @@ import Control.Monad (when, forM_)
 import System.Exit (ExitCode(..))
 import System.IO (hPutStrLn, stderr)
 import Control.Exception (catch, IOException)
+import Data.List (isInfixOf)
+import qualified Bit.Git.Run as Git
 
 -- | Export a bit repo back to a plain git repo.
 -- First arg: optional target path (copy export). Second arg: bit repo root.
@@ -36,7 +38,8 @@ exportInPlace root = do
     if rootGitIsDir && (indexGitIsFile || indexGitIsLink)
         then do
             -- Hybrid layout: .git is already the real dir, .bit/index/.git is a gitfile or symlink.
-            -- Just remove it and delete .bit/
+            -- Remove bundle remotes before deleting .bit/
+            removeBundleRemotes (root </> ".bit" </> "index")
             if indexGitIsLink
                 then Dir.removeDirectoryLink bitIndexGit
                 else Dir.removeFile bitIndexGit
@@ -53,6 +56,8 @@ exportInPlace root = do
                 if indexGitIsDir
                     then Dir.renameDirectory bitIndexGit rootGit
                     else Dir.copyFile bitIndexGit rootGit  -- gitfile: just copy
+                -- Remove bundle remotes before deleting .bit/
+                removeBundleRemotes (root </> ".bit" </> "index")
                 -- Delete .bit/
                 Dir.removeDirectoryRecursive (root </> ".bit")
                 putStrLn $ "Exported bit repository to git: " ++ root
@@ -133,6 +138,23 @@ copyDirectoryRecursive src dst = do
         if isDir
             then copyDirectoryRecursive srcPath dstPath
             else Dir.copyFile srcPath dstPath
+
+-- | Remove git remotes that point to bit's internal bundle paths.
+-- These are cloud transport artifacts that won't work in a plain git repo.
+removeBundleRemotes :: FilePath -> IO ()
+removeBundleRemotes indexDir = do
+    (code, out, _) <- Git.runGitAt indexDir ["remote"]
+    when (code == ExitSuccess) $ do
+        let names = filter (not . null) (lines out)
+        forM_ names $ \name -> do
+            (urlCode, urlOut, _) <- Git.runGitAt indexDir
+                ["config", "--get", "remote." ++ name ++ ".url"]
+            when (urlCode == ExitSuccess) $ do
+                let url = filter (/= '\n') urlOut
+                when (isBundlePath url) $
+                    Git.runGitAt indexDir ["remote", "remove", name] >> pure ()
+  where
+    isBundlePath url = ".git/bundles/" `isInfixOf` url || ".git\\bundles/" `isInfixOf` url
 
 -- | Copy working directory files from root to target, skipping .bit and .git.
 copyWorkingFiles :: FilePath -> FilePath -> IO ()
