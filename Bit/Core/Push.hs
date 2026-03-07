@@ -89,16 +89,32 @@ mkGitSeam :: Remote -> PushSeam
 mkGitSeam remote = PushSeam
     { ptFetchHistory = do
         let name = remoteName remote
-        (fetchCode, _, _) <- Git.runGitWithOutput ["fetch", name]
+        (fetchCode, _, fetchErr) <- Git.runGitWithOutput ["fetch", name]
         if fetchCode == ExitSuccess
             then Git.getRemoteTrackingHash name
-            else pure Nothing
+            else do
+                fixed <- Git.fixDubiousOwnership fetchErr
+                if fixed
+                    then do
+                        (retryCode, _, _) <- Git.runGitWithOutput ["fetch", name]
+                        if retryCode == ExitSuccess
+                            then Git.getRemoteTrackingHash name
+                            else pure Nothing
+                    else pure Nothing
     , ptPushMetadata = do
         let name = remoteName remote
         (code, _, err) <- Git.runGitWithOutput ["push", name, "main"]
         when (code /= ExitSuccess) $ do
-            hPutStrLn stderr $ "error: git push failed: " ++ err
-            exitWith code
+            fixed <- Git.fixDubiousOwnership err
+            if fixed
+                then do
+                    (retryCode, _, retryErr) <- Git.runGitWithOutput ["push", name, "main"]
+                    when (retryCode /= ExitSuccess) $ do
+                        hPutStrLn stderr $ "error: git push failed: " ++ retryErr
+                        exitWith retryCode
+                else do
+                    hPutStrLn stderr $ "error: git push failed: " ++ err
+                    exitWith code
     }
 
 -- ============================================================================

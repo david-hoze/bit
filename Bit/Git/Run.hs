@@ -65,6 +65,7 @@ module Bit.Git.Run
     , checkIgnore
     , checkForceBinary
     , listNonIgnoredFiles
+    , fixDubiousOwnership
     ) where
 
 import Data.Maybe (mapMaybe, listToMaybe)
@@ -77,7 +78,7 @@ import System.FilePath ((</>))
 import Data.Char (isSpace)
 import Control.Monad (when, guard)
 import Prelude hiding (init)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, isInfixOf)
 import System.IO (hPutStr, hPutStrLn, hGetContents, hSetBinaryMode, hClose,
                    hWaitForInput, stderr, stdin, hIsTerminalDevice)
 import Control.Concurrent (forkIO)
@@ -449,6 +450,40 @@ runGitWithOutput args = do
   flags <- getBaseFlags
   let fullArgs = flags ++ ["-c", "color.ui=never"] ++ args
   spawnGit fullArgs
+
+-- | Detect "dubious ownership" in git stderr and try to fix it by adding
+-- the path to safe.directory. Returns True if fixed (caller should retry).
+-- Returns False if the error wasn't about ownership or the fix failed.
+fixDubiousOwnership :: String -> IO Bool
+fixDubiousOwnership err
+    | "dubious ownership" `isInfixOf` err = do
+        -- Extract the path from: git config --global --add safe.directory '<path>'
+        let ls = lines err
+            safeDirLine = [l | l <- ls, "safe.directory" `isInfixOf` l]
+        case safeDirLine of
+            (line:_) -> do
+                let path = extractSafeDir line
+                case path of
+                    Just p -> do
+                        hPutStrLn stderr $ "Fixing ownership for: " ++ p
+                        (code, _, _) <- spawnGit ["config", "--global", "--add", "safe.directory", p]
+                        pure (code == ExitSuccess)
+                    Nothing -> do
+                        hPutStrLn stderr "error: Could not parse safe.directory path from git error."
+                        hPutStrLn stderr "Run the git config command shown above manually."
+                        pure False
+            [] -> pure False
+    | otherwise = pure False
+  where
+    -- Parse: git config --global --add safe.directory '<path>'
+    -- or:   git config --global --add safe.directory <path>
+    extractSafeDir line =
+        let after = dropWhile (/= '\'') (dropWhile (== ' ') line)
+        in if not (null after) && Prelude.head after == '\''
+            then Just (takeWhile (/= '\'') (tail after))
+            else -- Try unquoted: last token on the line
+                let ws = words line
+                in if null ws then Nothing else Just (last ws)
 
 -- | Abort an in-progress merge.
 mergeAbort :: IO ExitCode
