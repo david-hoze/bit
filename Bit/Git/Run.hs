@@ -65,6 +65,7 @@ module Bit.Git.Run
     , checkIgnore
     , checkForceBinary
     , listNonIgnoredFiles
+    , ensureSafeDirectory
     , fixDubiousOwnership
     , withOwnershipFix
     ) where
@@ -77,7 +78,7 @@ import System.Exit (ExitCode(..))
 import Bit.Config.Paths
 import System.FilePath ((</>))
 import Data.Char (isSpace)
-import Control.Monad (when, guard)
+import Control.Monad (when, guard, void)
 import Prelude hiding (init)
 import Data.List (isPrefixOf, isInfixOf)
 import System.IO (hPutStr, hPutStrLn, hGetContents, hSetBinaryMode, hClose,
@@ -105,8 +106,13 @@ indexPathRef = unsafePerformIO $ newIORef bitIndexPath
 {-# NOINLINE indexPathRef #-}
 
 -- | Set the index path for all subsequent git commands in this process.
+-- Also proactively adds the path to git's safe.directory to prevent
+-- "dubious ownership" errors on USB drives, network shares, etc.
+-- This is idempotent — git ignores duplicate safe.directory entries.
 setIndexPath :: FilePath -> IO ()
-setIndexPath = writeIORef indexPathRef
+setIndexPath path = do
+    writeIORef indexPathRef path
+    ensureSafeDirectory path
 
 -- | Read the current index path (for code that needs the resolved path outside BitM).
 getIndexPath :: IO FilePath
@@ -451,6 +457,14 @@ runGitWithOutput args = do
   flags <- getBaseFlags
   let fullArgs = flags ++ ["-c", "color.ui=never"] ++ args
   spawnGit fullArgs
+
+-- | Proactively add a path to git's safe.directory config.
+-- Git requires forward slashes on Windows; we normalize the path.
+-- Silently succeeds if the path is already listed (git deduplicates).
+ensureSafeDirectory :: FilePath -> IO ()
+ensureSafeDirectory path = do
+    let safePath = map (\c -> if c == '\\' then '/' else c) path
+    void $ spawnGit ["config", "--global", "--add", "safe.directory", safePath]
 
 -- | Detect "dubious ownership" in git stderr and try to fix it by adding
 -- the path to safe.directory. Returns True if fixed (caller should retry).

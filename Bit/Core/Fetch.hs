@@ -70,6 +70,7 @@ filesystemFetch _cwd remote = do
     checkFilesystemRemoteIsRepo rp
 
     -- Ensure git remote URL is current (device may have moved)
+    Git.ensureSafeDirectory (remotePath </> ".bit" </> "index")
     void $ Git.addRemote name (remotePath </> ".bit" </> "index")
 
     -- Read tracking ref before fetch

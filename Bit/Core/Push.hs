@@ -151,6 +151,7 @@ filesystemFetchHistory _cwd remote = do
     let name = remoteName remote
         remotePath = remoteUrl remote
     -- Ensure git remote URL is current (device may have moved)
+    Git.ensureSafeDirectory (remotePath </> ".bit" </> "index")
     void $ Git.addRemote name (remotePath </> ".bit" </> "index")
     -- Native git fetch
     (fetchCode, _, fetchErr) <- Git.withOwnershipFix $ Git.runGitWithOutput ["fetch", name]
@@ -167,6 +168,7 @@ filesystemPushMetadata :: FilePath -> Remote -> IO ()
 filesystemPushMetadata _cwd remote = do
     let remotePath = remoteUrl remote
         remoteIndex = remotePath </> ".bit" </> "index"
+    Git.ensureSafeDirectory remoteIndex
     localIndexPath <- Git.getIndexPath
     let localIndexGit = localIndexPath </> ".git"
     void $ Git.withOwnershipFix $ Git.runGitAt remoteIndex ["config", "core.fileMode", "false"]
