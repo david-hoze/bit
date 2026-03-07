@@ -2,9 +2,9 @@
 # Import Remotes - bit import registers git remotes in .bit/remotes/
 #
 # Tests: git remotes are classified and registered during import.
-# - SSH git remote -> type: git
-# - Local path remote -> type: filesystem
-# - bit remote show lists both
+# All imported remotes are metadata-only (type: git, layout: metadata)
+# since imported repos come from git with no bit binary data.
+# Exception: paths containing .bit/index are filesystem remotes.
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
@@ -33,7 +33,7 @@ cd test/cli/output/work_import_remotes && git remote add origin git@github.com:e
 <<<
 >>>= 0
 
-# Add a local filesystem remote (classified as type: filesystem)
+# Add a local path remote (all imported remotes are metadata-only git)
 cd test/cli/output/work_import_remotes && git remote add localfs /tmp/test-remote
 <<<
 >>>= 0
@@ -71,10 +71,10 @@ test -f test/cli/output/work_import_remotes/.bit/remotes/localfs && echo exists 
 exists
 >>>= 0
 
-# localfs should be type: filesystem
+# localfs should be type: git (all imported remotes are metadata-only)
 cd test/cli/output/work_import_remotes && cat .bit/remotes/localfs
 <<<
->>> /type: filesystem/
+>>> /type: git/
 >>>= 0
 
 # bit remote show origin should display the remote
@@ -89,10 +89,10 @@ cd test/cli/output/work_import_remotes && bit remote show origin
 >>> /Type: git/
 >>>= 0
 
-# bit remote show localfs should display filesystem type
+# bit remote show localfs should display git type (metadata-only)
 cd test/cli/output/work_import_remotes && bit remote show localfs
 <<<
->>> /localfs.*filesystem/
+>>> /localfs.*git/
 >>>= 0
 
 # ======================================================================
