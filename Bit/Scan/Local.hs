@@ -11,7 +11,7 @@ module Bit.Scan.Local
   , ScanPhase(..)
   , writeMetadataFiles
   , cleanOrphanMetadata
-  , cleanOrphanGitConfig
+
   , readMetadataFile
   , listMetadataPaths
   , getFileHashAndSize
@@ -756,7 +756,10 @@ writeMetadataFiles root entries = do
             when (n < total) go
 
 -- | Remove metadata files from .bit/index/ that no longer have corresponding
--- working tree files. Called after writeMetadataFiles to clean up deleted files.
+-- | Remove metadata files from .bit/index/ that no longer have corresponding
+-- working tree files. Called after writeMetadataFiles so that git sees deletions.
+-- Safe for verify: verify reads committed metadata from git history (FromCommit),
+-- not from filesystem metadata files.
 cleanOrphanMetadata :: FilePath -> [FileEntry] -> IO ()
 cleanOrphanMetadata root entries = do
     mBitRoot <- resolveBitRoot root
@@ -783,26 +786,6 @@ cleanOrphanMetadata root entries = do
                     contents <- listDirectory dir
                     let real = filter (\n -> n /= "." && n /= "..") contents
                     when (null real) $ removeDirectory dir
-
--- | Remove .gitattributes and .gitignore from .bit/index/ when they no longer
--- exist in the working tree. These git config files need index sync so that
--- git operations in .bit/index/ see the correct attributes/ignores.
--- Unlike generic cleanOrphanMetadata, this preserves all other metadata files
--- so that verify can detect missing files via stale metadata.
-cleanOrphanGitConfig :: FilePath -> IO ()
-cleanOrphanGitConfig root = do
-    mBitRoot <- resolveBitRoot root
-    case mBitRoot of
-      Nothing -> pure ()
-      Just bitRoot -> do
-        let metaRoot = bitRoot </> "index"
-        forM_ [".gitattributes", ".gitignore"] $ \name -> do
-            let workPath = root </> name
-            let indexPath = metaRoot </> name
-            workExists <- doesFileExist workPath
-            indexExists <- doesFileExist indexPath
-            when (not workExists && indexExists) $
-                removeFile indexPath
 
 -- | Check if a metadata file needs to be written (returns True if write needed)
 shouldWriteFile :: FilePath -> FilePath -> FileEntry -> Hash 'MD5 -> Integer -> ContentType -> IO Bool

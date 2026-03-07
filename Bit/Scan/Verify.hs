@@ -111,10 +111,10 @@ binaryEntries = concatMap go
 allEntryPaths :: [MetadataEntry] -> Set.Set Path
 allEntryPaths = Set.fromList . map entryPath
 
--- | Filter to user files only (exclude .git internals and .gitignore).
+-- | Filter to user files only (exclude .git internals).
 -- Used by BOTH filesystem and commit-tree paths.
 isUserFile :: FilePath -> Bool
-isUserFile filePath = not (isGitPath filePath) && filePath /= ".gitignore"
+isUserFile filePath = not (isGitPath filePath)
 
 -- | Resolve concurrency setting to a concrete bound.
 resolveConcurrency :: Concurrency -> IO Int

@@ -1,0 +1,101 @@
+# =============================================================================
+# Delete detection tests
+#
+# Verifies that deleting a file from the working tree is detected by bit status
+# and can be committed. The scan removes orphan metadata from .bit/index/ so
+# git sees the deletion.
+# =============================================================================
+
+# ---- CLEANUP ----
+rm -rf test/cli/output/work_del 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: create repo with multiple files
+# ======================================================================
+
+mkdir -p test/cli/output/work_del && cd test/cli/output/work_del && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_del && echo aaa > a.txt && echo bbb > b.txt && printf '\x00bin' > c.bin && bit add a.txt b.txt c.bin && bit commit -m "Add three files"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# ======================================================================
+# TEST 1: Delete a text file — status shows deletion
+# ======================================================================
+
+cd test/cli/output/work_del && rm a.txt && bit status
+<<<
+>>> /deleted.*a\.txt/
+>>>= 0
+
+# ======================================================================
+# TEST 2: Commit the deletion
+# ======================================================================
+
+cd test/cli/output/work_del && bit add a.txt && bit commit -m "Delete a.txt"
+<<<
+>>> /\[main|file changed|deletion/
+>>>= 0
+
+# ======================================================================
+# TEST 3: After commit, status is clean
+# ======================================================================
+
+cd test/cli/output/work_del && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# TEST 4: Delete a binary file — status shows deletion
+# ======================================================================
+
+cd test/cli/output/work_del && rm c.bin && bit status
+<<<
+>>> /deleted.*c\.bin/
+>>>= 0
+
+# ======================================================================
+# TEST 5: Commit binary deletion
+# ======================================================================
+
+cd test/cli/output/work_del && bit add c.bin && bit commit -m "Delete c.bin"
+<<<
+>>> /\[main|file changed|deletion/
+>>>= 0
+
+# ======================================================================
+# TEST 6: Only b.txt remains
+# ======================================================================
+
+cd test/cli/output/work_del && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# TEST 7: Delete last file, verify detected
+# ======================================================================
+
+cd test/cli/output/work_del && rm b.txt && bit status
+<<<
+>>> /deleted.*b\.txt/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+rm -rf test/cli/output/work_del 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

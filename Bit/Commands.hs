@@ -706,11 +706,13 @@ runCommand args = do
             mRemote <- getUpstreamRemote cwd
             pure $ BitEnv cwd bitDir prefix mRemote forceMode
 
-    -- Scan + metadata write — for write commands (add, commit, etc.)
+    -- Scan working tree → update metadata → remove orphans for deleted files.
+    -- cleanOrphanMetadata ensures git sees file deletions (removes stale .bit/index/ files).
+    -- Verify is unaffected: it reads committed metadata from git history, not the filesystem.
     let scanAndWrite = do
             localFiles <- Scan.scanWorkingDir cwd concurrency
             Scan.writeMetadataFiles cwd localFiles
-            Scan.cleanOrphanGitConfig cwd
+            Scan.cleanOrphanMetadata cwd localFiles
 
     -- Helper functions for running commands
     let runScanned action = do { scanAndWrite; env <- baseEnv; runBitM env action }
