@@ -77,7 +77,7 @@ filesystemFetch _cwd remote = do
     maybeOldHash <- Git.getRemoteTrackingHash name
 
     -- Native git fetch
-    (fetchCode, _fetchOut, fetchErr) <- Git.withOwnershipFix $ Git.runGitWithOutput ["fetch", name]
+    (fetchCode, _fetchOut, fetchErr) <- Git.runGitWithOutput ["fetch", name]
 
     when (fetchCode /= ExitSuccess) $ do
         hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr

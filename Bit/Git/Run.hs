@@ -452,8 +452,9 @@ unsetBranchUpstream = do
     pure code
 
 -- | Run git with baseFlags; returns (exitCode, stdout, stderr). Does not rewrite hints.
+-- Auto-fixes dubious ownership errors and retries once.
 runGitWithOutput :: [String] -> IO (ExitCode, String, String)
-runGitWithOutput args = do
+runGitWithOutput args = withOwnershipFix $ do
   flags <- getBaseFlags
   let fullArgs = flags ++ ["-c", "color.ui=never"] ++ args
   spawnGit fullArgs
@@ -679,8 +680,9 @@ getFilesAtCommit gitRef = do
 -- | Run a git command targeting a specific index path (for filesystem remotes).
 -- This is used when operating on a remote filesystem repo directly.
 -- The indexPath should be the path to the .bit/index directory (NOT the .git subdirectory).
+-- Auto-fixes dubious ownership errors and retries once.
 runGitAt :: FilePath -> [String] -> IO (ExitCode, String, String)
-runGitAt indexPath args = spawnGit (["-C", indexPath] ++ args)
+runGitAt indexPath args = withOwnershipFix $ spawnGit (["-C", indexPath] ++ args)
 
 -- | Run git in the current directory without -C override.
 -- Used when CWD itself is a git directory (e.g. user cd'd into .git)
