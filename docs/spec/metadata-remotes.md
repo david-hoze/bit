@@ -166,17 +166,21 @@ For `RemoteFilesystem` with `layout: metadata` pointing at a bare git repo, the 
 ### Summary Table
 
 ```
-Type        Layout      Metadata transport              File sync
-──────────  ──────────  ─────────────────────────────   ─────────
-git         metadata    git push/fetch (native)         None
-cloud       metadata    Bundle via rclone               None
-cloud       bare        Bundle via rclone               CAS only
-cloud       full        Bundle via rclone               CAS + readable
-filesystem  metadata    git push/fetch (native)         None
-filesystem  full        git fetch + ff-only merge       Working tree
-device      metadata    git push/fetch (native)         None
-device      full        git fetch + ff-only merge       Working tree
+Type        Layout      Metadata transport                          File sync
+──────────  ──────────  ──────────────────────────────────────────  ─────────
+git         metadata    git push/fetch (native)                     None
+cloud       metadata    Bundle via rclone                           None
+cloud       bare        Bundle via rclone                           CAS only
+cloud       full        Bundle via rclone                           CAS + readable
+filesystem  metadata    git pull --ff-only / git fetch (fs-native)  None
+filesystem  full        git fetch + ff-only merge                   Working tree
+device      metadata    git pull --ff-only / git fetch (fs-native)  None
+device      full        git fetch + ff-only merge                   Working tree
 ```
+
+Filesystem metadata-only remotes use pull-based push (`git pull --ff-only` at the
+remote side) for non-bare repos to avoid the "checked-out branch" problem with
+`git push`. Bare repos use `git push` directly. See push-pull.md for details.
 
 ### Git Transport Seam
 
@@ -232,7 +236,11 @@ Push to a metadata-only remote:
 3. **Push metadata** via the appropriate transport:
     - `RemoteGit`: `git push <name> main` inside `.bit/index`.
     - Cloud `layout: metadata`: Upload bundle via rclone, skip file sync.
-    - Filesystem/device `layout: metadata`: `git push` to the remote's git repo.
+    - Filesystem/device `layout: metadata`: Detects the remote structure:
+      - Empty/nonexistent: `git init -b main` to create a plain git repo, then pull-based push.
+      - Plain git repo (non-bare): `git pull --ff-only` at the remote, pulling from local `.bit/index/.git`.
+      - Bare git repo: `git push` to the remote (bare repos accept pushes).
+      - Bit repo: `git pull --ff-only` at `<remote>/.bit/index/`, pulling from local `.bit/index/.git`.
 4. **Update tracking ref.** `refs/remotes/<n>/main` updated to HEAD.
 
 ### Behavior Imitates Git

@@ -147,7 +147,15 @@ Everything else is shared: `classifyRemoteState`, `syncRemoteFiles`, ancestry ch
 
 **Filesystem seam** (`mkFilesystemSeam`): Uses native git fetch/pull. Metadata pushed via `git pull --ff-only` at the remote side.
 
-**Git seam** (`mkGitSeam`): For `RemoteGit` and metadata-only remotes. Uses native `git fetch`/`git push` directly. No bundles, no rclone. File sync skipped entirely.
+**Git seam** (`mkGitSeam`): For `RemoteGit` and non-filesystem metadata-only remotes. Uses native `git fetch`/`git push` directly. No bundles, no rclone. File sync skipped entirely.
+
+**Filesystem metadata-only seam** (`mkFilesystemMetadataSeam`): For filesystem remotes with `layout: metadata`. Detects the remote structure and adapts:
+- **Empty/nonexistent**: Initializes a plain git repo (`git init -b main`), then pull-based push
+- **Plain git repo** (non-bare): `git pull --ff-only` at the remote root, pulling from local `.bit/index/.git`. Avoids the checked-out-branch problem with `git push`.
+- **Bare git repo**: `git push` directly (bare repos accept pushes, no work tree for pull)
+- **Bit repo**: `git pull --ff-only` at `<remote>/.bit/index/`, pulling from local `.bit/index/.git`
+
+The detection helper (`detectRemoteGitKind`) runs inside the IO actions at push time. `remote add --metadata-only` allows nonexistent paths — the directory is created on first push.
 
 **Push flow** (all transports):
 1. **Verify local** (proof of possession -- full-layout remotes only; skipped for bare and metadata-only). Working tree must match committed metadata; CAS is not consulted (run `bit repair` first if files are corrupted).
@@ -176,6 +184,8 @@ PullSeam:
 **Filesystem seam** (`mkFilesystemPullSeam`): Runs `git fetch <remotePath>/.bit/index` directly.
 
 **Git seam** (`mkGitPullSeam`): Runs `git fetch <name>` using the git remote URL directly. Verification is a no-op.
+
+**Filesystem metadata-only seam** (`mkFilesystemMetadataPullSeam`): For filesystem remotes with `layout: metadata`. Detects the remote structure (plain git, bare git, or bit repo) and fetches from the appropriate git directory. Verification is a no-op (metadata-only remotes have no content to verify). Returns False for empty remotes.
 
 **Pull flow** (all transports):
 1. **Fetch remote metadata** via seam

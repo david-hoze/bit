@@ -65,6 +65,7 @@ import Bit.Rclone.Sync
     )
 import Bit.Core.Fetch (fetchRemoteBundle, saveFetchedBundle, FetchOutcome(..), printFetchBanner)
 import qualified Bit.Device.Identity as Device
+import Bit.Core.Push (RemoteGitKind(..), detectRemoteGitKind)
 
 -- ============================================================================
 -- PullSeam: abstracts fetch/verify differences between cloud and filesystem
@@ -147,6 +148,36 @@ mkFilesystemPullSeam remote = PullSeam
     name = remoteName remote
     remotePath = remoteUrl remote
 
+-- | Filesystem metadata-only pull seam.
+-- Detects what's at the remote path (plain git repo or bit repo) and fetches
+-- from the appropriate git directory.  No content to verify (metadata-only).
+mkFilesystemMetadataPullSeam :: Remote -> PullSeam
+mkFilesystemMetadataPullSeam remote = PullSeam
+    { psFetchMetadata = do
+        let name = remoteName remote
+            remotePath = remoteUrl remote
+        kind <- detectRemoteGitKind remotePath
+        case kind of
+            RemoteIsEmpty -> do
+                hPutStrLn stderr "error: Remote is empty. Nothing to pull."
+                pure False
+            _ -> do
+                let target = case kind of
+                        RemoteIsBitRepo -> remotePath </> ".bit" </> "index"
+                        _               -> remotePath
+                putStrLn $ "Pulling from filesystem remote: " ++ remotePath
+                Git.ensureSafeDirectory target
+                void $ Git.addRemote name target
+                putStrLn "Fetching remote commits..."
+                (fetchCode, _, fetchErr) <- Git.runGitWithOutput ["fetch", name]
+                when (fetchCode /= ExitSuccess) $ do
+                    hPutStrLn stderr $ "Error fetching from remote: " ++ fetchErr
+                    exitWith fetchCode
+                printFetchBanner name (name ++ "/main")
+                pure True
+    , psVerifyRemote = \_ -> pure ()  -- No content to verify (metadata-only)
+    }
+
 -- ============================================================================
 -- Pull operations
 -- ============================================================================
@@ -173,6 +204,7 @@ pull opts = withRemote $ \remote -> do
             (Just Device.RemoteGit, _)       -> mkGitPullSeam remote
             (_, Device.LayoutMetadata)        -> case mType of
                 Just Device.RemoteCloud       -> mkCloudPullSeam remote
+                _ | isFs                      -> mkFilesystemMetadataPullSeam remote
                 _                             -> mkGitPullSeam remote
             _ | isFs                          -> mkFilesystemPullSeam remote
             _                                 -> mkCloudPullSeam remote

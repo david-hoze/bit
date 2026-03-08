@@ -10,6 +10,8 @@ module Bit.Core.Push
     , uploadToRemote
     , cleanupTemp
     , syncRemoteFiles
+    , RemoteGitKind(..)
+    , detectRemoteGitKind
     ) where
 
 import qualified System.Directory as Dir
@@ -190,6 +192,100 @@ filesystemPushMetadata _cwd remote = do
     void $ Git.runGitAt remoteIndex ["add", "-u"]
 
 -- ============================================================================
+-- Filesystem metadata-only seam
+-- ============================================================================
+
+-- | What kind of git repository (if any) exists at a filesystem path.
+data RemoteGitKind
+    = RemoteIsEmpty      -- ^ Nothing there (or nonexistent)
+    | RemoteIsPlainGit   -- ^ Non-bare git repo (has .git/ subdirectory), no .bit/
+    | RemoteIsBareGit    -- ^ Bare git repo (HEAD at root, no .git/ subdir), no .bit/
+    | RemoteIsBitRepo    -- ^ Bit repo (has .bit/ directory)
+    deriving (Eq, Show)
+
+-- | Detect what kind of git repository exists at a filesystem path.
+-- Checks .bit/ first (takes priority — a dir with both .bit/ and .git/ is a bit repo).
+-- Distinguishes bare from non-bare: bare repos have HEAD at root but no .git/ subdir.
+detectRemoteGitKind :: FilePath -> IO RemoteGitKind
+detectRemoteGitKind path = do
+    exists <- Dir.doesDirectoryExist path
+    if not exists then pure RemoteIsEmpty
+    else do
+        hasBitDir <- Dir.doesDirectoryExist (path </> ".bit")
+        if hasBitDir then pure RemoteIsBitRepo
+        else do
+            hasGitDir <- Dir.doesDirectoryExist (path </> ".git")
+            hasHead <- Dir.doesFileExist (path </> "HEAD")
+            if hasGitDir then pure RemoteIsPlainGit
+            else if hasHead then pure RemoteIsBareGit
+            else pure RemoteIsEmpty
+
+-- | Target git directory for a filesystem metadata-only remote.
+-- Bit repos: the remote's .bit/index directory.
+-- All others (plain git, bare git): the remote path itself.
+remoteGitTarget :: RemoteGitKind -> FilePath -> FilePath
+remoteGitTarget RemoteIsBitRepo remotePath = remotePath </> ".bit" </> "index"
+remoteGitTarget _               remotePath = remotePath
+
+-- | Build a filesystem metadata-only push seam.
+-- Detects what's at the remote path and adapts:
+--   - Nothing: initialize a plain git repo, then pull-based push
+--   - Plain git repo: git pull --ff-only at remote path (avoids checked-out branch issue)
+--   - Bare git repo: git push (bare repos accept pushes, no work tree for pull)
+--   - Bit repo: git pull --ff-only at remote's .bit/index
+mkFilesystemMetadataSeam :: FilePath -> Remote -> PushSeam
+mkFilesystemMetadataSeam _cwd remote = PushSeam
+    { ptFetchHistory = do
+        let name = remoteName remote
+            remotePath = remoteUrl remote
+        kind <- detectRemoteGitKind remotePath
+        case kind of
+            RemoteIsEmpty -> pure Nothing  -- first push, no history yet
+            _ -> do
+                let target = remoteGitTarget kind remotePath
+                Git.ensureSafeDirectory target
+                void $ Git.addRemote name target
+                (code, _, _) <- Git.runGitWithOutput ["fetch", name]
+                if code == ExitSuccess
+                    then Git.getRemoteTrackingHash name
+                    else pure Nothing
+    , ptPushMetadata = do
+        let name = remoteName remote
+            remotePath = remoteUrl remote
+        kind <- detectRemoteGitKind remotePath
+        -- Initialize a plain git repo if nothing exists yet
+        when (kind == RemoteIsEmpty) $ do
+            Dir.createDirectoryIfMissing True remotePath
+            (code, _, err) <- Git.runGitAt remotePath ["init", "-b", "main"]
+            when (code /= ExitSuccess) $ do
+                hPutStrLn stderr $ "error: Failed to initialize remote: " ++ err
+                exitWith code
+        let target = remoteGitTarget kind remotePath
+        Git.ensureSafeDirectory target
+        void $ Git.addRemote name target
+        case kind of
+            -- Bare repos accept git push (no checked-out branch problem)
+            RemoteIsBareGit -> do
+                (code, _, err) <- Git.runGitWithOutput ["push", name, "main"]
+                when (code /= ExitSuccess) $ do
+                    hPutStrLn stderr $ "error: Failed to push to bare remote: " ++ err
+                    exitWith (ExitFailure 1)
+            -- Non-bare repos: use pull-based push to avoid checked-out branch issue.
+            -- See "The git push Antipattern" in push-pull.md.
+            _ -> do
+                localIndexPath <- Git.getIndexPath
+                let localIndexGit = localIndexPath </> ".git"
+                -- Disable filemode checks: remote may be on NTFS/FAT/WSL where
+                -- permissions differ, causing spurious mode-change diffs.
+                void $ Git.runGitAt target ["config", "core.fileMode", "false"]
+                (code, _, err) <- Git.runGitAt target
+                    ["pull", "--ff-only", localIndexGit, "main"]
+                when (code /= ExitSuccess) $ do
+                    hPutStrLn stderr $ "error: Failed to update remote metadata: " ++ err
+                    exitWith (ExitFailure 1)
+    }
+
+-- ============================================================================
 -- Unified push entry point
 -- ============================================================================
 
@@ -220,6 +316,7 @@ push = withRemote $ \remote -> do
             (Just Device.RemoteGit, _)       -> mkGitSeam remote
             (_, Device.LayoutMetadata)        -> case mType of
                 Just Device.RemoteCloud       -> mkCloudSeam remote
+                _ | isFs                      -> mkFilesystemMetadataSeam cwd remote
                 _                             -> mkGitSeam remote
             _ | isFs                          -> mkFilesystemSeam cwd remote
             _                                 -> mkCloudSeam remote

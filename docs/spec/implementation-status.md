@@ -28,6 +28,7 @@
 | `DeviceInfo` | `Bit.Device.Identity` | UUID + storage type + optional hardware serial |
 | `RemoteType` | `Bit.Device.Identity` | RemoteFilesystem, RemoteDevice, RemoteCloud, RemoteGit |
 | `RemoteLayout` | `Bit.Device.Identity` | LayoutFull, LayoutBare, LayoutMetadata |
+| `RemoteGitKind` | `Bit.Core.Push` | RemoteIsEmpty, RemoteIsPlainGit, RemoteIsBareGit, RemoteIsBitRepo -- filesystem metadata-only detection |
 | `BitMode` | `Bit.Core.Config` | ModeLite, ModeSolid |
 | `ChunkConfig` | `Bit.CDC.Types` | CDC parameters: minSize, avgSize, maxSize |
 | `ChunkManifest` | `Bit.CDC.Types` | File hash + size + ordered list of `ChunkRef` |

@@ -1,0 +1,424 @@
+# =============================================================================
+# Filesystem metadata-only remote tests
+#
+# Tests push/pull to filesystem remotes with --metadata-only flag.
+# Three remote types: nonexistent path, plain git repo, bit repo.
+# Uses pull-based push (git pull --ff-only) to avoid the "checked-out branch"
+# problem with git push to non-bare repos.
+# =============================================================================
+
+# ---- CLEANUP ----
+rm -rf test/cli/output/work_fsmeta test/cli/output/fsmeta_plain test/cli/output/fsmeta_bitrepo test/cli/output/fsmeta_newpath test/cli/output/work_fsmeta_b test/cli/output/fsmeta_bare 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: Push to nonexistent path (first push creates plain git repo)
+# ======================================================================
+
+# Set up source bit repo
+mkdir -p test/cli/output/work_fsmeta
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && echo "hello world" > file.txt && bit add file.txt && bit commit -m "Initial commit"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# Add remote pointing at nonexistent directory
+cd test/cli/output/work_fsmeta && bit remote add newdest ../fsmeta_newpath --metadata-only
+<<<
+>>> /Remote 'newdest' added/
+>>>= 0
+
+# Push — should create plain git repo and succeed
+cd test/cli/output/work_fsmeta && bit push -u newdest
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Verify: remote is a plain git repo (has .git/, no .bit/)
+test -d test/cli/output/fsmeta_newpath/.git && echo "has .git - GOOD" || echo "no .git - BAD"
+<<<
+>>>
+has .git - GOOD
+>>>= 0
+
+test -d test/cli/output/fsmeta_newpath/.bit && echo "has .bit - BAD" || echo "no .bit - GOOD"
+<<<
+>>>
+no .bit - GOOD
+>>>= 0
+
+# Verify: remote has the expected git history
+cd test/cli/output/fsmeta_newpath && git log --oneline
+<<<
+>>> /Initial commit/
+>>>= 0
+
+# Push again (idempotent) — should succeed
+cd test/cli/output/work_fsmeta && bit push newdest
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: Push to existing plain git repo (non-bare, main checked out)
+# ======================================================================
+
+# Create a plain git repo at target path (non-bare, main checked out, no commits)
+mkdir -p test/cli/output/fsmeta_plain
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/fsmeta_plain && git init -b main
+<<<
+>>> /Initialized/
+>>>= 0
+
+# Set up a fresh bit repo
+rm -rf test/cli/output/work_fsmeta 2>/dev/null; mkdir -p test/cli/output/work_fsmeta
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && echo "content A" > doc.txt && bit add doc.txt && bit commit -m "Add doc"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# Add the plain git repo as metadata-only remote
+cd test/cli/output/work_fsmeta && bit remote add plaingit ../fsmeta_plain --metadata-only
+<<<
+>>> /Remote 'plaingit' added/
+>>>= 0
+
+# Push — should succeed (this is the original bug scenario: non-bare with main checked out)
+cd test/cli/output/work_fsmeta && bit push -u plaingit
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Verify: remote's git log includes the pushed commits
+cd test/cli/output/fsmeta_plain && git log --oneline
+<<<
+>>> /Add doc/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: Push to existing bit repo (metadata-only, skip binary sync)
+# ======================================================================
+
+# Create destination bit repo
+mkdir -p test/cli/output/fsmeta_bitrepo
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/fsmeta_bitrepo && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/fsmeta_bitrepo && echo "base" > base.txt && bit add base.txt && bit commit -m "Base commit"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# Set up source with shared history (pull from dest first)
+rm -rf test/cli/output/work_fsmeta 2>/dev/null; mkdir -p test/cli/output/work_fsmeta
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Add as full remote first to get shared history, then re-add as metadata-only
+cd test/cli/output/work_fsmeta && bit remote add dest ../fsmeta_bitrepo
+<<<
+>>> /Remote 'dest' added/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit pull dest
+<<<
+>>> /Checking out|Pull|first pull/
+>>>= 0
+
+# Remove and re-add as metadata-only
+cd test/cli/output/work_fsmeta && bit remote remove dest
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit remote add dest ../fsmeta_bitrepo --metadata-only
+<<<
+>>> /Remote 'dest' added/
+>>>= 0
+
+# Make new commits at source
+cd test/cli/output/work_fsmeta && echo "new content" > newfile.txt && bit add newfile.txt && bit commit -m "Add newfile"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# Push metadata only
+cd test/cli/output/work_fsmeta && bit push dest
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Verify: destination's .bit/index has the new commits
+cd test/cli/output/fsmeta_bitrepo/.bit/index && git log --oneline
+<<<
+>>> /Add newfile/
+>>>= 0
+
+# Verify: no binary files were transferred (newfile.txt NOT in dest working tree)
+test -f test/cli/output/fsmeta_bitrepo/newfile.txt && echo "file synced - BAD" || echo "no file - GOOD"
+<<<
+>>>
+no file - GOOD
+>>>= 0
+
+# ======================================================================
+# SECTION 4: Pull from plain git repo
+# ======================================================================
+
+# Create a plain git repo with some commits
+rm -rf test/cli/output/fsmeta_plain 2>/dev/null; mkdir -p test/cli/output/fsmeta_plain
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/fsmeta_plain && git init -b main && echo "readme" > README.md && git add . && git commit -m "First commit"
+<<<
+>>> /\[main.*First commit/
+>>>= 0
+
+# Set up a fresh bit repo and pull from the plain git repo
+rm -rf test/cli/output/work_fsmeta 2>/dev/null; mkdir -p test/cli/output/work_fsmeta
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit remote add plaingit ../fsmeta_plain --metadata-only
+<<<
+>>> /Remote 'plaingit' added/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit pull plaingit
+<<<
+>>> /Checking out|Pull|first pull/
+>>>= 0
+
+# Verify: local .bit/index has the remote's commits
+cd test/cli/output/work_fsmeta && bit log --oneline
+<<<
+>>> /First commit/
+>>>= 0
+
+# ======================================================================
+# SECTION 5: Pull from bit repo (metadata-only)
+# ======================================================================
+
+# Make new commits at the remote bit repo
+cd test/cli/output/fsmeta_bitrepo && echo "remote change" > remote-only.txt && bit add remote-only.txt && bit commit -m "Remote change"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# Set up a fresh bit repo that shares history
+rm -rf test/cli/output/work_fsmeta 2>/dev/null; mkdir -p test/cli/output/work_fsmeta
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit remote add src ../fsmeta_bitrepo --metadata-only
+<<<
+>>> /Remote 'src' added/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit pull src
+<<<
+>>> /Checking out|Pull|first pull/
+>>>= 0
+
+# Verify: metadata updated
+cd test/cli/output/work_fsmeta && bit log --oneline
+<<<
+>>> /Remote change/
+>>>= 0
+
+# Verify: no binary files downloaded
+test -f test/cli/output/work_fsmeta/remote-only.txt && echo "file synced - BAD" || echo "no file - GOOD"
+<<<
+>>>
+no file - GOOD
+>>>= 0
+
+# ======================================================================
+# SECTION 6: Round-trip push then pull
+# ======================================================================
+
+# Push metadata to a plain git repo remote
+rm -rf test/cli/output/fsmeta_plain test/cli/output/work_fsmeta test/cli/output/work_fsmeta_b 2>/dev/null
+<<<
+>>>
+>>>= 0
+
+mkdir -p test/cli/output/work_fsmeta
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && echo "v1" > data.txt && bit add data.txt && bit commit -m "Version 1"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit remote add shared ../fsmeta_plain --metadata-only
+<<<
+>>> /Remote 'shared' added/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit push -u shared
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Make more changes and push again
+cd test/cli/output/work_fsmeta && echo "v2" > data.txt && bit add data.txt && bit commit -m "Version 2"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit push shared
+<<<
+>>> /Push complete/
+>>>= 0
+
+# From a third bit repo, add the same remote and pull — should get all history
+mkdir -p test/cli/output/work_fsmeta_b
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta_b && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_fsmeta_b && bit remote add shared ../fsmeta_plain --metadata-only
+<<<
+>>> /Remote 'shared' added/
+>>>= 0
+
+cd test/cli/output/work_fsmeta_b && bit pull shared
+<<<
+>>> /Checking out|Pull|first pull/
+>>>= 0
+
+# Should have both commits
+cd test/cli/output/work_fsmeta_b && bit log --oneline
+<<<
+>>> /Version 2/
+>>>= 0
+
+cd test/cli/output/work_fsmeta_b && bit log --oneline
+<<<
+>>> /Version 1/
+>>>= 0
+
+# ======================================================================
+# SECTION 7: Bare git repo still works
+# ======================================================================
+
+rm -rf test/cli/output/work_fsmeta test/cli/output/fsmeta_bare 2>/dev/null
+<<<
+>>>
+>>>= 0
+
+mkdir -p test/cli/output/fsmeta_bare
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/fsmeta_bare && git init --bare
+<<<
+>>> /Initialized/
+>>>= 0
+
+mkdir -p test/cli/output/work_fsmeta
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && echo "bare test" > bare.txt && bit add bare.txt && bit commit -m "Bare test commit"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# Bare git repo is auto-detected as metadata-only
+cd test/cli/output/work_fsmeta && bit remote add barerepo ../fsmeta_bare
+<<<
+>>> /Remote 'barerepo' added.*metadata only/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit push -u barerepo
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Verify the bare repo received the commit
+cd test/cli/output/fsmeta_bare && git log --oneline main
+<<<
+>>> /Bare test commit/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+rm -rf test/cli/output/work_fsmeta test/cli/output/fsmeta_plain test/cli/output/fsmeta_bitrepo test/cli/output/fsmeta_newpath test/cli/output/work_fsmeta_b test/cli/output/fsmeta_bare 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

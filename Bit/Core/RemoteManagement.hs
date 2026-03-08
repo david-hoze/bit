@@ -77,7 +77,9 @@ addRemoteFilesystem :: FilePath -> String -> FilePath -> Bool -> IO ()
 addRemoteFilesystem cwd name filePath metadataOnly = do
     absPath <- Dir.makeAbsolute filePath
     exists <- Platform.doesDirectoryExist absPath
-    unless exists $ do
+    -- Allow nonexistent paths for --metadata-only: the push seam will
+    -- create and initialize the directory on first push.
+    unless (exists || metadataOnly) $ do
         hPutStrLn stderr ("fatal: Path does not exist or is not accessible: " ++ filePath)
         case filePath of
             ('\\':_) -> uncHint
@@ -86,16 +88,18 @@ addRemoteFilesystem cwd name filePath metadataOnly = do
         exitWith (ExitFailure 1)
 
     -- Check for bare git repo without .bit (auto-detect metadata-only)
-    hasBitDir <- Dir.doesDirectoryExist (absPath </> ".bit")
-    hasHead <- Dir.doesFileExist (absPath </> "HEAD")
-    hasGitSubdir <- Dir.doesDirectoryExist (absPath </> ".git")
+    hasBitDir <- if exists then Dir.doesDirectoryExist (absPath </> ".bit") else pure False
+    hasHead <- if exists then Dir.doesFileExist (absPath </> "HEAD") else pure False
+    hasGitSubdir <- if exists then Dir.doesDirectoryExist (absPath </> ".git") else pure False
     let isBareGitRepo = (hasHead || hasGitSubdir) && not hasBitDir
         isMetadata = metadataOnly || isBareGitRepo
 
     if isMetadata
         then do
             Device.writeRemoteFile cwd name Device.RemoteFilesystem (Just absPath) (Just Device.LayoutMetadata)
-            -- Point git remote directly at the path (not .bit/index)
+            -- Point git remote directly at the path (not .bit/index).
+            -- For nonexistent paths, register the URL anyway — the seam will
+            -- detect RemoteIsEmpty and initialize on first push.
             void $ Git.addRemote name absPath
             let autoMsg = if isBareGitRepo && not metadataOnly
                     then " (detected bare git repo, metadata only)."
