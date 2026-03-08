@@ -830,9 +830,7 @@ listMetadataPaths indexRoot = go indexRoot ""
       if isDir
         then do
           names <- listDirectory full
-          let staticSkip name = name == "." || name == ".."
-          gitIsDir <- doesDirectoryExist (full </> ".git")
-          let skip name = staticSkip name || (name == ".git" && gitIsDir)
+          let skip name = name == "." || name == ".." || name == ".git"
           let children = [ (full </> name, if null rel then name else rel </> name) | name <- names, not (skip name) ]
           concat <$> mapM (\(p, r) -> go p r) children
         else do
