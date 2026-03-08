@@ -45,6 +45,7 @@ import Bit.Core.Helpers
     , safeRemove
     )
 import Bit.Core.Init (initializeRemoteRepoAt)
+import qualified Bit.Scan.Local as Scan
 import Bit.Rclone.Sync (deriveActions, executeCommand)
 import Bit.Core.Fetch (classifyRemoteState, fetchBundle)
 import qualified Bit.Device.Identity as Device
@@ -177,6 +178,16 @@ filesystemPushMetadata _cwd remote = do
     when (code /= ExitSuccess) $ do
         hPutStrLn stderr $ "error: Failed to update remote metadata: " ++ err
         exitWith (ExitFailure 1)
+    -- git pull --ff-only checks out files with normalized line endings
+    -- (e.g. LF from eol=lf in .gitattributes), but the remote working
+    -- tree has the original bytes (CRLF on Windows).  Scan the remote
+    -- working tree to overwrite the checkout with byte-for-byte copies,
+    -- then git add -u to update the stat cache so git knows the CRLF
+    -- files normalize to the same LF blobs already committed.
+    remoteFiles <- Scan.scanWorkingDir remotePath (Parallel 0)
+    Scan.writeMetadataFiles remotePath remoteFiles
+    Scan.cleanOrphanMetadata remotePath remoteFiles
+    void $ Git.runGitAt remoteIndex ["add", "-u"]
 
 -- ============================================================================
 -- Unified push entry point

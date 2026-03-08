@@ -1,22 +1,24 @@
 # =============================================================================
-# Filesystem Remote File Mode - bit push sets core.fileMode=false on remote
+# Filesystem Remote File Mode and Line Ending Normalization
 #
-# On network/external filesystems (USB, NAS, UNC paths), file permissions are
-# reported differently than what git records. Without core.fileMode=false,
-# git sees permission differences as modifications, causing phantom "modified"
-# files on bit status at the remote. bit push sets core.fileMode=false on
-# the remote's .bit/index/ to prevent this.
+# Tests two filesystem remote issues:
+# 1. core.fileMode=false: prevents phantom modifications from permission
+#    differences on network/external filesystems.
+# 2. CRLF stat cache: when .gitattributes has eol=lf, git pull --ff-only
+#    checks out LF files, but writeMetadataFiles copies CRLF from the
+#    working tree.  git add -u in scanAndWrite updates the stat cache so
+#    git knows the CRLF files normalize to the same LF blobs.
 # =============================================================================
 
 # ---- CLEANUP: remove any leftover state from previous runs ----
-rm -rf test/cli/output/work_filemode test/cli/output/fs_remote_filemode 2>/dev/null; echo cleanup done
+rm -rf test/cli/output/work_filemode test/cli/output/fs_remote_filemode test/cli/output/work_eol test/cli/output/fs_eol test/cli/output/work_noeol test/cli/output/fs_noeol test/cli/output/work_lf test/cli/output/fs_lf 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done
 >>>= 0
 
 # ======================================================================
-# SECTION 1: SETUP
+# SECTION 1: core.fileMode=false
 # ======================================================================
 
 mkdir -p test/cli/output/work_filemode test/cli/output/fs_remote_filemode
@@ -45,10 +47,6 @@ cd test/cli/output/work_filemode && bit push -u origin
 >>> /Push complete/
 >>>= 0
 
-# ======================================================================
-# SECTION 2: VERIFY core.fileMode=false IS SET ON REMOTE
-# ======================================================================
-
 # Remote .bit/index should have core.fileMode=false after push
 cd test/cli/output/fs_remote_filemode/.bit/index && git config core.fileMode
 <<<
@@ -56,19 +54,11 @@ cd test/cli/output/fs_remote_filemode/.bit/index && git config core.fileMode
 false
 >>>= 0
 
-# ======================================================================
-# SECTION 3: STATUS AT REMOTE SHOULD BE CLEAN
-# ======================================================================
-
 # bit status at remote should show no modifications
 cd test/cli/output/fs_remote_filemode && bit status
 <<<
 >>> /nothing to commit|working tree clean/
 >>>= 0
-
-# ======================================================================
-# SECTION 4: PUSH AGAIN - fileMode SHOULD PERSIST
-# ======================================================================
 
 # Make a change and push again
 cd test/cli/output/work_filemode && echo "updated" > file.txt && bit add file.txt && bit commit -m "Update"
@@ -95,10 +85,134 @@ cd test/cli/output/fs_remote_filemode && bit status
 >>>= 0
 
 # ======================================================================
+# SECTION 2: CRLF files with eol=lf - remote status should be clean
+# ======================================================================
+
+mkdir -p test/cli/output/work_eol test/cli/output/fs_eol
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_eol && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Set up .gitattributes with eol=lf and create a CRLF file
+cd test/cli/output/work_eol && echo '*.md text eol=lf' > .gitattributes && printf "hello\r\nworld\r\n" > test.md && bit add .gitattributes test.md && bit commit -m "CRLF with eol=lf"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test/cli/output/work_eol && bit remote add origin ../fs_eol
+<<<
+>>> /Remote 'origin' added/
+>>>= 0
+
+cd test/cli/output/work_eol && bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Remote bit status should be clean (git add -u updates stat cache)
+cd test/cli/output/fs_eol && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# Local bit status should also be clean
+cd test/cli/output/work_eol && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 3: No .gitattributes - CRLF files should be clean
+# ======================================================================
+
+mkdir -p test/cli/output/work_noeol test/cli/output/fs_noeol
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_noeol && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# No .gitattributes, just CRLF files
+cd test/cli/output/work_noeol && printf "hello\r\nworld\r\n" > test.md && bit add test.md && bit commit -m "CRLF no gitattributes"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test/cli/output/work_noeol && bit remote add origin ../fs_noeol
+<<<
+>>> /Remote 'origin' added/
+>>>= 0
+
+cd test/cli/output/work_noeol && bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Both should be clean
+cd test/cli/output/fs_noeol && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+cd test/cli/output/work_noeol && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 4: LF files with eol=lf - should be clean on both
+# ======================================================================
+
+mkdir -p test/cli/output/work_lf test/cli/output/fs_lf
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_lf && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# eol=lf with actual LF files (no mismatch)
+cd test/cli/output/work_lf && echo '*.md text eol=lf' > .gitattributes && printf "hello\nworld\n" > test.md && bit add .gitattributes test.md && bit commit -m "LF with eol=lf"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test/cli/output/work_lf && bit remote add origin ../fs_lf
+<<<
+>>> /Remote 'origin' added/
+>>>= 0
+
+cd test/cli/output/work_lf && bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Both should be clean
+cd test/cli/output/fs_lf && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+cd test/cli/output/work_lf && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
 # CLEANUP
 # ======================================================================
 
-rm -rf test/cli/output/work_filemode test/cli/output/fs_remote_filemode 2>/dev/null; echo cleanup done
+rm -rf test/cli/output/work_filemode test/cli/output/fs_remote_filemode test/cli/output/work_eol test/cli/output/fs_eol test/cli/output/work_noeol test/cli/output/fs_noeol test/cli/output/work_lf test/cli/output/fs_lf 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done

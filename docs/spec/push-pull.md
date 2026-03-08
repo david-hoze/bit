@@ -115,13 +115,15 @@ When accessing repos on network paths (UNC, USB, NAS), git may report "dubious o
 1. **Proactive**: `ensureSafeDirectory` runs `git config --global --add safe.directory <path>` before accessing remote index paths (in `setIndexPath`, `filesystemFetch`, `filesystemPushMetadata`, `filesystemFetchHistory`).
 2. **Reactive**: `withOwnershipFix` is baked into `runGitWithOutput` and `runGitAt` — if any git command fails with "dubious ownership", it adds the safe.directory entry and retries automatically.
 
-### Filesystem Remote: File Mode Normalization
+### Filesystem Remote: File Mode and Line Ending Normalization
 
-When pushing to a filesystem remote, bit sets `core.fileMode=false` on the remote's `.bit/index/` git config before running `git pull --ff-only`. This prevents phantom "modified" files when running `bit status` at the remote.
+**File mode:** `filesystemPushMetadata` sets `core.fileMode=false` on the remote's `.bit/index/` before running `git pull --ff-only`. On network filesystems (UNC, USB, NAS), NTFS, and FAT, file permissions are reported differently than what git records. Without this, git treats permission differences as modifications.
 
-**Problem:** On network filesystems (UNC paths, USB drives, NAS), NTFS, FAT, and WSL `/mnt/c`, file permissions are reported differently than what git records in its index. With `core.fileMode=true` (the default), git treats any permission difference as a modification — so every file appears "modified" even though the content is identical.
+**Line ending normalization:** When `.gitattributes` has `eol=lf`, `git pull --ff-only` checks out files with LF line endings. Then `writeMetadataFiles` copies working tree files byte-for-byte (CRLF on Windows) into `.bit/index/`, overwriting the LF files. Git's index stat cache (built from the LF checkout) no longer matches the CRLF files on disk.
 
-**Fix:** `filesystemPushMetadata` sets `core.fileMode=false` on the remote's `.bit/index/` before the pull. This persists in the remote's `.bit/index/.git/config`, so subsequent `bit status` calls at the remote only compare file content, not permissions.
+`scanAndWrite` runs `git add -u` after `writeMetadataFiles` to fix this. It processes the CRLF files through the clean filter, confirms they produce the same LF blob hash already committed, and updates the stat cache. On local repos this is a no-op (the stat cache already matches from the original `git add`). No history changes; nothing gets staged.
+
+`bit status` faithfully reports git's view of the working tree, including line ending mismatches. If `.gitattributes` specifies `eol=lf` but the working tree has CRLF files, both local and remote `bit status` show the same result.
 
 ### The `git push` Antipattern
 
