@@ -110,9 +110,18 @@ All imported remotes are metadata-only by definition (they come from a git repo 
 
 #### Dubious Ownership Auto-Fix
 
-When accessing remotes on network paths (UNC, USB, NAS), git may report "dubious ownership" because the remote filesystem doesn't record ownership. Bit automatically detects this error, runs `git config --global --add safe.directory <path>`, and retries the operation. If the fix fails, bit prints the error so the user can run the command manually.
+When accessing repos on network paths (UNC, USB, NAS), git may report "dubious ownership" because the remote filesystem doesn't record ownership. Bit handles this at two levels:
 
-This applies to both `git fetch` and `git push` in the git seam, and to filesystem fetch.
+1. **Proactive**: `ensureSafeDirectory` runs `git config --global --add safe.directory <path>` before accessing remote index paths (in `setIndexPath`, `filesystemFetch`, `filesystemPushMetadata`, `filesystemFetchHistory`).
+2. **Reactive**: `withOwnershipFix` is baked into `runGitWithOutput` and `runGitAt` — if any git command fails with "dubious ownership", it adds the safe.directory entry and retries automatically.
+
+### Filesystem Remote: File Mode Normalization
+
+When pushing to a filesystem remote, bit sets `core.fileMode=false` on the remote's `.bit/index/` git config before running `git pull --ff-only`. This prevents phantom "modified" files when running `bit status` at the remote.
+
+**Problem:** On network filesystems (UNC paths, USB drives, NAS), NTFS, FAT, and WSL `/mnt/c`, file permissions are reported differently than what git records in its index. With `core.fileMode=true` (the default), git treats any permission difference as a modification — so every file appears "modified" even though the content is identical.
+
+**Fix:** `filesystemPushMetadata` sets `core.fileMode=false` on the remote's `.bit/index/` before the pull. This persists in the remote's `.bit/index/.git/config`, so subsequent `bit status` calls at the remote only compare file content, not permissions.
 
 ### The `git push` Antipattern
 

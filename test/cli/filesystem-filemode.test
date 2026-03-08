@@ -1,0 +1,105 @@
+# =============================================================================
+# Filesystem Remote File Mode - bit push sets core.fileMode=false on remote
+#
+# On network/external filesystems (USB, NAS, UNC paths), file permissions are
+# reported differently than what git records. Without core.fileMode=false,
+# git sees permission differences as modifications, causing phantom "modified"
+# files on bit status at the remote. bit push sets core.fileMode=false on
+# the remote's .bit/index/ to prevent this.
+# =============================================================================
+
+# ---- CLEANUP: remove any leftover state from previous runs ----
+rm -rf test/cli/output/work_filemode test/cli/output/fs_remote_filemode 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SECTION 1: SETUP
+# ======================================================================
+
+mkdir -p test/cli/output/work_filemode test/cli/output/fs_remote_filemode
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_filemode && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_filemode && bit remote add origin ../fs_remote_filemode
+<<<
+>>> /Remote 'origin' added/
+>>>= 0
+
+# Create files and push
+cd test/cli/output/work_filemode && echo "hello world" > file.txt && echo "second file" > other.txt && bit add file.txt other.txt && bit commit -m "Initial"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test/cli/output/work_filemode && bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# ======================================================================
+# SECTION 2: VERIFY core.fileMode=false IS SET ON REMOTE
+# ======================================================================
+
+# Remote .bit/index should have core.fileMode=false after push
+cd test/cli/output/fs_remote_filemode/.bit/index && git config core.fileMode
+<<<
+>>>
+false
+>>>= 0
+
+# ======================================================================
+# SECTION 3: STATUS AT REMOTE SHOULD BE CLEAN
+# ======================================================================
+
+# bit status at remote should show no modifications
+cd test/cli/output/fs_remote_filemode && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# SECTION 4: PUSH AGAIN - fileMode SHOULD PERSIST
+# ======================================================================
+
+# Make a change and push again
+cd test/cli/output/work_filemode && echo "updated" > file.txt && bit add file.txt && bit commit -m "Update"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+cd test/cli/output/work_filemode && bit push
+<<<
+>>> /Push complete/
+>>>= 0
+
+# core.fileMode should still be false
+cd test/cli/output/fs_remote_filemode/.bit/index && git config core.fileMode
+<<<
+>>>
+false
+>>>= 0
+
+# Remote status should still be clean after second push
+cd test/cli/output/fs_remote_filemode && bit status
+<<<
+>>> /nothing to commit|working tree clean/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+
+rm -rf test/cli/output/work_filemode test/cli/output/fs_remote_filemode 2>/dev/null; echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
