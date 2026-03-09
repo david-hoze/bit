@@ -12,16 +12,67 @@ module Bit.Progress.Report
   ) where
 
 import System.IO (hPutStr, hFlush, hIsTerminalDevice, hSetBinaryMode, stderr)
-import Data.IORef (IORef, newIORef, readIORef)
+import System.IO.Unsafe (unsafePerformIO)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Control.Concurrent (forkIO, threadDelay, killThread)
-import Control.Exception (finally)
+import Control.Exception (finally, try, SomeException)
 import Control.Monad (when)
+import System.Environment (lookupEnv)
+import Data.Char (isDigit)
+import System.Process (readProcess)
+
+-- | Cached terminal width. 0 means not yet queried.
+{-# NOINLINE termWidthRef #-}
+termWidthRef :: IORef Int
+termWidthRef = unsafePerformIO (newIORef 0)
+
+-- | Get terminal width, caching the result. Falls back to 80 if detection fails.
+getTermWidth :: IO Int
+getTermWidth = do
+    cached <- readIORef termWidthRef
+    if cached > 0
+        then pure cached
+        else do
+            w <- detectTermWidth
+            writeIORef termWidthRef w
+            pure w
+
+-- | Detect terminal width from COLUMNS env var, tput, or stty, defaulting to 80.
+detectTermWidth :: IO Int
+detectTermWidth = do
+    -- Try COLUMNS env var first (set by most shells including bash on MINGW64)
+    mCols <- lookupEnv "COLUMNS"
+    case mCols >>= parsePositiveInt of
+        Just w  -> pure w
+        Nothing -> do
+            -- Try `tput cols` (works on MINGW64/mintty)
+            tputResult <- try (readProcess "tput" ["cols"] "") :: IO (Either SomeException String)
+            case tputResult >>= Right . parsePositiveInt . filter isDigit of
+                Right (Just w) -> pure w
+                _ -> do
+                    -- Try `stty size` which returns "rows cols"
+                    sttyResult <- try (readProcess "stty" ["size"] "") :: IO (Either SomeException String)
+                    case sttyResult of
+                        Right out -> case words out of
+                            [_, cols] -> pure (maybe 80 id $ parsePositiveInt cols)
+                            _         -> pure 80
+                        Left _ -> pure 80
+  where
+    parsePositiveInt s = case reads (filter isDigit s) of
+        [(n, "")] | n > 0 -> Just n
+        _                  -> Nothing
 
 -- | Write a progress line to stderr. Overwrites the current line using carriage return.
--- This is the single correct way to update a progress indicator.
+-- Truncates the message to terminal width to prevent line wrapping (which breaks \r overwriting).
 reportProgress :: String -> IO ()
 reportProgress msg = do
-  hPutStr stderr ("\r\ESC[K" ++ msg)
+  w <- getTermWidth
+  -- Reserve 1 column for safety; \r\ESC[K prefix doesn't count toward visible width
+  let maxVisible = max 20 (w - 1)
+      truncated = if length msg > maxVisible
+                  then take (maxVisible - 3) msg ++ "..."
+                  else msg
+  hPutStr stderr ("\r\ESC[K" ++ truncated)
   hFlush stderr
 
 -- | Clear the current progress line. Used in cleanup.
