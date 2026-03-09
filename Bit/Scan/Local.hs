@@ -59,7 +59,7 @@ import Control.Concurrent.Async (mapConcurrently)
 import Control.Concurrent (getNumCapabilities, forkIO, threadDelay, killThread)
 import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
 import Control.Exception (bracket_, finally)
-import Bit.Progress.Report (reportProgress, clearProgress)
+import Bit.Progress.Report (reportProgress, clearProgress, enableProgressMode, disableProgressMode)
 import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
@@ -506,10 +506,12 @@ scanWorkingDir root concurrencyMode = do
         isTTY <- hIsTerminalDevice stderr
         mFileEntries <- if total > 50 && isTTY
             then do
+                enableProgressMode
                 reporterThread <- forkIO (progressLoop counter total)
                 finally hashingAction $ do
                     killThread reporterThread
                     clearProgress
+                    disableProgressMode
                     hPutStrLn stderr $ "Scanned " ++ show total ++ " files."
             else
                 hashingAction
@@ -612,10 +614,12 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
                         hashStart <- getCurrentTime
                         if isTTY
                           then do
+                            enableProgressMode
                             reporterThread <- forkIO (hashProgressLoop counter bytesHashedRef totalNewFiles totalBytesNeeded)
                             finally hashingAction $ do
                                 killThread reporterThread
                                 clearProgress
+                                disableProgressMode
                                 actualCount <- readIORef counter
                                 actualBytes <- readIORef bytesHashedRef
                                 hashEnd <- getCurrentTime
@@ -673,7 +677,9 @@ writeMetadataFiles root entries = do
         -- Start progress reporter thread if we're in a TTY and have enough files
         let shouldShowProgress = isTTY && total > 10
         reporterThread <- if shouldShowProgress
-            then Just <$> forkIO (writeProgressLoop counter skipped total)
+            then do
+                enableProgressMode
+                Just <$> forkIO (writeProgressLoop counter skipped total)
             else pure Nothing
 
         -- Third pass: write files in parallel (bounded concurrency)
@@ -729,6 +735,7 @@ writeMetadataFiles root entries = do
                     n <- readIORef counter
                     s <- readIORef skipped
                     clearProgress
+                    disableProgressMode
                     let written = n - s
                     hPutStr stderr $ "Wrote " ++ show written ++ " metadata files"
                     when (s > 0) $ hPutStr stderr $ " (skipped " ++ show s ++ " unchanged)"

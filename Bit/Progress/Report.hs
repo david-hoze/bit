@@ -5,11 +5,13 @@
 module Bit.Progress.Report
   ( reportProgress
   , clearProgress
+  , enableProgressMode
+  , disableProgressMode
   , withProgressReporter
   , simpleProgressLoop
   ) where
 
-import System.IO (hPutStr, hFlush, hIsTerminalDevice, stderr)
+import System.IO (hPutStr, hFlush, hIsTerminalDevice, hSetBinaryMode, stderr)
 import Data.IORef (IORef, newIORef, readIORef)
 import Control.Concurrent (forkIO, threadDelay, killThread)
 import Control.Exception (finally)
@@ -28,6 +30,15 @@ clearProgress = do
   hPutStr stderr "\r\ESC[K"
   hFlush stderr
 
+-- | Set stderr to binary mode so \r is not translated to \r\n on Windows.
+-- Call once before starting any progress reporting.
+enableProgressMode :: IO ()
+enableProgressMode = hSetBinaryMode stderr True
+
+-- | Restore stderr to text mode after progress reporting is done.
+disableProgressMode :: IO ()
+disableProgressMode = hSetBinaryMode stderr False
+
 -- | Bracket pattern for progress reporting. Handles TTY detection, thread management, and cleanup.
 -- Parameters:
 --   threshold: minimum count to show progress (below this, no reporter thread is spawned)
@@ -43,6 +54,8 @@ withProgressReporter threshold total action = do
   
   if shouldShowProgress
     then do
+      -- Binary mode prevents \r → \r\n translation on Windows
+      enableProgressMode
       -- Fork reporter thread, run action with cleanup
       reporterThread <- forkIO (simpleProgressLoop "Processing..." counter total 100000)
       finally
@@ -50,6 +63,7 @@ withProgressReporter threshold total action = do
         (do
           killThread reporterThread
           clearProgress
+          disableProgressMode
         )
     else
       -- No progress reporting, just run the action

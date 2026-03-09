@@ -21,7 +21,7 @@ import System.IO
     )
 import System.Process (CreateProcess(..), StdStream(..), proc, createProcess, waitForProcess, terminateProcess)
 import System.Exit (ExitCode(..))
-import Bit.Progress.Report (reportProgress, clearProgress)
+import Bit.Progress.Report (reportProgress, clearProgress, enableProgressMode, disableProgressMode)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, atomicModifyIORef')
 import Control.Concurrent (forkIO, threadDelay, killThread)
 import Control.Concurrent.Async (async, wait)
@@ -325,6 +325,7 @@ withSyncProgressReporter progress action = do
     let shouldShowProgress = isTTY && spFilesTotal progress > 0
     if shouldShowProgress
         then do
+            enableProgressMode
             reporterThread <- forkIO (syncProgressLoop progress)
             finally action $ do
                 killThread reporterThread
@@ -332,6 +333,7 @@ withSyncProgressReporter progress action = do
                 filesCompleted <- readIORef (spFilesComplete progress)
                 totalBytes <- readIORef (spBytesCopied progress)
                 clearProgress
+                disableProgressMode
                 hPutStrLn stderr $ "Synced " ++ show filesCompleted ++ " files (" ++ formatBytes totalBytes ++ ")."
         else do
             -- Non-TTY: print one line per file as it completes

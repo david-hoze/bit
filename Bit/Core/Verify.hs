@@ -41,7 +41,7 @@ import Bit.CDC.Manifest (readManifestFromCas)
 import Data.Maybe (isNothing)
 import qualified Bit.Scan.Fsck as Fsck
 import Bit.Config.Paths (bundleForRemote, bitIndexPath)
-import Bit.Progress.Report (reportProgress, clearProgress)
+import Bit.Progress.Report (reportProgress, clearProgress, enableProgressMode, disableProgressMode)
 import Bit.Utils (toPosix, atomicWriteFileStr, formatBytes)
 import Bit.Config.Metadata (MetaContent(..), serializeMetadata)
 import qualified Bit.Device.Identity as Device
@@ -486,10 +486,12 @@ executeRepairWithProgress cwd mTargetRemote plan label = do
     let withProgressBar progressLabel action = do
             bytesRef <- newIORef (0 :: Integer)
             if isTTY && fileSize > 0
-                then bracket
-                    (forkIO (repairFileProgress bytesRef fileSize progressLabel))
-                    (\tid -> killThread tid >> clearProgress)
-                    (\_ -> action bytesRef)
+                then do
+                    enableProgressMode
+                    bracket
+                        (forkIO (repairFileProgress bytesRef fileSize progressLabel))
+                        (\tid -> killThread tid >> clearProgress >> disableProgressMode)
+                        (\_ -> action bytesRef)
                 else do
                     hPutStrLn stderr $ "  " ++ progressLabel ++ "..."
                     action bytesRef
