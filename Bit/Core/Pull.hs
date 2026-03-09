@@ -239,10 +239,10 @@ pullAcceptRemoteImpl remote layout = do
     checkoutCode <- lift $ Git.checkoutRemoteAsMain name
     case checkoutCode of
         ExitSuccess -> do
-            -- Sync actual files based on what changed (skip for metadata-only)
-            when (layout /= Device.LayoutMetadata) $
-                maybe (lift $ syncAllFilesFromHEAD remoteRoot cwd layout mRemote)
-                      (\oh -> lift $ applyMergeToWorkingDir remoteRoot cwd oh layout mRemote) oldHead
+            -- Sync text files from index to working tree (all layouts).
+            -- Binary sync handled inside sync functions (skipped for metadata-only).
+            maybe (lift $ syncAllFilesFromHEAD remoteRoot cwd layout mRemote)
+                  (\oh -> lift $ applyMergeToWorkingDir remoteRoot cwd oh layout mRemote) oldHead
 
             -- Update tracking ref
             maybeRemoteHash <- lift $ Git.getRemoteTrackingHash name
@@ -347,64 +347,75 @@ pullNormalImpl remote layout = do
                     checkoutCode <- lift $ Git.checkoutRemoteAsMain name
                     case checkoutCode of
                         ExitSuccess -> lift $ do
-                            when (layout /= Device.LayoutMetadata) $ do
-                                syncAllFilesFromHEAD remoteRoot cwd layout mRemote
+                            syncAllFilesFromHEAD remoteRoot cwd layout mRemote
+                            when (layout /= Device.LayoutMetadata) $
                                 tell "Syncing binaries... done."
                             void $ Git.updateRemoteTrackingBranchToHash name remoteHash
                         _ -> lift $ tellErr "Error: Failed to checkout remote branch."
 
                 Just localHash -> do
-                    (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery
-                        ["merge", "--no-commit", "--no-ff", Git.remoteTrackingRef name]
-
-                    (finalMergeCode, finalMergeOut, finalMergeErr) <-
-                        lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
-                        then do tell "Merging unrelated histories..."; gitQuery ["merge", "--no-commit", "--no-ff", "--allow-unrelated-histories", Git.remoteTrackingRef name]
-                        else pure (mergeCode, mergeOut, mergeErr)
-
-                    case finalMergeCode of
-                        ExitSuccess -> do
+                    -- Try fast-forward first. If local is behind remote, this
+                    -- moves the branch pointer without creating a merge commit.
+                    (ffCode, _, _) <- lift $ gitQuery
+                        ["merge", "--ff-only", Git.remoteTrackingRef name]
+                    if ffCode == ExitSuccess
+                        then do
                             lift $ do
                                 tell $ "Updating " ++ shortRefDisplay localHash ++ ".." ++ shortRefDisplay remoteHash
-                                tell "Merge made by the 'recursive' strategy."
-                            -- Always commit when MERGE_HEAD exists — never guard with hasStagedChanges.
-                            -- When the tree is unchanged (e.g. identical content on both sides),
-                            -- git commit still succeeds because MERGE_HEAD is present, and skipping
-                            -- the commit would leave MERGE_HEAD dangling (breaking the next push).
-                            lift $ void $ gitRaw ["commit", "-m", "Merge remote"]
-                            when (layout /= Device.LayoutMetadata) $
-                                lift $ do
-                                    applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
-                                    tell "Syncing binaries... done."
-                            lift $ void $ Git.updateRemoteTrackingBranchToHash name remoteHash
-                        _ -> do
-                            lift $ do
-                                tell finalMergeOut
-                                tellErr finalMergeErr
-                                tell "Automatic merge failed."
-                                tell "bit requires you to pick a version for each conflict."
-                                tell ""
-                                tell "Resolving conflicts..."
-
-                            conflicts <- lift Conflict.getConflictedFilesE
-                            resolutions <- lift $ Conflict.resolveAll conflicts
-                            let total = length resolutions
-
-                            bitDir' <- asks envBitDir
-                            invalid <- lift $ validateMetadataDir (bitDir' </> "index")
-                            unless (null invalid) $ lift $ do
-                                void $ gitRaw ["merge", "--abort"]
-                                tellErr Conflict.conflictMarkersFatalMessage
-                                throwIO (userError "Invalid metadata")
-
-                            conflictsNow <- lift Conflict.getConflictedFilesE
-                            when (null conflictsNow) $ lift $ do
-                                void $ gitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
-                                tell $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
-                                when (layout /= Device.LayoutMetadata) $ do
-                                    applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
+                                applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
+                                when (layout /= Device.LayoutMetadata) $
                                     tell "Syncing binaries... done."
                                 void $ Git.updateRemoteTrackingBranchToHash name remoteHash
+                        else do
+                            -- Fast-forward failed — histories diverged. Fall back to
+                            -- a real merge (--no-commit so we can sync files before committing).
+                            (mergeCode, mergeOut, mergeErr) <- lift $ gitQuery
+                                ["merge", "--no-commit", Git.remoteTrackingRef name]
+
+                            (finalMergeCode, finalMergeOut, finalMergeErr) <-
+                                lift $ if mergeCode /= ExitSuccess && "refusing to merge unrelated histories" `List.isInfixOf` (mergeOut ++ mergeErr)
+                                then do tell "Merging unrelated histories..."; gitQuery ["merge", "--no-commit", "--allow-unrelated-histories", Git.remoteTrackingRef name]
+                                else pure (mergeCode, mergeOut, mergeErr)
+
+                            case finalMergeCode of
+                                ExitSuccess -> do
+                                    lift $ do
+                                        tell $ "Updating " ++ shortRefDisplay localHash ++ ".." ++ shortRefDisplay remoteHash
+                                        tell "Merge made by the 'recursive' strategy."
+                                    lift $ void $ gitRaw ["commit", "-m", "Merge remote"]
+                                    lift $ do
+                                        applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
+                                        when (layout /= Device.LayoutMetadata) $
+                                            tell "Syncing binaries... done."
+                                    lift $ void $ Git.updateRemoteTrackingBranchToHash name remoteHash
+                                _ -> do
+                                    lift $ do
+                                        tell finalMergeOut
+                                        tellErr finalMergeErr
+                                        tell "Automatic merge failed."
+                                        tell "bit requires you to pick a version for each conflict."
+                                        tell ""
+                                        tell "Resolving conflicts..."
+
+                                    conflicts <- lift Conflict.getConflictedFilesE
+                                    resolutions <- lift $ Conflict.resolveAll conflicts
+                                    let total = length resolutions
+
+                                    bitDir' <- asks envBitDir
+                                    invalid <- lift $ validateMetadataDir (bitDir' </> "index")
+                                    unless (null invalid) $ lift $ do
+                                        void $ gitRaw ["merge", "--abort"]
+                                        tellErr Conflict.conflictMarkersFatalMessage
+                                        throwIO (userError "Invalid metadata")
+
+                                    conflictsNow <- lift Conflict.getConflictedFilesE
+                                    when (null conflictsNow) $ lift $ do
+                                        void $ gitRaw ["commit", "-m", "Merge remote (resolved " ++ show total ++ " conflict(s))"]
+                                        tell $ "Merge complete. " ++ show total ++ " conflict(s) resolved."
+                                        applyMergeToWorkingDir remoteRoot cwd localHash layout mRemote
+                                        when (layout /= Device.LayoutMetadata) $
+                                            tell "Syncing binaries... done."
+                                        void $ Git.updateRemoteTrackingBranchToHash name remoteHash
 
 -- ============================================================================
 -- Helper types and functions

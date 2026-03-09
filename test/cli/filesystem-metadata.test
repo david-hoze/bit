@@ -240,6 +240,13 @@ cd test/cli/output/work_fsmeta && bit log --oneline
 >>> /First commit/
 >>>= 0
 
+# Verify: text file IS synced from .bit/index to working tree
+test -f test/cli/output/work_fsmeta/README.md && echo "text synced - GOOD" || echo "no text - BAD"
+<<<
+>>>
+text synced - GOOD
+>>>= 0
+
 # ======================================================================
 # SECTION 5: Pull from bit repo (metadata-only)
 # ======================================================================
@@ -277,11 +284,11 @@ cd test/cli/output/work_fsmeta && bit log --oneline
 >>> /Remote change/
 >>>= 0
 
-# Verify: no binary files downloaded
-test -f test/cli/output/work_fsmeta/remote-only.txt && echo "file synced - BAD" || echo "no file - GOOD"
+# Verify: text files ARE synced (they live in .bit/index/, no remote download needed)
+test -f test/cli/output/work_fsmeta/remote-only.txt && echo "text file synced - GOOD" || echo "no file - BAD"
 <<<
 >>>
-no file - GOOD
+text file synced - GOOD
 >>>= 0
 
 # ======================================================================
@@ -362,6 +369,13 @@ cd test/cli/output/work_fsmeta_b && bit log --oneline
 >>> /Version 1/
 >>>= 0
 
+# Verify: text file synced to working tree after metadata-only pull
+test -f test/cli/output/work_fsmeta_b/data.txt && cat test/cli/output/work_fsmeta_b/data.txt
+<<<
+>>>
+v2
+>>>= 0
+
 # ======================================================================
 # SECTION 7: Bare git repo still works
 # ======================================================================
@@ -414,10 +428,82 @@ cd test/cli/output/fsmeta_bare && git log --oneline main
 >>>= 0
 
 # ======================================================================
+# SECTION 8: Text files sync, binary files don't (metadata-only pull)
+# ======================================================================
+
+# Create a source bit repo with both text and binary files
+rm -rf test/cli/output/work_fsmeta test/cli/output/fsmeta_mixed test/cli/output/work_fsmeta_b 2>/dev/null
+<<<
+>>>
+>>>= 0
+
+mkdir -p test/cli/output/work_fsmeta
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+# Add a text file and a binary file (use a .png stub for binary detection)
+cd test/cli/output/work_fsmeta && echo "text content" > notes.txt && printf '\x89PNG\r\n' > image.png && bit add notes.txt image.png && bit commit -m "Mixed content"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
+# Push to a metadata-only remote (creates plain git repo)
+cd test/cli/output/work_fsmeta && bit remote add mixed ../fsmeta_mixed --metadata-only
+<<<
+>>> /Remote 'mixed' added/
+>>>= 0
+
+cd test/cli/output/work_fsmeta && bit push -u mixed
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Pull into a fresh repo from the metadata-only remote
+mkdir -p test/cli/output/work_fsmeta_b
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_fsmeta_b && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_fsmeta_b && bit remote add mixed ../fsmeta_mixed --metadata-only
+<<<
+>>> /Remote 'mixed' added/
+>>>= 0
+
+cd test/cli/output/work_fsmeta_b && bit pull mixed
+<<<
+>>> /Checking out|Pull|first pull/
+>>>= 0
+
+# Text file SHOULD be in working tree (copied from .bit/index)
+test -f test/cli/output/work_fsmeta_b/notes.txt && cat test/cli/output/work_fsmeta_b/notes.txt
+<<<
+>>>
+text content
+>>>= 0
+
+# Binary file should NOT be in working tree (no content on metadata-only remote)
+test -f test/cli/output/work_fsmeta_b/image.png && echo "binary synced - BAD" || echo "no binary - GOOD"
+<<<
+>>>
+no binary - GOOD
+>>>= 0
+
+# ======================================================================
 # CLEANUP
 # ======================================================================
 
-rm -rf test/cli/output/work_fsmeta test/cli/output/fsmeta_plain test/cli/output/fsmeta_bitrepo test/cli/output/fsmeta_newpath test/cli/output/work_fsmeta_b test/cli/output/fsmeta_bare 2>/dev/null; echo cleanup done
+rm -rf test/cli/output/work_fsmeta test/cli/output/fsmeta_plain test/cli/output/fsmeta_bitrepo test/cli/output/fsmeta_newpath test/cli/output/work_fsmeta_b test/cli/output/fsmeta_bare test/cli/output/fsmeta_mixed 2>/dev/null; echo cleanup done
 <<<
 >>>
 cleanup done

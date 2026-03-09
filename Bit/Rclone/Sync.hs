@@ -150,8 +150,9 @@ classifyAndSync remoteRoot cwd layout mRemote filePaths = do
     void $ mapConcurrentlyBounded concLevel (copyFromIndexToWorkTree cwd) textPaths
 
     -- Binary files: full layout = rclone from readable paths; bare = copy from remote CAS by hash
+    -- Metadata-only: no content remote, skip binary sync entirely (text already handled above)
     let binaryPaths = [p | BinaryToSync p <- fileInfo]
-    unless (null binaryPaths) $
+    unless (null binaryPaths || layout == Device.LayoutMetadata) $
         case (layout, mRemote) of
             (Device.LayoutBare, Just remote) -> do
                 indexDir <- Git.getIndexPath

@@ -1,8 +1,8 @@
 # =============================================================================
 # Proof of Possession Tests
 #
-# Tests the proof of possession rule: push/pull must verify that working tree
-# matches metadata before transferring metadata. Verification is unconditional.
+# Tests the proof of possession rule: push verifies that files in the diff set
+# (files being synced) match metadata. Pull verifies remote files match.
 #
 # Covers:
 # - Push verification blocks when a tracked file is missing from working tree
@@ -62,25 +62,30 @@ cd test/cli/output/work_pop_local && bit push -u origin
 >>>= 0
 
 # ======================================================================
-# SECTION 2: PUSH VERIFICATION - Tracked file must exist in working tree
+# SECTION 2: PUSH VERIFICATION - Files in the diff set must match metadata
 # ======================================================================
 
-# ---- Delete tracked file (metadata remains in .bit/index) - push should fail ----
+# ---- Make a new commit, then delete the changed file — push should fail ----
+cd test/cli/output/work_pop_local && echo "updated content" > file.txt && bit add file.txt && bit commit -m "Update file"
+<<<
+>>> /\[main|files? changed/
+>>>= 0
+
 cd test/cli/output/work_pop_local && rm -f file.txt && bit push
 <<<
->>> /Verifying local files/
+>>> /Verifying.*file/
 >>>2 /Working tree does not match metadata/
 >>>= 1
 
 # ---- Verify --force does NOT bypass verification on push ----
 cd test/cli/output/work_pop_local && rm -f file.txt && bit push --force
 <<<
->>> /Verifying local files/
+>>> /Verifying.*file/
 >>>2 /Working tree does not match metadata/
 >>>= 1
 
 # ---- Restore file so remaining tests can proceed ----
-cd test/cli/output/work_pop_local && echo original content > file.txt
+cd test/cli/output/work_pop_local && echo "updated content" > file.txt
 <<<
 >>>
 >>>= 0

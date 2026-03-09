@@ -314,20 +314,21 @@ cd test/cli/output/work_e2e_pc && bit repair
 >>>= 0
 
 # ======================================================================
-# 13. PUSH VERIFICATION: delete tracked file, push must fail
+# 13. PUSH VERIFICATION: changed file in diff set must match metadata
 # ======================================================================
 
-cd test/cli/output/work_e2e_laptop && rm -f doc.txt
+# Make a new commit so doc.txt is in the diff set, then delete it before push
+cd test/cli/output/work_e2e_laptop && echo "updated doc" > doc.txt && bit add doc.txt && bit commit -m "Update doc"
 <<<
->>>
+>>> /\[main|files? changed/
 >>>= 0
 
-cd test/cli/output/work_e2e_laptop && bit push origin
+cd test/cli/output/work_e2e_laptop && rm -f doc.txt && bit push origin
 <<<
 >>>2 /Working tree does not match|Verifying/
 >>>= 1
 
-cd test/cli/output/work_e2e_laptop && bit restore doc.txt
+cd test/cli/output/work_e2e_laptop && echo "updated doc" > doc.txt
 <<<
 >>>
 >>>= 0

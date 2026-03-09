@@ -8,6 +8,7 @@ module Bit.Scan.Verify
   , verifyLocalAt
   , verifyWithAbort
   , verifyRemote
+  , verifyFiles
   , VerifyIssue(..)
   , VerifyResult(..)
   , BinaryFileMeta(..)
@@ -332,6 +333,39 @@ verifyLocalAt root mCounter concurrency = do
 -- | Verify local working tree against committed metadata in .bit/index.
 verifyLocal :: FilePath -> Maybe (IORef Int) -> Concurrency -> IO VerifyResult
 verifyLocal cwd = verifyLocalAt cwd
+
+-- | Verify only specific files against their committed metadata.
+-- Used by push to verify only the files being synced (the diff set),
+-- rather than the entire working tree.
+verifyFiles :: FilePath -> [FilePath] -> IO VerifyResult
+verifyFiles root filePaths = do
+  indexDir <- resolveIndexDir root
+  issues <- concat <$> mapM (verifyOneFile root indexDir) filePaths
+  pure (VerifyResult (length filePaths) issues)
+  where
+    verifyOneFile cwd indexDir relPath = do
+      let workPath = cwd </> relPath
+          metaPath = indexDir </> relPath
+      workExists <- doesFileExist workPath
+      metaExists <- doesFileExist metaPath
+      case (workExists, metaExists) of
+        (False, _) -> pure [Missing (Path relPath)]
+        (True, False) -> pure []  -- New file, no committed metadata yet
+        (True, True) -> do
+          mMeta <- parseMetadataFile metaPath
+          case mMeta of
+            Just mc -> do
+              -- Binary file: compare hash
+              actualHash <- hashFile workPath
+              actualSize <- fromIntegral . BS.length <$> BS.readFile workPath
+              if actualHash == metaHash mc && actualSize == metaSize mc
+                then pure []
+                else pure [HashMismatch (Path relPath)
+                            (T.unpack (hashToText (metaHash mc)))
+                            (T.unpack (hashToText actualHash))
+                            (metaSize mc)
+                            actualSize]
+            Nothing -> pure []  -- Text file, skip (git handles integrity)
 
 -- | Verify with bandwidth detection. Uses scanWorkingDirWithAbort to measure
 -- throughput and optionally skip hashing on slow storage.

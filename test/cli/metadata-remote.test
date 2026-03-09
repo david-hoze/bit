@@ -249,11 +249,11 @@ cd test/cli/output/work_metaremote_b && bit log --oneline
 >>> /Initial commit/
 >>>= 0
 
-# Verify file.txt was NOT synced (metadata only — no binary download)
-test -f test/cli/output/work_metaremote_b/file.txt && echo "file synced - BAD" || echo "no file - GOOD"
+# Verify file.txt IS synced (text files live in .bit/index/ and are copied to working tree)
+test -f test/cli/output/work_metaremote_b/file.txt && echo "text file synced - GOOD" || echo "no file - BAD"
 <<<
 >>>
-no file - GOOD
+text file synced - GOOD
 >>>= 0
 
 # ======================================================================

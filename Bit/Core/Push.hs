@@ -298,20 +298,7 @@ push = withRemote $ \remote -> do
     isFs <- isFilesystemRemote remote
     layout <- liftIO $ Device.readRemoteLayout cwd (remoteName remote)
 
-    -- 1. Proof of possession — skip for bare and metadata-only remotes
-    when (layout == Device.LayoutFull || (isFs && layout /= Device.LayoutMetadata)) $ do
-        liftIO $ putStrLn "Verifying local files..."
-        result <- liftIO $ Verify.verifyLocal cwd Nothing (Parallel 0)
-        if null result.vrIssues
-            then liftIO $ putStrLn $ "Verified " ++ show result.vrCount ++ " files. All match metadata."
-            else liftIO $ do
-                hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length result.vrIssues) ++ " issues)."
-                mapM_ (printVerifyIssue id) result.vrIssues
-                hPutStrLn stderr "hint: Run 'bit verify' to see all mismatches."
-                hPutStrLn stderr "hint: Run 'bit add' to update metadata, or 'bit restore' to restore files."
-                exitWith (ExitFailure 1)
-
-    -- 2. Detect transport mode and build seam
+    -- 1. Detect transport mode and build seam
     let seam = case (mType, layout) of
             (Just Device.RemoteGit, _)       -> mkGitSeam remote
             (_, Device.LayoutMetadata)        -> case mType of
@@ -465,6 +452,16 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
         else do
             let (copies, others) = List.partition isCopy actions
                 copyPaths = [unPath src | Copy src _ <- copies]
+            -- Proof of possession: verify only the files being synced
+            unless (null copyPaths || layout == Device.LayoutMetadata) $ liftIO $ do
+                putStrLn $ "Verifying " ++ show (length copyPaths) ++ " file(s) to sync..."
+                result <- Verify.verifyFiles cwd copyPaths
+                unless (null result.vrIssues) $ do
+                    hPutStrLn stderr $ "error: Working tree does not match metadata (" ++ show (length result.vrIssues) ++ " issues)."
+                    mapM_ (printVerifyIssue id) result.vrIssues
+                    hPutStrLn stderr "hint: Run 'bit verify' to see all mismatches."
+                    hPutStrLn stderr "hint: Run 'bit add' to update metadata, or 'bit restore' to restore files."
+                    exitWith (ExitFailure 1)
             -- Always upload binary files to remote CAS (both full and bare).
             -- TODO: Full layout then syncs same files to readable paths (double bandwidth).
             --       Future optimization: skip CAS upload for files that already exist at readable path.
