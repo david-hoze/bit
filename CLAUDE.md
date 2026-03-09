@@ -41,7 +41,7 @@ Commands.hs → Core/*.hs ──→ Rclone/Sync.hs → Rclone/Run.hs → rclone 
 
 ### Key Invariants
 
-- **Proof of possession**: a repo must not transfer metadata it cannot back up with actual content. Verify before push; verify remote before pull.
+- **Proof of possession**: a repo must not transfer metadata it cannot back up with actual content. Push verifies only the diff set (files being synced), not the entire working tree. Pull verifies the remote's readable tree before downloading.
 - **Index mirror**: `.bit/index/` is a perfect mirror of the working directory — every tracked file is copied byte-for-byte, except binary files which are replaced with metadata stubs. This includes `.gitattributes` and all other dotfiles. Git is the sole authority over `.bit/index/`; after any git operation that changes HEAD, `.bit/index/` is correct by definition.
 - `.bit/index/` files are mutable working state — every scan overwrites them. To read what the user **committed**, use git (`git diff`, `git show HEAD:<path>`), not the filesystem files.
 - **CAS is only populated by `bit add` in solid mode.** Push never stages files to local CAS — it only uploads CAS blobs that already exist. In lite mode with no CAS data: full-layout remotes sync readable copies, bare-layout remotes have nothing to upload (bare requires solid mode to transfer binary files).

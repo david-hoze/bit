@@ -332,6 +332,10 @@ error: --bare and --metadata-only are mutually exclusive.
 
 **`--metadata-only` on a git-detected remote is redundant but accepted silently** — it's already metadata-only by detection.
 
+### `--metadata-only` on Push and Pull
+
+`bit push --metadata-only` and `bit pull --metadata-only` temporarily override the remote's layout to `metadata` for a single operation. This skips binary syncing without changing the remote's persistent configuration. Useful for one-off metadata transfers or pulling history before hydrating binaries later with `bit hydrate`.
+
 ### `bit remote show`
 
 ```

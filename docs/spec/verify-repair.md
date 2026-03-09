@@ -29,9 +29,12 @@ Verification check:
 
 ### Push Verification
 
-1. Verify local -- every binary file in the working tree must match committed metadata
-2. If verification fails, refuse to push (suggest `bit repair` to fix corrupted files first)
-3. If verified, upload to remote CAS and sync readable paths, then push metadata
+1. Derive the diff set (files changed between the remote tracking ref and HEAD)
+2. Verify only those files -- each must match committed metadata in the working tree
+3. If verification fails, refuse to push (suggest `bit repair` to fix corrupted files first)
+4. If verified, upload to remote CAS and sync readable paths, then push metadata
+
+This is **diff-based verification**: only files being synced are checked, not the entire working tree. A repo with unrelated corrupted files can still push changes to healthy files.
 
 ### Pull Verification
 

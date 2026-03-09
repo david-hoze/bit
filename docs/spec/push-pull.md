@@ -158,14 +158,15 @@ Everything else is shared: `classifyRemoteState`, `syncRemoteFiles`, ancestry ch
 The detection helper (`detectRemoteGitKind`) runs inside the IO actions at push time. `remote add --metadata-only` allows nonexistent paths — the directory is created on first push.
 
 **Push flow** (all transports):
-1. **Verify local** (proof of possession -- full-layout remotes only; skipped for bare and metadata-only). Working tree must match committed metadata; CAS is not consulted (run `bit repair` first if files are corrupted).
-2. **First-push detection** (filesystem only): Create and initialize remote `.bit/` if needed
-3. **Classify remote state** via rclone
-4. **Fetch remote history** via seam
-5. **Ancestry/force checks**
-6. **Sync files** -- CAS upload; for full remotes, additionally sync readable paths; skipped for metadata-only
-7. **Push metadata** via seam
-8. **Update tracking ref**
+1. **First-push detection** (filesystem only): Create and initialize remote `.bit/` if needed
+2. **Classify remote state** via rclone
+3. **Fetch remote history** via seam
+4. **Ancestry/force checks**
+5. **Derive diff set** -- files changed between remote tracking ref and HEAD
+6. **Verify diff set** (proof of possession -- full-layout remotes only; skipped for bare and metadata-only). Only files being synced must match committed metadata; CAS is not consulted (run `bit repair` first if files are corrupted).
+7. **Sync files** -- CAS upload; for full remotes, additionally sync readable paths; skipped for metadata-only
+8. **Push metadata** via seam
+9. **Update tracking ref**
 
 ---
 
@@ -191,10 +192,10 @@ PullSeam:
 1. **Fetch remote metadata** via seam
 2. **Verify remote** via seam -- full-layout only; skipped for bare, metadata-only, `--accept-remote`, `--manual-merge`
 3. **Dispatch by mode**:
-   - Normal: `git merge --no-commit --no-ff`, then `applyMergeToWorkingDir`
+   - Normal: Try `git merge --ff-only` first; if histories diverge, fall back to `git merge --no-commit` for three-way merge, then `applyMergeToWorkingDir`
    - `--accept-remote`: Force-checkout (with `--no-track`), then sync files
    - `--manual-merge`: Detect divergence, create conflict directories
-4. **Sync files**: Text from index, binary via rclone; for bare remotes, download from CAS; skipped for metadata-only
+4. **Sync files**: Text from index, binary via rclone; for bare remotes, download from CAS; binary sync skipped for metadata-only
 5. **Update tracking ref**
 
 ---
@@ -207,4 +208,17 @@ PullSeam:
 
 **`--force-with-lease`:** Proceeds only if nobody else has pushed since our last fetch. Captures the tracking ref before the seam fetch, compares to the post-fetch remote ref. If they differ, error: "Remote has changed since last fetch!"
 
-Neither flag affects verification -- push always verifies local working tree first (for full-layout remotes); they only affect ancestry and overwrite policy.
+Neither flag affects verification -- push still verifies the diff set (for full-layout remotes); they only affect ancestry and overwrite policy.
+
+---
+
+## `--metadata-only` Flag (Push and Pull)
+
+`bit push --metadata-only` and `bit pull --metadata-only` override the remote's configured layout to `metadata` for a single operation. This skips binary file syncing without changing the remote's persistent configuration.
+
+Use cases:
+- Push only git history to a full remote when binary content hasn't changed
+- Pull metadata updates without downloading large binary files (use `bit hydrate` later)
+- One-off metadata sync to a remote that normally syncs binaries
+
+The flag is orthogonal to other flags: `bit push -u origin --metadata-only`, `bit pull origin --accept-remote --metadata-only`, etc.

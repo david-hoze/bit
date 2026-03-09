@@ -22,7 +22,7 @@
 
 10. **The `oldHead` capture pattern**: Before any git operation that changes HEAD, capture HEAD so `applyMergeToWorkingDir` can diff old vs new and sync only what changed. The only exception is first pull (`oldHead = Nothing`), which falls back to `syncAllFilesFromHEAD`.
 
-11. **Proof of possession on push/pull (full-layout remotes only)**: Verification checks the working tree against committed metadata. CAS is a repair source, not a verification shortcut -- corruption is always surfaced. Bare-layout remotes are exempt (self-verifying). The existing divergence resolution mechanisms serve as escape hatches.
+11. **Proof of possession on push (full-layout remotes only, diff-based)**: Push verifies only files in the diff set (files being synced) against committed metadata -- not the entire working tree. This means a repo with unrelated corrupted files can still push healthy changes. CAS is a repair source, not a verification shortcut -- corruption is always surfaced when the file is in the diff set. Bare-layout and metadata-only remotes are exempt. Pull verifies the remote's readable tree before downloading.
 
 12. **Seam pattern for transport differences**: Both push and pull use a single code path for cloud and filesystem remotes. The only difference -- how metadata is fetched/pushed -- is isolated behind a small seam record (`PushSeam`/`PullSeam`).
 
