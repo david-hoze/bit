@@ -453,11 +453,11 @@ runRemoteCommand remoteName args = do
                     exitWith (ExitFailure 1)
 
 -- | Helper function to push with upstream tracking
-pushWithUpstream :: BitEnv -> FilePath -> String -> IO ()
-pushWithUpstream env cwd name = do
+pushWithUpstream :: BitEnv -> FilePath -> Bool -> String -> IO ()
+pushWithUpstream env cwd metaOnly name = do
     mNamedRemote <- resolveRemote cwd name
     let envWithRemote = env { envRemote = mNamedRemote }
-    runBitM envWithRemote Bit.push
+    runBitM envWithRemote (Bit.push metaOnly)
     -- After successful push, set upstream tracking
     void $ Git.setupBranchTrackingFor name
     putStrLn $ "branch 'main' set up to track '" ++ name ++ "/main'."
@@ -729,9 +729,7 @@ runCommand args = do
             env <- baseEnv
             mNamedRemote <- resolveRemote cwd name
             runBitM env { envRemote = mNamedRemote } action
-    let runPushWithUpstream name = baseEnv >>= \env -> pushWithUpstream env cwd name
-    let optsAcceptRemote = Bit.PullOptions Bit.PullAcceptRemote
-    let optsManualMerge = Bit.PullOptions Bit.PullManualMerge
+    let runPushWithUpstream metaOnly name = baseEnv >>= \env -> pushWithUpstream env cwd metaOnly name
     let isPush ("push":_) = True
         isPush _ = False
 
@@ -792,24 +790,17 @@ runCommand args = do
         ("revert":rest)                 -> runBase (Bit.revert rest) >>= exitWith
         
         -- push (no scan needed — uses git metadata diff; requires upstream)
-        -- Filter -f from push args (it means --force for push, detected via forceMode)
-        _ | isPush cmd -> case filter (/= "-f") cmd of
-            ["push"]                        -> runUpstream Bit.push
-            ["push", "-u", name]            -> runPushWithUpstream name
-            ["push", "--set-upstream", name] -> runPushWithUpstream name
-            ["push", name]                  -> runBaseWithRemote name Bit.push
-            _ -> Git.runGitRaw cmd >>= exitWith
-        
-        -- pull (no explicit remote: requires upstream, no "origin" fallback)
-        ["pull"]                        -> runScannedUpstream $ Bit.pull Bit.defaultPullOptions
-        ["pull", name]                  -> runScannedWithRemote name $ Bit.pull Bit.defaultPullOptions
-        ["pull", "--accept-remote"]     -> runScannedUpstream $ Bit.pull optsAcceptRemote
-        ["pull", "--manual-merge"]      -> runScannedUpstream $ Bit.pull optsManualMerge
-        ["pull", name, "--accept-remote"] -> runScannedWithRemote name $ Bit.pull optsAcceptRemote
-        ["pull", "--accept-remote", name] -> runScannedWithRemote name $ Bit.pull optsAcceptRemote
-        ["pull", name, "--manual-merge"] -> runScannedWithRemote name $ Bit.pull optsManualMerge
-        ["pull", "--manual-merge", name] -> runScannedWithRemote name $ Bit.pull optsManualMerge
-        
+        -- Filter -f and --metadata-only from push args
+        _ | isPush cmd -> do
+            let filtered = filter (`notElem` ["-f", "--metadata-only"]) cmd
+                metaOnly = "--metadata-only" `elem` cmd
+            case filtered of
+                ["push"]                        -> runUpstream (Bit.push metaOnly)
+                ["push", "-u", name]            -> runPushWithUpstream metaOnly name
+                ["push", "--set-upstream", name] -> runPushWithUpstream metaOnly name
+                ["push", name]                  -> runBaseWithRemote name (Bit.push metaOnly)
+                _ -> Git.runGitRaw cmd >>= exitWith
+
         -- submodule (delegates to git -C .bit/index submodule, syncs working dir)
         ("submodule":rest)              -> Submodule.submodule cwd bitDir rest >>= exitWith
 
@@ -820,18 +811,35 @@ runCommand args = do
         -- Catch-all for fetch with extra flags (e.g. fetch --all, fetch origin main)
         ("fetch":_)                     -> Git.runGitRawAt (bitDir </> "index") ("fetch" : filter (/= "-f") (drop 1 cmd)) >>= exitWith
 
-        -- pull with extra flags (e.g. pull --rebase, pull --ff-only)
-        -- Needs working tree sync since pull can change HEAD
-        ("pull":_rest)                  -> do
-            scanAndWrite
-            env <- baseEnv
-            let pullAction = do
-                    oldHead <- liftIO getLocalHeadE
-                    code <- liftIO $ Git.runGitRawIn prefix ("pull" : drop 1 cmd)
-                    when (code == ExitSuccess) $
-                        Bit.syncWorkingTreeFromDiff oldHead
-                    pure code
-            runBitM env pullAction >>= exitWith
+        -- pull (no explicit remote: requires upstream, no "origin" fallback)
+        ("pull":pullArgs) -> do
+            let metaOnly = "--metadata-only" `elem` pullArgs
+                filtered = filter (/= "--metadata-only") pullArgs
+                defOpts = Bit.defaultPullOptions { Bit.pullMetadataOnly = metaOnly }
+                arOpts  = Bit.PullOptions Bit.PullAcceptRemote metaOnly
+                mmOpts  = Bit.PullOptions Bit.PullManualMerge metaOnly
+            case filtered of
+                []                          -> runScannedUpstream $ Bit.pull defOpts
+                [name] | name `notElem` ["--accept-remote", "--manual-merge"]
+                                            -> runScannedWithRemote name $ Bit.pull defOpts
+                ["--accept-remote"]         -> runScannedUpstream $ Bit.pull arOpts
+                ["--manual-merge"]          -> runScannedUpstream $ Bit.pull mmOpts
+                [name, "--accept-remote"]   -> runScannedWithRemote name $ Bit.pull arOpts
+                ["--accept-remote", name]   -> runScannedWithRemote name $ Bit.pull arOpts
+                [name, "--manual-merge"]    -> runScannedWithRemote name $ Bit.pull mmOpts
+                ["--manual-merge", name]    -> runScannedWithRemote name $ Bit.pull mmOpts
+                -- pull with extra flags (e.g. pull --rebase, pull --ff-only)
+                -- Needs working tree sync since pull can change HEAD
+                _                           -> do
+                    scanAndWrite
+                    env <- baseEnv
+                    let pullAction = do
+                            oldHead <- liftIO getLocalHeadE
+                            code <- liftIO $ Git.runGitRawIn prefix ("pull" : drop 1 cmd)
+                            when (code == ExitSuccess) $
+                                Bit.syncWorkingTreeFromDiff oldHead
+                            pure code
+                    runBitM env pullAction >>= exitWith
 
         -- Catch-all: passthrough to git in .bit/index/ for known commands
         -- with unmatched arg patterns (e.g. push -v, remote -v, remote rename)

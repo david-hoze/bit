@@ -199,7 +199,8 @@ pull opts = withRemote $ \remote -> do
     cwd <- asks envCwd
     isFs <- isFilesystemRemote remote
     mType <- liftIO $ Device.readRemoteType cwd (remoteName remote)
-    layout <- liftIO $ Device.readRemoteLayout cwd (remoteName remote)
+    rawLayout <- liftIO $ Device.readRemoteLayout cwd (remoteName remote)
+    let layout = if pullMetadataOnly opts then Device.LayoutMetadata else rawLayout
     let seam = case (mType, layout) of
             (Just Device.RemoteGit, _)       -> mkGitPullSeam remote
             (_, Device.LayoutMetadata)        -> case mType of

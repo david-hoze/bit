@@ -289,14 +289,15 @@ mkFilesystemMetadataSeam _cwd remote = PushSeam
 -- Unified push entry point
 -- ============================================================================
 
-push :: BitM ()
-push = withRemote $ \remote -> do
+push :: Bool -> BitM ()
+push metadataOnly = withRemote $ \remote -> do
     cwd <- asks envCwd
 
     -- Read layout for all remote types
     mType <- liftIO $ Device.readRemoteType cwd (remoteName remote)
     isFs <- isFilesystemRemote remote
-    layout <- liftIO $ Device.readRemoteLayout cwd (remoteName remote)
+    rawLayout <- liftIO $ Device.readRemoteLayout cwd (remoteName remote)
+    let layout = if metadataOnly then Device.LayoutMetadata else rawLayout
 
     -- 1. Detect transport mode and build seam
     let seam = case (mType, layout) of
