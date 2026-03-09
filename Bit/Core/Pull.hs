@@ -200,8 +200,9 @@ pull opts = withRemote $ \remote -> do
     isFs <- isFilesystemRemote remote
     mType <- liftIO $ Device.readRemoteType cwd (remoteName remote)
     rawLayout <- liftIO $ Device.readRemoteLayout cwd (remoteName remote)
+    -- Seam selection uses real layout; sync decisions use effective layout
     let layout = if pullMetadataOnly opts then Device.LayoutMetadata else rawLayout
-    let seam = case (mType, layout) of
+    let seam = case (mType, rawLayout) of
             (Just Device.RemoteGit, _)       -> mkGitPullSeam remote
             (_, Device.LayoutMetadata)        -> case mType of
                 Just Device.RemoteCloud       -> mkCloudPullSeam remote

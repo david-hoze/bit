@@ -297,10 +297,11 @@ push metadataOnly = withRemote $ \remote -> do
     mType <- liftIO $ Device.readRemoteType cwd (remoteName remote)
     isFs <- isFilesystemRemote remote
     rawLayout <- liftIO $ Device.readRemoteLayout cwd (remoteName remote)
+    -- Seam selection uses the real layout; sync decisions use the effective layout
     let layout = if metadataOnly then Device.LayoutMetadata else rawLayout
 
-    -- 1. Detect transport mode and build seam
-    let seam = case (mType, layout) of
+    -- 1. Detect transport mode and build seam (based on real remote config)
+    let seam = case (mType, rawLayout) of
             (Just Device.RemoteGit, _)       -> mkGitSeam remote
             (_, Device.LayoutMetadata)        -> case mType of
                 Just Device.RemoteCloud       -> mkCloudSeam remote
@@ -311,7 +312,8 @@ push metadataOnly = withRemote $ \remote -> do
 
     -- 3. For git/metadata-only remotes, skip classifyRemoteState (uses rclone listing).
     -- Instead, try fetch directly and dispatch based on result.
-    if layout == Device.LayoutMetadata || layout == Device.LayoutBare
+    -- Use rawLayout for dispatch (seam selection matches remote config).
+    if rawLayout == Device.LayoutMetadata || rawLayout == Device.LayoutBare
         then do
             liftIO $ putStrLn $ "Pushing metadata to: " ++ displayRemote remote
             preHash <- liftIO $ Git.getRemoteTrackingHash (remoteName remote)
