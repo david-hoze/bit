@@ -76,6 +76,11 @@ cross-repo dedup within a shared CAS bucket.
 - [ ] Extend CI to a Windows/macOS matrix (bit has heavy Windows-specific paths).
 - [ ] Consider a static musl/Alpine Linux binary for distribution portability
       (glibc binaries couple to the build host's libc version).
+- [ ] **macOS (Apple Silicon) release binary** — `blake3-0.3` fails to link on
+      arm64 (it auto-references a NEON impl it never compiles, and cabal
+      `cc-options` don't reach the store-built dependency to disable it). The
+      macOS release leg is currently non-blocking. Fix by sourcing BLAKE3
+      differently (e.g. `crypton`'s `Crypto.Hash.BLAKE3`) so it builds on ARM.
 
 ## Open questions (from the research)
 
