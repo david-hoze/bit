@@ -256,6 +256,12 @@ cd test/t && bash t0001-binary-add-commit.sh                   # Single binary t
 - **Env vars**: `BIT_TEST_NETWORK_BASE` (path to slow device) and `BIT_TEST_NETWORK_TYPE` (label: `RDP`, `USB`, `NAS`, etc.) — set in shell profile
 - **When documenting network test results**, always include the network type from `BIT_TEST_NETWORK_TYPE` (visible in the first test case output). Tag results sections/tables by network type so different transport benchmarks are distinguishable.
 
+### Large-File Tests (memory hazard)
+- See `docs/large-file-testing.md` for the full writeup.
+- **Never create or copy a multi-GB file on a machine whose RAM is comparable to the file size.** On WSL2 this floods the page cache and can hang or crash the **entire VM** (not just the test process) — even before the code under test runs. Check `free -h` first; on a 3–4 GB VM keep large-file fixtures around ~1 GB.
+- **Cap subprocess heaps** when running Haskell test programs over big inputs: build with `-rtsopts`, run with `+RTS -s -M512m` so a regression aborts with `Heap exhausted` instead of OOM-hanging the box. `+RTS -s` also prints `maximum residency`, the actual bounded-memory measurement.
+- **Force strict accumulation** in measurement helpers (e.g. `!ctx` for an incremental MD5) — a lazy fold over a large stream OOMs the harness and masquerades as a failure of the code under test.
+
 ## Commit Messages
 
 - Always `git pull` before committing

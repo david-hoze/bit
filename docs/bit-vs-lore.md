@@ -105,7 +105,35 @@ with a bounded-buffer streaming loop:
 Note: `chunkByteString` (the pure in-memory variant) is unchanged and still used
 for testing and small inputs.
 
-## TASKS FOR THE NEXT AGENT (env with Haskell)
+## STATUS — tasks 1–5 completed (2026-06-25)
+
+The streaming `chunkFile` change was built, verified, and tested on a Linux/WSL
+env with the Haskell toolchain. Results:
+
+1. **Build** ✅ — compiles cleanly; the streaming change added no new warnings.
+2. **Byte-identical gate** ✅ — new `cdc` tasty suite (`test/CdcSpec.hs`, wired
+   into `bit.cabal`) asserts `chunkFile == chunkByteString` for empty,
+   single-byte, <minSize, =minSize, between, =maxSize, exact-multiple-of-maxSize,
+   many-chunks, all-zeros, plus 100 random QuickCheck inputs. All pass.
+3. **Large-file smoke test** ✅ — `test/single-workflows/cdc-largefile-smoke.hs`.
+   A 1 GiB file (>RAM headroom) chunks with **max residency 2.5 MB** (~2×maxSize),
+   chunks tile the file contiguously, reassembled MD5 matches whole-file MD5.
+   *Hazard learned: building a 4 GB fixture on a 3.7 GB-RAM WSL VM crashed the
+   whole VM via page-cache flooding — see `docs/large-file-testing.md`. 1 GB is
+   sufficient and safe.*
+4. **Suites** ✅ — CLI 1456 passed / 0 failed (1357 local + 99 gdrive cloud),
+   binary 20/20 scripts, git representative subset 10/10 scripts. The CDC CLI
+   tests (`cdc-chunking`, `cdc-default`) pass 54/54.
+5. **Spec/impl reconcile** ✅ — code is off-by-default; fixed the contradicting
+   "default: enabled" claims in `docs/spec/cdc-spec.md` (INI comment + parameter
+   table) and three tutorials (`config.md`, `bare-remotes.md`, `modes-and-cas.md`).
+
+Open follow-up noted: `docs/spec/cdc-spec.md:1000` lists the benchmark's "default"
+chunk config as 128K/512K/2M, which doesn't match the code defaults
+(32K/128K/512K). Left as-is — it's a measured-benchmark record, not a normative
+default — but worth relabeling.
+
+## ORIGINAL TASKS FOR THE NEXT AGENT (env with Haskell)
 
 This was written on an env with no `cabal`/`ghc`. The streaming change is
 committed but **has not been built or tested**. Please:
