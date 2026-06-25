@@ -42,7 +42,16 @@ jobs:
         run: cabal update
 
       - name: Build executables
-        run: cabal build exe:bit exe:bit-git-router
+        shell: bash
+        # BLAKE3's ARM dispatch references the NEON implementation, which only
+        # compiles when blake3's `neon` flag is on. Enable it on macOS (arm64);
+        # x86 builds keep it off (the freeze already disables the x86 SIMD ISAs).
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cabal build exe:bit exe:bit-git-router --constraint="blake3 +neon"
+          else
+            cabal build exe:bit exe:bit-git-router
+          fi
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
