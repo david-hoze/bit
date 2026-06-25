@@ -16,7 +16,7 @@ import Data.Array ((!))
 import Data.Bits (shiftL, (.&.), xor)
 import Data.Word (Word64)
 import qualified Data.ByteString as BS
-import System.IO (withFile, IOMode(ReadMode), hFileSize)
+import System.IO (withFile, IOMode(ReadMode), Handle)
 
 import Bit.CDC.Types (ChunkConfig(..), Chunk(..))
 import Bit.CDC.Gear (gearTable)
@@ -90,18 +90,43 @@ chunkByteString cfg bs = go 0
                             }
           in chunk : go boundary
 
--- | Chunk a file on disk using streaming IO.
--- Reads the file in maxSize-sized blocks, finding boundaries within each block.
--- For boundaries near the end of a block, seeks back to continue from the boundary.
+-- | Chunk a file on disk using streaming IO with a bounded buffer.
+--
+-- Peak memory is ~2*maxSize regardless of file size, so files larger than RAM
+-- chunk correctly. The output is byte-identical to @chunkByteString@ on the same
+-- bytes: before every boundary search we guarantee the buffer holds at least
+-- maxSize bytes (or all remaining bytes at EOF), so 'findBoundary' sees exactly
+-- the same window it would see scanning the whole file in memory.
 chunkFile :: ChunkConfig -> FilePath -> IO [Chunk]
-chunkFile cfg filePath = withFile filePath ReadMode $ \h -> do
-  fileSize <- hFileSize h
-  if fileSize == 0
-    then pure []
-    else do
-      -- For simplicity and correctness, read the entire file if it fits in memory.
-      -- Files that reach CDC are typically large binaries (>= minSize), but not
-      -- so large that they can't be read into memory for chunking.
-      -- A streaming approach with hGet + hSeek can be added later if needed.
-      content <- BS.hGet h (fromIntegral fileSize)
-      pure (chunkByteString cfg content)
+chunkFile cfg filePath = withFile filePath ReadMode $ \h ->
+    go h 0 BS.empty False []
+  where
+    maxSz = ccMaxSize cfg
+
+    -- Refill the buffer until it holds at least maxSize bytes or EOF is hit.
+    -- Returns the (possibly grown) buffer and whether EOF was reached.
+    fill :: Handle -> BS.ByteString -> IO (BS.ByteString, Bool)
+    fill h buf
+      | BS.length buf >= maxSz = pure (buf, False)
+      | otherwise = do
+          more <- BS.hGet h maxSz
+          if BS.null more
+            then pure (buf, True)
+            else fill h (buf <> more)
+
+    go :: Handle -> Int -> BS.ByteString -> Bool -> [Chunk] -> IO [Chunk]
+    go h absOff buf eof acc = do
+      (buf', eof') <- if eof then pure (buf, True) else fill h buf
+      if BS.null buf'
+        then pure (reverse acc)
+        else do
+          let (boundary, _) = findBoundary cfg buf' 0
+              !len   = boundary
+              !cbs   = BS.take len buf'
+              !h'    = hashFileBytes cbs
+              !chunk = Chunk { chunkOffset = fromIntegral absOff
+                             , chunkLength = len
+                             , chunkHash   = h'
+                             }
+              rest   = BS.drop len buf'
+          go h (absOff + len) rest eof' (chunk : acc)
