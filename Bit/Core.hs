@@ -53,6 +53,9 @@ module Bit.Core
     , casBackfill
     , casGc
     , casRehash
+    , lockPaths
+    , unlockPaths
+    , listLocks
 
       -- Merge management
     , mergeContinue
@@ -106,6 +109,7 @@ import Bit.Core.Config (configGet, configSet, configList, configGetWithRoot, con
 import Bit.Core.Verify (VerifyTarget(..), RepairMode(..), verify, repair, hydrate, fsck, casBackfill)
 import Bit.Core.CasGc (casGc)
 import Bit.Core.CasRehash (casRehash)
+import Bit.Core.Locks (lockPaths, unlockPaths, listLocks)
 import Bit.Core.Import (importRepo)
 import Bit.Core.Export (exportRepo)
 import Bit.Core.BecomeGit (becomeGit, becomeBit)

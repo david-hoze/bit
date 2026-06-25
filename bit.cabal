@@ -44,6 +44,7 @@ executable bit
                       Bit.Core.Verify,
                       Bit.Core.CasGc,
                       Bit.Core.CasRehash,
+                      Bit.Core.Locks,
                       Bit.Git.Run,
                       Bit.Config.Paths,
                       Bit.Config.File,

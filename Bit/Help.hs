@@ -67,6 +67,13 @@ printMainHelp = putStr $ unlines
     , "  config <key> [<value>]            Get or set config (e.g. core.mode lite|solid)"
     , "  config --list                     List all config"
     , "  cas backfill                      Store current working tree blobs into CAS"
+    , "  cas gc [--dry-run]                Remove orphaned CAS blobs"
+    , "  cas rehash                        Migrate content hashes to BLAKE3"
+    , ""
+    , "Binary-asset locks:"
+    , "  lock <remote> <path>...           Claim an advisory lock on a path"
+    , "  unlock [--force] <remote> <path>  Release a lock"
+    , "  locks <remote>                    List locks held on a remote"
     , ""
     , "Merge and branching:"
     , "  merge --continue|--abort          Continue or abort merge"
@@ -430,11 +437,15 @@ commandRegistry =
     , CommandHelp
         { cmdName     = "cas"
         , cmdSynopsis = "Content-addressed store"
-        , cmdUsage    = "bit cas backfill"
+        , cmdUsage    = "bit cas <backfill|gc|rehash>"
         , cmdDesc     = [ "CAS subcommands."
-                        , "  backfill   Walk historical commits and store blobs currently in the working tree into .bit/cas/." ]
+                        , "  backfill   Walk historical commits and store blobs currently in the working tree into .bit/cas/."
+                        , "  gc         Remove orphaned CAS blobs/chunks/manifests not referenced by any commit or the index."
+                        , "  rehash     Migrate content hashes from MD5 to BLAKE3 (sets core.hash-algo=blake3)." ]
         , cmdOptions  = []
-        , cmdExamples = [HelpItem "bit cas backfill" "Backfill CAS from current files"]
+        , cmdExamples = [ HelpItem "bit cas backfill" "Backfill CAS from current files"
+                        , HelpItem "bit cas gc --dry-run" "Preview orphaned blobs"
+                        , HelpItem "bit cas rehash" "Migrate to BLAKE3 hashing" ]
         }
     , CommandHelp
         { cmdName     = "cas backfill"
@@ -446,6 +457,36 @@ commandRegistry =
                         , "copy it into the CAS. Optional after switching to solid mode." ]
         , cmdOptions  = []
         , cmdExamples = [HelpItem "bit cas backfill" "Backfill CAS from current files"]
+        }
+    , CommandHelp
+        { cmdName     = "lock"
+        , cmdSynopsis = "Claim an advisory lock on a binary asset"
+        , cmdUsage    = "bit lock <remote> <path>..."
+        , cmdDesc     = [ "Claim an advisory lock on one or more paths, stored on the remote"
+                        , "under locks/. Binary files cannot be merged, so locks let a team"
+                        , "coordinate edits. A path already locked by another owner is refused."
+                        , "Owner identity is the bit repo's git user.email." ]
+        , cmdOptions  = []
+        , cmdExamples = [HelpItem "bit lock origin hero.psd" "Lock a file before editing"]
+        }
+    , CommandHelp
+        { cmdName     = "unlock"
+        , cmdSynopsis = "Release an advisory lock"
+        , cmdUsage    = "bit unlock [--force] <remote> <path>..."
+        , cmdDesc     = [ "Release locks you own. Use --force to release a lock held by"
+                        , "another owner (e.g. a colleague who is offline)." ]
+        , cmdOptions  = [HelpItem "--force" "Release a lock held by another owner"]
+        , cmdExamples = [ HelpItem "bit unlock origin hero.psd" "Release your lock"
+                        , HelpItem "bit unlock --force origin hero.psd" "Override another owner's lock" ]
+        }
+    , CommandHelp
+        { cmdName     = "locks"
+        , cmdSynopsis = "List locks held on a remote"
+        , cmdUsage    = "bit locks <remote>"
+        , cmdDesc     = [ "List all advisory locks currently held on the remote, with the"
+                        , "owner and host for each locked path." ]
+        , cmdOptions  = []
+        , cmdExamples = [HelpItem "bit locks origin" "Show who holds which locks"]
         }
     , CommandHelp
         { cmdName     = "become-git"
