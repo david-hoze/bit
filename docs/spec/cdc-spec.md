@@ -712,7 +712,7 @@ CDC configuration uses git-style INI format in `.bit/config`:
     mode = solid          # required for CAS (and thus CDC)
 
 [cdc]
-    enabled = true        # content-defined chunking (default: enabled)
+    enabled = true        # content-defined chunking (default: disabled — opt in with true)
     min-size = 32768      # minimum chunk size in bytes (default: 32 KB)
     avg-size = 131072     # average chunk size in bytes (default: 128 KB)
     max-size = 524288     # maximum chunk size in bytes (default: 512 KB)
@@ -747,7 +747,7 @@ validateChunkConfig cc@ChunkConfig{..}
 ```
 Key              Type    Default   Constraint
 ──────────────   ──────  ────────  ──────────────────────────
-cdc.enabled      Bool    true      —
+cdc.enabled      Bool    false     —
 cdc.min-size     Int     32768     > 0
 cdc.avg-size     Int     131072    > cdc.min-size
 cdc.max-size     Int     524288    > cdc.avg-size

@@ -95,11 +95,12 @@ The config file is **not** tracked by git. It's local to each clone. This means:
 
 ## Common Workflows
 
-### Enable solid mode (CDC is on by default)
+### Enable solid mode (CDC is off by default)
 
 ```bash
 bit config core.mode solid
-# CDC chunking is enabled by default — no need to set cdc.enabled
+# CDC chunking is opt-in — enable it explicitly:
+bit config cdc.enabled true
 ```
 
 ### Check current mode

@@ -107,10 +107,11 @@ bit push backup-v2
 
 Bare remotes benefit the most from content-defined chunking (CDC). When enabled, large binary files are split into content-determined chunks. Modifying a small region of a 2 GB video only uploads the changed chunks — not the entire file.
 
-CDC is enabled by default when in solid mode:
+CDC is off by default; enable it explicitly once you are in solid mode:
 
 ```bash
-bit config core.mode solid      # CAS is required for CDC; CDC is on by default
+bit config core.mode solid      # CAS is required for CDC
+bit config cdc.enabled true     # CDC is opt-in
 ```
 
 See [Modes and CAS](modes-and-cas.md) for more on solid mode.
