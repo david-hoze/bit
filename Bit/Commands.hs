@@ -283,6 +283,7 @@ isKnownCommand name = root `elem` knownRoots
         , "rm", "mv", "reset", "restore", "checkout", "revert", "branch", "merge"
         , "push", "pull", "fetch", "remote", "verify", "repair", "hydrate", "fsck"
         , "cas", "submodule"
+        , "lock", "unlock", "locks"
         , "help", "become-git", "become-bit"
         ]
 
@@ -754,6 +755,17 @@ runCommand args = do
         ["cas", "backfill"]             -> Bit.casBackfill cwd >> exitWith ExitSuccess
         ("cas":"gc":gcRest)             -> Bit.casGc ("--dry-run" `elem` gcRest) cwd >> exitWith ExitSuccess
         ["cas", "rehash"]               -> Bit.casRehash cwd >> exitWith ExitSuccess
+
+        -- ── Binary-asset locks ───────────────────────────────
+        ("lock":remoteN:lockPaths_)
+            | not (null lockPaths_)     -> Bit.lockPaths cwd remoteN lockPaths_ >>= exitWith
+        -- Note: --force is stripped from args globally (see hasForce above).
+        ("unlock":remoteN:ps)
+            | not (null ps)             -> Bit.unlockPaths cwd remoteN hasForce ps >>= exitWith
+        ["locks", remoteN]              -> Bit.listLocks cwd remoteN >>= exitWith
+        ("lock":_)                      -> do hPutStrLn stderr "usage: bit lock <remote> <path>..."; exitWith (ExitFailure 1)
+        ("unlock":_)                    -> do hPutStrLn stderr "usage: bit unlock [--force] <remote> <path>..."; exitWith (ExitFailure 1)
+        ("locks":_)                     -> do hPutStrLn stderr "usage: bit locks <remote>"; exitWith (ExitFailure 1)
 
         -- ── Lightweight env (no scan) ────────────────────────
         ("log":rest)                    -> Bit.log prefix rest >>= exitWith

@@ -1,0 +1,120 @@
+# =============================================================================
+# Binary-asset locks - bit lock / unlock / locks over a filesystem remote
+#
+# Tests: claiming a lock, listing locks, refusing a lock/unlock held by another
+# owner, and --force override. Owner identity comes from the bit index repo's
+# git user.email, set per-section to simulate two users.
+# =============================================================================
+
+# ---- CLEANUP ----
+rm -rf test/cli/output/work_locks 2>/dev/null && rm -rf test/cli/output/remote_locks 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: repo as "Alice" + a filesystem remote
+# ======================================================================
+
+mkdir -p test/cli/output/work_locks test/cli/output/remote_locks
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_locks && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_locks && git -C .bit/index config user.email "alice@example.com" && git -C .bit/index config user.name "Alice" && echo ok
+<<<
+>>>
+ok
+>>>= 0
+
+cd test/cli/output/work_locks && bit remote add origin ../remote_locks
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test/cli/output/work_locks && head -c 100 /dev/urandom > hero.psd && echo made
+<<<
+>>>
+made
+>>>= 0
+
+# ======================================================================
+# ALICE LOCKS
+# ======================================================================
+
+cd test/cli/output/work_locks && bit lock origin hero.psd
+<<<
+>>>
+Locked hero.psd
+>>>= 0
+
+cd test/cli/output/work_locks && bit locks origin
+<<<
+>>> /hero\.psd.*alice@example\.com/
+>>>= 0
+
+# Locking your own path again is a no-op success
+cd test/cli/output/work_locks && bit lock origin hero.psd
+<<<
+>>> /Already locked by you/
+>>>= 0
+
+# ======================================================================
+# BOB IS REFUSED
+# ======================================================================
+
+cd test/cli/output/work_locks && git -C .bit/index config user.email "bob@example.com" && git -C .bit/index config user.name "Bob" && echo ok
+<<<
+>>>
+ok
+>>>= 0
+
+# Bob cannot lock Alice's path
+cd test/cli/output/work_locks && bit lock origin hero.psd
+<<<
+>>> /locked by Alice/
+>>>= 1
+
+# Bob cannot unlock Alice's path without --force
+cd test/cli/output/work_locks && bit unlock origin hero.psd
+<<<
+>>> /locked by Alice.*--force/
+>>>= 1
+
+# ======================================================================
+# FORCE OVERRIDE
+# ======================================================================
+
+cd test/cli/output/work_locks && bit unlock origin --force hero.psd
+<<<
+>>>
+Unlocked hero.psd
+>>>= 0
+
+cd test/cli/output/work_locks && bit locks origin
+<<<
+>>>
+No locks.
+>>>= 0
+
+# Unlocking an unlocked path is a no-op success
+cd test/cli/output/work_locks && bit unlock origin hero.psd
+<<<
+>>>
+Not locked: hero.psd
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+rm -rf test/cli/output/work_locks 2>/dev/null && rm -rf test/cli/output/remote_locks 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

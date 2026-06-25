@@ -78,6 +78,68 @@ change) the in-memory chunker. bit optimizes for *small teams / individuals who
 want git ergonomics over arbitrary cloud storage*; Lore optimizes for *large
 studios moving terabytes of binary assets* with centralized access control.
 
+## Future ideas worth taking from Lore
+
+Filtered for fit with bit's philosophy (*thin orchestration over git + rclone;
+never reimplement what they already do*). Ordered by value.
+
+### 1. File locking for binary assets — the highest-leverage gap
+
+Binary files cannot be three-way merged, so every serious binary-asset VCS
+(Perforce, Git-LFS locking, Lore) offers *exclusive locks*: "I'm editing
+`hero.psd`, nobody else touch it." bit today gives excellent binary **dedup**
+but no **coordination** — two people can edit the same `.uasset`, both push, and
+one silently loses. This is bit's biggest real-world weakness for its own target
+users, and it fits the architecture cleanly:
+
+- A lock is **metadata**, and coordination already flows through the shared
+  remote bit uses for CAS. Store lock records under a `locks/` prefix on the
+  remote (rclone-synced, exactly like `cas/`), one file per locked path,
+  recording the owner and timestamp.
+- Owner identity = **git's** `user.email` (+ hostname for display) — reuse git's
+  identity rather than invent one.
+- Advisory, like Git-LFS locks: `bit push`/`bit add` *warns or refuses* to modify
+  a path locked by someone else.
+
+**Honest limitation:** dumb storage (Drive/S3) has no atomic compare-and-swap, so
+two simultaneous `bit lock` calls can race. The mitigation is read-back-after-
+write contention detection; the fully race-free version would ride git's atomic
+ref-update semantics (a `refs/bit/locks` pointer, push-rejected on conflict) —
+the golden-rule-correct upgrade if stronger guarantees are ever needed.
+
+*(Implemented as a first increment: `bit lock` / `bit unlock` / `bit locks` —
+advisory locks synced through the rclone remote. Push-time enforcement is the
+designed next step, kept out of the hot push path for now.)*
+
+### 2. Partial / shallow history — lean on git, don't reinvent
+
+bit's bundle transport serializes the **full** DAG, which gets heavy for
+long-lived art repos. Git already has partial clone (`--filter=blob:none`) and
+shallow fetch (`--depth`); surfacing them for bit's metadata transport addresses
+the same scaling pressure Lore's on-demand model targets, with **no new transport
+code** — a pure golden-rule win.
+
+### 3. Commit / content signing — provenance for free
+
+Lore (centralized) gets provenance from its server. bit can get it from git's
+native GPG/SSH commit signing — just surface the config + a `bit verify`-style
+check. Cheap, high-trust-value, zero new crypto.
+
+### 4. `bit cas verify` / scrub — integrity at scale
+
+`bit cas gc` collects orphans; the natural sibling re-hashes CAS blobs against
+their content-addressed filenames to detect bit-rot (Lore emphasizes
+integrity-at-scale). Small, and cheaper now that BLAKE3 is available.
+
+### Deliberate non-goals (taking these would *lose* bit's edge)
+
+- **Sparse workspaces / partial-file byte-range reads.** bit's invariant is that
+  the working tree materializes *real* files, so every ordinary tool Just Works.
+  That is a feature, not a gap; Lore trades it for scale bit doesn't target.
+- **A centralized server-of-record.** bit's whole point is zero server-side
+  software over dumb storage. Adopting Lore's server would discard its core
+  advantage.
+
 **Sources:**
 - <https://github.com/EpicGames/lore>
 - <https://epicgames.github.io/lore/explanation/system-design/>
