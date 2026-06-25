@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build + pure unit suites. No external tools — fast and deterministic.
+  # This is the required gate: it catches compile breaks and the CDC
+  # byte-identical chunker property (the suite that guards CAS dedup).
+  # ---------------------------------------------------------------------------
+  build-test:
+    name: Build & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.6.7'
+          cabal-version: '3.14.2.0'
+
+      - name: Cache cabal store and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.setup.outputs.cabal-store }}
+            dist-newstyle
+          key: ${{ runner.os }}-ghc9.6.7-${{ hashFiles('**/*.cabal', 'cabal.project*') }}
+          restore-keys: |
+            ${{ runner.os }}-ghc9.6.7-
+
+      - name: Build everything
+        run: cabal build all
+
+      - name: Run pure unit suites
+        # Named explicitly so we skip suites that need git/rclone/shelltest.
+        run: cabal test cdc plan device-prompt lint-tests
+
+  # ---------------------------------------------------------------------------
+  # Integration: the binary-file suite and the local (non-cloud) CLI suite.
+  # Needs the installed `bit` binary, rclone, and shelltest. The 5 gdrive
+  # cloud tests are excluded — they require a configured rclone remote.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: CLI & binary suites
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.6.7'
+          cabal-version: '3.14.2.0'
+
+      - name: Cache cabal store and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.setup.outputs.cabal-store }}
+            dist-newstyle
+          key: ${{ runner.os }}-ghc9.6.7-${{ hashFiles('**/*.cabal', 'cabal.project*') }}
+          restore-keys: |
+            ${{ runner.os }}-ghc9.6.7-
+
+      - name: Install rclone
+        run: sudo apt-get update && sudo apt-get install -y rclone
+
+      - name: Install bit and shelltestrunner
+        run: |
+          cabal install --overwrite-policy=always
+          cabal install shelltestrunner --overwrite-policy=always
+          echo "$HOME/.cabal/bin" >> "$GITHUB_PATH"
+
+      - name: Binary-file test suite
+        run: cd test/t && bash run-tests.sh
+
+      - name: CLI suite (excluding cloud tests)
+        env:
+          BIT_CEILING_DIRECTORIES: ${{ github.workspace }}/test/cli/output
+        run: |
+          GDRIVE="gdrive-remote.test multi-remote-sync.test bare-push-pull.test fetch-output.test verify-bare-remote.test"
+          LOCAL=$(for f in test/cli/*.test; do
+                    b=$(basename "$f")
+                    echo "$GDRIVE" | grep -qw "$b" || echo "$f"
+                  done | grep -v 000-cleanup.test)
+          bash test/cli/run.sh $LOCAL
