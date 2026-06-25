@@ -126,6 +126,15 @@ committed but **has not been built or tested**. Please:
    spanning many chunks, and a file whose length is an exact multiple of maxSize.
    This is the core correctness property of the change.
 
+   > **Recommendation: treat this as a blocking gate.** It is the one test that
+   > proves the streaming rewrite did not change chunk boundaries. If boundaries
+   > shift, existing CAS blobs no longer match newly-produced chunks, silently
+   > breaking dedup (every file re-uploads in full) without any error. Do not
+   > ship the streaming `chunkFile` until this assertion passes for all the
+   > sizes above — especially the EOF cases (< minSize and exact-multiple-of-
+   > maxSize), where the buffer-fill invariant is most likely to differ from the
+   > in-memory path.
+
 3. **Large-file smoke test.** Chunk a file larger than the test machine's
    comfortable RAM headroom (e.g. several GB sparse/random file) and confirm
    memory stays bounded (~2*maxSize) and the reassembled file's hash matches.
