@@ -504,7 +504,7 @@ commandKey ("merge":sub:_)
 commandKey ("branch":sub:_)
     | sub `elem` ["--unset-upstream"] = "branch " ++ sub
 commandKey ("cas":sub:_)
-    | sub == "backfill" = "cas backfill"
+    | sub `elem` ["backfill", "gc", "rehash"] = "cas " ++ sub
 commandKey (cmd:_) = cmd
 commandKey [] = ""
 
@@ -752,6 +752,8 @@ runCommand args = do
         -- config: bit-specific keys handled above; everything else passes through to git
         ("config":rest)                 -> Git.runGitRawAt (bitDir </> "index") ("config" : rest) >>= exitWith
         ["cas", "backfill"]             -> Bit.casBackfill cwd >> exitWith ExitSuccess
+        ("cas":"gc":gcRest)             -> Bit.casGc ("--dry-run" `elem` gcRest) cwd >> exitWith ExitSuccess
+        ["cas", "rehash"]               -> Bit.casRehash cwd >> exitWith ExitSuccess
 
         -- ── Lightweight env (no scan) ────────────────────────
         ("log":rest)                    -> Bit.log prefix rest >>= exitWith

@@ -495,7 +495,7 @@ parseBlobHash line =
        else Just (Hash ("md5:" <> filename))
 ```
 
-**Future optimization:** Option C (local push tracking) is added as a transparent cache in front of the `rclone lsf`. The local pushed-blobs set is consulted first; `rclone lsf` is the fallback for cache misses or stale state. This optimization is documented here for future implementation but is not part of the initial CDC spec.
+**Implemented (Option C — local push tracking):** a transparent cache in front of the `rclone lsf`. After each successful push, the set of blob hashes now known to be on the remote is written to `.bit/cache/pushed-blobs/<name>` (one `md5:<hex>` per line). Subsequent pushes read this cache as the known-remote set and skip the `rclone lsf` entirely; `rclone lsf` runs only on a cache miss (no cache file). The cache holds only hashes we have confirmed present (already there, or just uploaded), so a present entry is safe to trust for dedup. The one stale case is a blob deleted from the remote out of band — deleting the cache file forces a fresh `rclone lsf` on the next push. See `Bit/Remote/PushedBlobsCache.hs`.
 
 ### Batched Chunk Upload
 
@@ -712,7 +712,7 @@ CDC configuration uses git-style INI format in `.bit/config`:
     mode = solid          # required for CAS (and thus CDC)
 
 [cdc]
-    enabled = true        # content-defined chunking (default: enabled)
+    enabled = true        # content-defined chunking (default: disabled — opt in with true)
     min-size = 32768      # minimum chunk size in bytes (default: 32 KB)
     avg-size = 131072     # average chunk size in bytes (default: 128 KB)
     max-size = 524288     # maximum chunk size in bytes (default: 512 KB)
@@ -747,7 +747,7 @@ validateChunkConfig cc@ChunkConfig{..}
 ```
 Key              Type    Default   Constraint
 ──────────────   ──────  ────────  ──────────────────────────
-cdc.enabled      Bool    true      —
+cdc.enabled      Bool    false     —
 cdc.min-size     Int     32768     > 0
 cdc.avg-size     Int     131072    > cdc.min-size
 cdc.max-size     Int     524288    > cdc.avg-size
@@ -997,7 +997,7 @@ The `Bit.CDC.*` modules form a self-contained subsystem. `Bit.CAS` gains a few n
 ### Test Setup
 
 - **File:** Blender 4.3 splash screen, 227 MB (238,766,205 bytes)
-- **CDC config:** default (min 128KB, avg 512KB, max 2MB)
+- **CDC config:** default (min 32KB, avg 128KB, max 512KB)
 - **Chunks produced:** ~1,370 chunk blobs + 1 manifest per version
 - **Remote:** MinIO (localhost S3, <1ms RTT)
 - **Platform:** Windows MINGW64, bit with `--transfers 32` for CAS operations

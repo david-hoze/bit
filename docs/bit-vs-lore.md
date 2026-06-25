@@ -61,13 +61,13 @@ spec: a 6-byte edit in a 227 MB file → 2 chunks uploaded, 1,370 skipped.
 
 | Gap | bit today | How to close it |
 |---|---|---|
-| Chunk hash | MD5 (collision-weak, ~2× slower than BLAKE3). Fine for accidental-corruption threat model. | Uniform `bit cas rehash` migration (whole-file + chunks together), not piecemeal. Future work. |
+| File hash | MD5 by default. | **`bit cas rehash` implemented** — switches `core.hash-algo` to BLAKE3 and rewrites stubs + CAS whole-file blobs + manifest filenames to BLAKE3, then commits. Verify/add are algorithm-aware (dispatch on the stored hash's prefix). Chunk *content* hashes stay MD5 (a chunk hash is just a content address, independent of file identity), so the chunker is untouched. Pre-migration commits keep their MD5 content for history. |
+| Remote chunk index | `rclone lsf` the whole CAS every push — O(remote size), slow on Drive. | **Implemented** — local `pushed-blobs` cache at `.bit/cache/pushed-blobs/<name>` as a front cache; `rclone lsf` runs only on a cache miss. |
 | Merkle structure | Flat manifest (a list); integrity is end-to-end via whole-file hash, not a per-file Merkle tree. | Acceptable division of labor: git's tree objects provide the *directory* Merkle layer; manifests handle *intra-file* chunking. No need to rebuild git's tree layer. |
-| Remote chunk index | `rclone lsf` the whole CAS every push — O(remote size), slow on Drive. | Add Option C from the spec (line ~498): local `pushed-blobs` cache in `.bit/remotes/<name>/` as a front cache, `rclone lsf` as fallback. Biggest practical speedup on high-latency remotes. |
 | Streaming chunking | **FIXED in this change** — `chunkFile` was loading the entire file into memory; now uses a bounded ~2*maxSize buffer. | See below. |
 | Partial-file reads | None — reassembly is always whole-file. | Deliberate non-goal: bit materializes the real file in the working tree, unlike Lore's sparse workspace. |
 | Inter-chunk delta | None (explicitly out of scope). | Lore doesn't do this either. No gap. |
-| Orphan-chunk GC | None yet (`bit cas gc` is future work). | Mark-sweep over live manifests. |
+| Orphan-chunk GC | **Implemented** — `bit cas gc [--dry-run]` mark-sweeps orphan blobs/chunks/manifests; live set spans all reachable commits + the current index. | Mark-sweep over live manifests. |
 
 ## Bottom line
 
@@ -105,7 +105,50 @@ with a bounded-buffer streaming loop:
 Note: `chunkByteString` (the pure in-memory variant) is unchanged and still used
 for testing and small inputs.
 
-## TASKS FOR THE NEXT AGENT (env with Haskell)
+## STATUS — tasks 1–6 completed (2026-06-25)
+
+The streaming `chunkFile` change was built, verified, and tested on a Linux/WSL
+env with the Haskell toolchain. Results:
+
+1. **Build** ✅ — compiles cleanly; the streaming change added no new warnings.
+2. **Byte-identical gate** ✅ — new `cdc` tasty suite (`test/CdcSpec.hs`, wired
+   into `bit.cabal`) asserts `chunkFile == chunkByteString` for empty,
+   single-byte, <minSize, =minSize, between, =maxSize, exact-multiple-of-maxSize,
+   many-chunks, all-zeros, plus 100 random QuickCheck inputs. All pass.
+3. **Large-file smoke test** ✅ — `test/single-workflows/cdc-largefile-smoke.hs`.
+   A 1 GiB file (>RAM headroom) chunks with **max residency 2.5 MB** (~2×maxSize),
+   chunks tile the file contiguously, reassembled MD5 matches whole-file MD5.
+   *Hazard learned: building a 4 GB fixture on a 3.7 GB-RAM WSL VM crashed the
+   whole VM via page-cache flooding — see `docs/large-file-testing.md`. 1 GB is
+   sufficient and safe.*
+4. **Suites** ✅ — CLI 1456 passed / 0 failed (1357 local + 99 gdrive cloud),
+   binary 20/20 scripts, git representative subset 10/10 scripts. The CDC CLI
+   tests (`cdc-chunking`, `cdc-default`) pass 54/54.
+5. **Spec/impl reconcile** ✅ — code is off-by-default; fixed the contradicting
+   "default: enabled" claims in `docs/spec/cdc-spec.md` (INI comment + parameter
+   table) and three tutorials (`config.md`, `bare-remotes.md`, `modes-and-cas.md`).
+
+Resolved follow-up: `docs/spec/cdc-spec.md:1000` previously labeled the benchmark
+config 128K/512K/2M; the measured ~1,370 chunks for 227 MB imply ~174 KB average,
+matching the code defaults (32K/128K/512K), so the line was corrected.
+
+### Optional follow-ups (gap table) — all implemented (2026-06-25)
+
+6a. **Local `pushed-blobs` cache** ✅ — `.bit/cache/pushed-blobs/<name>` front
+    cache; push skips `rclone lsf` on a cache hit. `Bit/Remote/PushedBlobsCache.hs`,
+    test `pushed-blobs-cache.test`.
+6b. **`bit cas gc`** ✅ — mark-and-sweep orphan collection; live set spans all
+    reachable commits + the current index. `Bit/Core/CasGc.hs`, test `cas-gc.test`.
+6c. **`bit cas rehash` (MD5→BLAKE3)** ✅ — `core.hash-algo` config + algorithm-
+    aware hashing/verify; migrates stubs + CAS whole-file blobs + manifest names
+    to BLAKE3 and commits. Chunk content hashes stay MD5 (content addresses), so
+    FastCDC is untouched. `Bit/Core/CasRehash.hs`, test `cas-rehash.test`.
+
+Post-implementation suites: local CLI **1410/0**, binary **20/20**, CDC unit
+gate green. Cloud CLI not re-run after 6a–6c (network-bound; the cache path is
+covered by the filesystem `pushed-blobs-cache.test`).
+
+## ORIGINAL TASKS FOR THE NEXT AGENT (env with Haskell)
 
 This was written on an env with no `cabal`/`ghc`. The streaming change is
 committed but **has not been built or tested**. Please:

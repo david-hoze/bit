@@ -1,0 +1,133 @@
+# =============================================================================
+# Pushed-blobs cache - local front cache avoids rclone-lsf-ing the remote CAS
+#
+# Uses a filesystem bare remote (no cloud needed).
+# Tests: first push creates .bit/cache/pushed-blobs/<name>, second push reports
+#        "Using local blob cache" instead of querying the remote, dedup still
+#        works through the cache, and deleting the cache forces a re-query.
+# =============================================================================
+
+# ---- CLEANUP ----
+rm -rf test/cli/output/work_pbcache 2>/dev/null && rm -rf test/cli/output/remote_pbcache 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: solid-mode repo with CDC and a filesystem bare remote
+# ======================================================================
+
+mkdir -p test/cli/output/work_pbcache
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_pbcache && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_pbcache && bit config core.mode solid
+<<<
+>>> /[Ss]olid|Mode set/
+>>>= 0
+
+cd test/cli/output/work_pbcache && bit config cdc.min-size 64 && bit config cdc.avg-size 256 && bit config cdc.max-size 1024
+<<<
+>>>= 0
+
+cd test/cli/output/work_pbcache && dd if=/dev/zero of=data.bin bs=1 count=4096 2>/dev/null
+<<<
+>>>= 0
+
+cd test/cli/output/work_pbcache && bit add data.bin && bit commit -m "Initial"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+mkdir -p test/cli/output/remote_pbcache
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_pbcache && bit remote add origin ../remote_pbcache
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+# ======================================================================
+# FIRST PUSH: no cache yet -> queries remote, then writes the cache
+# ======================================================================
+
+cd test/cli/output/work_pbcache && bit push -u origin
+<<<
+>>> /Push complete/
+>>>= 0
+
+# Cache file should now exist for the 'origin' remote
+cd test/cli/output/work_pbcache && test -f .bit/cache/pushed-blobs/origin && echo cache-present
+<<<
+>>>
+cache-present
+>>>= 0
+
+# Cache should contain at least one md5: hash line
+cd test/cli/output/work_pbcache && grep -c '^md5:' .bit/cache/pushed-blobs/origin
+<<<
+>>> /^[1-9][0-9]*$/
+>>>= 0
+
+# ======================================================================
+# SECOND PUSH: small edit -> uses the local blob cache (no remote query)
+# ======================================================================
+
+cd test/cli/output/work_pbcache && printf 'EDIT!\n' > tmp_edit && cat tmp_edit data.bin > data.bin.new && mv data.bin.new data.bin && rm -f tmp_edit
+<<<
+>>>= 0
+
+cd test/cli/output/work_pbcache && bit add data.bin && bit commit -m "Small edit"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# Push should announce it is using the local blob cache (not "Querying remote")
+cd test/cli/output/work_pbcache && bit push 2>&1
+<<<
+>>> /Using local blob cache/
+>>>= 0
+
+# ======================================================================
+# CACHE INVALIDATION: deleting the cache forces a fresh remote query
+# ======================================================================
+
+cd test/cli/output/work_pbcache && rm -f .bit/cache/pushed-blobs/origin && printf 'MORE!\n' > tmp_edit && cat tmp_edit data.bin > data.bin.new && mv data.bin.new data.bin && rm -f tmp_edit
+<<<
+>>>= 0
+
+cd test/cli/output/work_pbcache && bit add data.bin && bit commit -m "Another edit"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# With no cache, push falls back to querying the remote CAS
+cd test/cli/output/work_pbcache && bit push 2>&1
+<<<
+>>> /Querying remote CAS/
+>>>= 0
+
+# Cache is rebuilt after that push
+cd test/cli/output/work_pbcache && test -f .bit/cache/pushed-blobs/origin && echo cache-rebuilt
+<<<
+>>>
+cache-rebuilt
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+rm -rf test/cli/output/work_pbcache 2>/dev/null && rm -rf test/cli/output/remote_pbcache 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

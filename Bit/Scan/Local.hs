@@ -45,8 +45,8 @@ import Data.Text.Encoding (decodeUtf8, decodeUtf8', encodeUtf8)
 import Data.Char (toLower)
 import qualified Bit.Config.File as ConfigFile
 import Bit.Utils (atomicWriteFileStr, formatBytes)
-import Bit.Config.Metadata (MetaContent(..), readMetadataOrComputeHash, parseMetadata, hashFile, serializeMetadata)
-import Bit.Core.Config (getCoreModeWithRoot, BitMode(..))
+import Bit.Config.Metadata (MetaContent(..), readMetadataOrComputeHash, parseMetadata, hashFile, hashFileWith, hashAlgoOf, serializeMetadata)
+import Bit.Core.Config (getCoreModeWithRoot, getHashAlgoWithRoot, BitMode(..))
 import Bit.CAS (writeBlobToCas)
 import Bit.CDC.Config (getCdcConfig)
 import Bit.CDC.Types (ChunkConfig(..))
@@ -113,13 +113,46 @@ data ScanPhase
 -- For large files or binary extensions: streams hash only, returns BinaryContent.
 -- For others: reads first 8KB for text classification, then streams remaining chunks for hash.
 -- When mBytesRef is provided, updates it with bytes read per chunk for live progress.
-hashAndClassifyFile :: FilePath -> Integer -> ConfigFile.TextConfig -> Maybe (IORef Integer) -> IO (Hash 'MD5, ContentType)
-hashAndClassifyFile filePath size config mBytesRef = do
+hashAndClassifyFile :: FilePath -> Integer -> ConfigFile.TextConfig -> HashAlgo -> Maybe (IORef Integer) -> IO (Hash 'MD5, ContentType)
+hashAndClassifyFile filePath size config algo mBytesRef = do
     let ext = map toLower (takeExtension filePath)
         bump chunk = case mBytesRef of
             Just ref -> atomicModifyIORef' ref (\b -> (b + fromIntegral (BS.length chunk), ()))
             Nothing  -> pure ()
 
+    case algo of
+      -- MD5 (default) keeps the original single-pass, byte-counted fast paths.
+      MD5 -> hashAndClassifyMd5 filePath size config ext bump
+      -- Other algorithms hash with the shared streaming primitive and classify
+      -- separately. This is the migration / opt-in path; correctness over the
+      -- extra read of the first 8 KB for classification.
+      _ -> do
+        h  <- hashFileWith algo filePath
+        ct <- classifyContentType filePath size config ext
+        bumpWhole size mBytesRef
+        pure (h, ct)
+
+-- | Bump the progress byte-counter by a whole file size at once (used when the
+-- hash is computed by a streaming primitive that does not call @bump@ per read).
+bumpWhole :: Integer -> Maybe (IORef Integer) -> IO ()
+bumpWhole size = maybe (pure ()) (\ref -> atomicModifyIORef' ref (\b -> (b + size, ())))
+
+-- | Classify a file as text or binary without hashing it. Mirrors the
+-- classification embedded in the MD5 fast path.
+classifyContentType :: FilePath -> Integer -> ConfigFile.TextConfig -> String -> IO ContentType
+classifyContentType filePath size config ext
+  | size >= ConfigFile.textSizeLimit config || ext `elem` binaryExtensions = pure BinaryContent
+  | otherwise = withFile filePath ReadMode $ \handle -> do
+      firstChunk <- BS.hGet handle 8192
+      let trimmed = trimIncompleteUtf8 firstChunk
+      pure $ if not (BS.elem 0 firstChunk)
+                && not (BS.null trimmed && not (BS.null firstChunk))
+                && isRight (decodeUtf8' trimmed)
+             then TextContent else BinaryContent
+
+-- | Original MD5 single-pass hash-and-classify (unchanged behavior).
+hashAndClassifyMd5 :: FilePath -> Integer -> ConfigFile.TextConfig -> String -> (BS.ByteString -> IO ()) -> IO (Hash 'MD5, ContentType)
+hashAndClassifyMd5 filePath size config ext bump = do
     -- Fast path: large files or known binary extensions - just stream hash
     if size >= ConfigFile.textSizeLimit config || ext `elem` binaryExtensions
         then do
@@ -395,8 +428,8 @@ formatElapsed secs
 
 -- | Stat a file and check the hash cache.
 -- Returns Right for cache hits, Left for files needing hashing.
-statAndCheckCache :: FilePath -> (FilePath, FilePath) -> IO (Maybe (Either FileToHash FileEntry))
-statAndCheckCache root (rel, fullPath) = do
+statAndCheckCache :: FilePath -> HashAlgo -> (FilePath, FilePath) -> IO (Maybe (Either FileToHash FileEntry))
+statAndCheckCache root algo (rel, fullPath) = do
     exists <- doesFileExist fullPath
     if not exists then pure Nothing else do
       size <- getFileSize fullPath
@@ -404,7 +437,8 @@ statAndCheckCache root (rel, fullPath) = do
       let mtimeInt = round (utcTimeToPOSIXSeconds mtime * 1000000000) :: Integer
       cached <- loadCacheEntry root rel
       case cached of
-          Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt ->
+          Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt
+                    && hashAlgoOf (ceHash ce) == algo ->
               pure $ Just $ Right $ FileEntry
                   { path = Path rel
                   , kind = File (ceHash ce) (fromIntegral size) (ceContentType ce)
@@ -424,9 +458,9 @@ statNoCache _root (rel, fullPath) = do
 -- | Hash a single file and save the result to cache.
 -- When forceBinarySet is non-empty and the file's relative path is in it,
 -- the classification is overridden to BinaryContent.
-hashFileToEntry :: FilePath -> ConfigFile.TextConfig -> Set.Set FilePath -> Maybe (IORef Integer) -> FileToHash -> IO FileEntry
-hashFileToEntry root config forceBinarySet mBytesRef fth = do
-    (h, rawContentType) <- hashAndClassifyFile (fthFull fth) (fthSize fth) config mBytesRef
+hashFileToEntry :: FilePath -> ConfigFile.TextConfig -> HashAlgo -> Set.Set FilePath -> Maybe (IORef Integer) -> FileToHash -> IO FileEntry
+hashFileToEntry root config algo forceBinarySet mBytesRef fth = do
+    (h, rawContentType) <- hashAndClassifyFile (fthFull fth) (fthSize fth) config algo mBytesRef
     let contentType = if Set.member (fthRel fth) forceBinarySet then BinaryContent else rawContentType
     saveCacheEntry root (fthRel fth) (CacheEntry (fthMtime fth) (fthSize fth) h contentType)
     pure $ FileEntry
@@ -462,6 +496,7 @@ scanWorkingDir root concurrencyMode = do
       Nothing -> pure []
       Just bitRoot -> do
         config <- ConfigFile.readTextConfig
+        algo <- getHashAlgoWithRoot bitRoot
         (filePaths, dirPaths) <- collectNonIgnoredPaths root
         forceBinarySet <- loadForceBinarySet root bitRoot filePaths
 
@@ -484,7 +519,8 @@ scanWorkingDir root concurrencyMode = do
                   let mtimeInt = round (utcTimeToPOSIXSeconds mtime * 1000000000) :: Integer
                   cached <- loadCacheEntry root rel
                   case cached of
-                    Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt -> do
+                    Just ce | ceSize ce == fromIntegral size && ceMtime ce == mtimeInt
+                              && hashAlgoOf (ceHash ce) == algo -> do
                       let ct = if Set.member rel forceBinarySet then BinaryContent else ceContentType ce
                       atomicModifyIORef' counter (\n -> (n + 1, ()))
                       pure $ Just $ FileEntry
@@ -492,7 +528,7 @@ scanWorkingDir root concurrencyMode = do
                           , kind = File { fHash = ceHash ce, fSize = fromIntegral size, fContentType = ct }
                           }
                     _ -> do
-                      (h, rawCt) <- hashAndClassifyFile fullPath (fromIntegral size) config Nothing
+                      (h, rawCt) <- hashAndClassifyFile fullPath (fromIntegral size) config algo Nothing
                       let contentType = if Set.member rel forceBinarySet then BinaryContent else rawCt
                       saveCacheEntry root rel (CacheEntry mtimeInt (fromIntegral size) h contentType)
                       atomicModifyIORef' counter (\n -> (n + 1, ()))
@@ -534,6 +570,7 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
       Nothing -> pure (ScanResult [] [])
       Just bitRoot -> do
         config <- ConfigFile.readTextConfig
+        algo <- getHashAlgoWithRoot bitRoot
         (filePaths, dirPaths) <- collectNonIgnoredPaths root
         forceBinarySet <- loadForceBinarySet root bitRoot filePaths
 
@@ -546,7 +583,7 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
         -- Phase 1: stat all files and check cache (skip cache when forceRehash)
         mStatResults <- if forceRehash
             then mapM (statNoCache root) filesToProcess
-            else mapM (statAndCheckCache root) filesToProcess
+            else mapM (statAndCheckCache root algo) filesToProcess
         let statResults = catMaybes mStatResults
             cacheHits    = [e | Right e <- statResults]
             needsHashing = [fth | Left fth <- statResults]
@@ -602,7 +639,7 @@ scanWorkingDirWithAbort' forceRehash root concurrencyMode mCallback = do
                     Parallel n  -> pure n
 
                 let hashWithProgress fth = do
-                        entry <- hashFileToEntry root config forceBinarySet (Just bytesHashedRef) fth
+                        entry <- hashFileToEntry root config algo forceBinarySet (Just bytesHashedRef) fth
                         atomicModifyIORef' counter (\n -> (n + 1, ()))
                         pure entry
 

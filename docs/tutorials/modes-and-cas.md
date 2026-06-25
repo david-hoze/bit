@@ -132,9 +132,9 @@ Switching modes is instant, with no migration or data loss.
 
 ## Content-Defined Chunking (CDC)
 
-When solid mode is active, content-defined chunking (CDC) is enabled by default. CDC splits large files into content-determined chunks. When you modify a small part of a large file, only the affected chunks get new hashes — the rest are already stored. This dramatically reduces storage and upload time for incremental changes to large files.
+When solid mode is active, you can enable content-defined chunking (CDC). It is off by default — turn it on with `bit config cdc.enabled true`. CDC splits large files into content-determined chunks. When you modify a small part of a large file, only the affected chunks get new hashes — the rest are already stored. This dramatically reduces storage and upload time for incremental changes to large files.
 
-To disable CDC: `bit config cdc.enabled false`
+To disable CDC again: `bit config cdc.enabled false`
 
 CDC parameters:
 

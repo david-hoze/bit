@@ -1,0 +1,119 @@
+# =============================================================================
+# cas gc - mark-and-sweep removal of orphaned CAS blobs
+#
+# Tests: a clean CAS reports nothing to collect; a synthetic orphan blob is
+# detected by --dry-run, removed by a real run, and live chunks/manifests of a
+# committed file are preserved (verify still passes).
+# =============================================================================
+
+# ---- CLEANUP ----
+rm -rf test/cli/output/work_casgc 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: solid-mode repo with CDC, one committed binary file
+# ======================================================================
+
+mkdir -p test/cli/output/work_casgc
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_casgc && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_casgc && bit config core.mode solid && bit config cdc.enabled true && bit config cdc.min-size 64 && bit config cdc.avg-size 256 && bit config cdc.max-size 1024
+<<<
+>>> /[Ss]olid|Mode set/
+>>>= 0
+
+cd test/cli/output/work_casgc && dd if=/dev/zero of=data.bin bs=1 count=4096 2>/dev/null
+<<<
+>>>= 0
+
+cd test/cli/output/work_casgc && bit add data.bin && bit commit -m "Initial"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# Record how many CAS files the live file produced
+cd test/cli/output/work_casgc && find .bit/cas -type f | wc -l | tr -d ' '
+<<<
+>>> /^[1-9][0-9]*$/
+>>>= 0
+
+# ======================================================================
+# CLEAN CAS: everything is referenced, nothing to collect
+# ======================================================================
+
+cd test/cli/output/work_casgc && bit cas gc --dry-run
+<<<
+>>>
+CAS is clean — no orphan blobs.
+>>>= 0
+
+# ======================================================================
+# ORPHAN: drop a blob no tracked file references
+# ======================================================================
+
+cd test/cli/output/work_casgc && mkdir -p .bit/cas/de && printf 'junk' > .bit/cas/de/deadbeefdeadbeefdeadbeefdeadbeef && echo orphan-created
+<<<
+>>>
+orphan-created
+>>>= 0
+
+# Dry-run detects it but does not delete
+cd test/cli/output/work_casgc && bit cas gc --dry-run
+<<<
+>>> /Would remove 1 orphan blob/
+>>>= 0
+
+# Orphan still present after dry-run
+cd test/cli/output/work_casgc && test -f .bit/cas/de/deadbeefdeadbeefdeadbeefdeadbeef && echo still-there
+<<<
+>>>
+still-there
+>>>= 0
+
+# Real run removes it
+cd test/cli/output/work_casgc && bit cas gc
+<<<
+>>> /Removed 1 orphan blob/
+>>>= 0
+
+# Orphan is gone
+cd test/cli/output/work_casgc && test ! -f .bit/cas/de/deadbeefdeadbeefdeadbeefdeadbeef && echo gone
+<<<
+>>>
+gone
+>>>= 0
+
+# ======================================================================
+# LIVE CONTENT SURVIVES: the committed file's chunks/manifest are intact
+# ======================================================================
+
+cd test/cli/output/work_casgc && bit verify
+<<<
+>>> /All .* files? match|Verified|0 issues/
+>>>= 0
+
+# A second gc is a no-op — CAS is clean again
+cd test/cli/output/work_casgc && bit cas gc
+<<<
+>>>
+CAS is clean — no orphan blobs.
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+rm -rf test/cli/output/work_casgc 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

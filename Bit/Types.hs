@@ -29,7 +29,7 @@ newtype Path = Path { unPath :: FilePath }
   deriving stock (Show, Generic)
   deriving newtype (Eq, Ord, IsString)
 
-data HashAlgo = MD5 | SHA256
+data HashAlgo = MD5 | SHA256 | BLAKE3
   deriving (Show, Eq, Generic)
 
 newtype Hash (a :: HashAlgo) = Hash Text

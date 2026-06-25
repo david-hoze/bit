@@ -36,7 +36,7 @@ import Data.Maybe (maybeToList, isJust)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Bit.Git.Run as Git
-import Bit.Config.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, hashFile, serializeMetadata)
+import Bit.Config.Metadata (MetaContent(..), parseMetadata, parseMetadataFile, hashFile, hashFileLike, serializeMetadata)
 import qualified Bit.Scan.Remote as Remote.Scan
 import qualified Bit.Remote
 import qualified Bit.Rclone.Run as Transport
@@ -299,7 +299,7 @@ findIssuesFromScan root entries = do
                       es
                       as']
             (BinaryEntry _ eh es, TextEntry _) -> do
-                actualHash <- hashFile fsPath
+                actualHash <- hashFileLike eh fsPath
                 actualSize <- fromIntegral . BS.length <$> BS.readFile fsPath
                 pure [HashMismatch (Path relPath)
                         (T.unpack (hashToText eh))
@@ -355,8 +355,9 @@ verifyFiles root filePaths = do
           mMeta <- parseMetadataFile metaPath
           case mMeta of
             Just mc -> do
-              -- Binary file: compare hash
-              actualHash <- hashFile workPath
+              -- Binary file: compare hash, recomputing with the stored algorithm
+              -- so a repo migrated to BLAKE3 verifies like-for-like.
+              actualHash <- hashFileLike (metaHash mc) workPath
               actualSize <- fromIntegral . BS.length <$> BS.readFile workPath
               if actualHash == metaHash mc && actualSize == metaSize mc
                 then pure []

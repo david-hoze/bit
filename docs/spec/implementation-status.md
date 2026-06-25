@@ -94,8 +94,10 @@
 - `bit init` -- creates `.bit/`, initializes Git; supports `BIT_GIT_JUNCTION=1`, re-init, `--initial-branch`, `--separate-git-dir`, bitlinks
 - `bit init --bare` -- passes through to `git init --bare`, creates `bit/cas/`
 - `bit add` -- scans files, computes MD5 hashes, writes metadata, stages in Git; solid mode populates CAS
-- `bit config` -- get/set/list `.bit/config`; `core.mode` gates CAS writes
+- `bit config` -- get/set/list `.bit/config`; `core.mode` gates CAS writes; `core.hash-algo` (md5|blake3|sha256, default md5) selects the content-hash algorithm for new content
 - `bit cas backfill` -- walk historical commits, store blobs into CAS
+- `bit cas gc [--dry-run]` -- mark-and-sweep removal of orphan CAS blobs/chunks/manifests; live set = blobs referenced by any commit (`git rev-list --all`) or the current index
+- `bit cas rehash` -- migrate content hashes MD5->BLAKE3: sets `core.hash-algo=blake3`, rewrites stubs + CAS whole-file blobs + manifest filenames, commits; verify/add dispatch on the stored hash's prefix so migrated repos keep working. Chunk content hashes stay MD5 (content addresses)
 - CAS -- `.bit/cas/<prefix>/<hash>`; restore/checkout/revert copy from CAS (whole blob or CDC reassembly); verification consults CAS
 - `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `revert`, `reset`, `rm`, `mv`, `branch`, `merge` -- delegate to Git; restore/checkout/revert sync binary files from CAS after git updates metadata
 - `bit remote add/show` -- named remotes with device-aware resolution
