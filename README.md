@@ -1,5 +1,9 @@
 # `bit`
 
+[![CI](https://github.com/david-hoze/bit/actions/workflows/ci.yml/badge.svg)](https://github.com/david-hoze/bit/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/david-hoze/bit?include_prereleases&sort=semver)](https://github.com/david-hoze/bit/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Version control for binary files.** Git's super-brain, without its baggage.
 
 `bit` splits the job in two: **Git** tracks tiny metadata files (hash + size), **rclone** moves actual files. Your working directory stays completely normal — no pointer files, no special filters, no server to run. You get commits, history, diffs, branches, and merges for free, and any storage backend works out of the box.
@@ -333,8 +337,34 @@ When you outgrow that and want full history, `bit config core.mode solid` turns 
 
 ## Install
 
+### Prebuilt binaries (recommended)
+
+Grab the latest archive from the [**Releases**](https://github.com/david-hoze/bit/releases/latest)
+page — no toolchain required. Each archive contains `bit` and `bit-git-router`.
+
+**Linux (x86_64):**
+
 ```bash
-# From source (requires GHC + cabal)
+curl -L https://github.com/david-hoze/bit/releases/download/v0.1.0/bit-v0.1.0-Linux-x86_64.tar.gz | tar xz
+sudo mv bit bit-git-router /usr/local/bin/
+bit --version
+```
+
+**Windows (x86_64):** download `bit-v0.1.0-Windows-x86_64.zip` from the
+[Releases](https://github.com/david-hoze/bit/releases/latest) page, extract it,
+and add the folder to your `PATH`.
+
+`bit` shells out to [`git`](https://git-scm.com/) and
+[`rclone`](https://rclone.org/) — install those too.
+
+> macOS (Apple Silicon) binaries are not published yet; build from source for
+> now. Tracked in [ROADMAP.md](ROADMAP.md).
+
+### From source
+
+Requires GHC 9.6 + cabal (e.g. via [ghcup](https://www.haskell.org/ghcup/)):
+
+```bash
 git clone https://github.com/david-hoze/bit.git
 cd bit
 cabal install
