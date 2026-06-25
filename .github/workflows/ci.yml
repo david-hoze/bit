@@ -80,6 +80,14 @@ jobs:
       - name: Update package index
         run: cabal update
 
+      - name: Configure git identity
+        # CI runners have no global git identity; bit's commits fail with exit
+        # 128 ("Please tell me who you are") without one.
+        run: |
+          git config --global user.email "ci@bit.invalid"
+          git config --global user.name "bit CI"
+          git config --global init.defaultBranch main
+
       - name: Install rclone
         run: sudo apt-get update && sudo apt-get install -y rclone
 
