@@ -1,6 +1,13 @@
 cabal-version:      2.4
 name:               bit
 version:            0.1.0.0
+synopsis:           Serverless version control for large/binary files (git + rclone)
+license:            MIT
+license-file:       LICENSE
+author:             David Hoze
+maintainer:         david.hoze1@gmail.com
+copyright:          2026 David Hoze
+homepage:           https://github.com/david-hoze/bit
 
 executable bit
     main-is:          Bit.hs
