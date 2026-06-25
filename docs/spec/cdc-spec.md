@@ -997,7 +997,7 @@ The `Bit.CDC.*` modules form a self-contained subsystem. `Bit.CAS` gains a few n
 ### Test Setup
 
 - **File:** Blender 4.3 splash screen, 227 MB (238,766,205 bytes)
-- **CDC config:** default (min 128KB, avg 512KB, max 2MB)
+- **CDC config:** default (min 32KB, avg 128KB, max 512KB)
 - **Chunks produced:** ~1,370 chunk blobs + 1 manifest per version
 - **Remote:** MinIO (localhost S3, <1ms RTT)
 - **Platform:** Windows MINGW64, bit with `--transfers 32` for CAS operations
