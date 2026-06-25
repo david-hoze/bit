@@ -1,0 +1,108 @@
+# =============================================================================
+# Lock enforcement at push time
+#
+# A push is refused when a file in the diff set is locked by another owner,
+# and allowed with --force. Owner identity comes from the bit index repo's
+# git user.email, switched mid-test to simulate two users sharing a remote.
+# =============================================================================
+
+# ---- CLEANUP ----
+rm -rf test/cli/output/work_enf 2>/dev/null && rm -rf test/cli/output/remote_enf 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: Alice's repo + filesystem remote, baseline pushed
+# ======================================================================
+
+mkdir -p test/cli/output/work_enf test/cli/output/remote_enf
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_enf && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_enf && git -C .bit/index config user.email "alice@example.com" && git -C .bit/index config user.name "Alice" && echo ok
+<<<
+>>>
+ok
+>>>= 0
+
+cd test/cli/output/work_enf && bit remote add origin ../remote_enf
+<<<
+>>> /Remote.*added/
+>>>= 0
+
+cd test/cli/output/work_enf && printf 'v1\n' > asset.txt && bit add asset.txt && bit commit -m "v1"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+cd test/cli/output/work_enf && bit push -u origin
+<<<
+>>> /Push complete|up to date|set up to track/
+>>>= 0
+
+# Alice locks the asset
+cd test/cli/output/work_enf && bit lock origin asset.txt
+<<<
+>>>
+Locked asset.txt
+>>>= 0
+
+# ======================================================================
+# BOB cannot push a change to Alice's locked file
+# ======================================================================
+
+cd test/cli/output/work_enf && git -C .bit/index config user.email "bob@example.com" && git -C .bit/index config user.name "Bob" && echo ok
+<<<
+>>>
+ok
+>>>= 0
+
+cd test/cli/output/work_enf && printf 'v2-bob\n' > asset.txt && bit add asset.txt && bit commit -m "v2"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# Push is refused — file locked by Alice
+cd test/cli/output/work_enf && bit push 2>&1
+<<<
+>>> /refusing to push files locked by another owner/
+>>>= 1
+
+# The remote still has v1 (Bob's change did not land)
+cat test/cli/output/remote_enf/asset.txt
+<<<
+>>>
+v1
+>>>= 0
+
+# ======================================================================
+# --force overrides the lock
+# ======================================================================
+
+cd test/cli/output/work_enf && bit push --force
+<<<
+>>> /Push complete/
+>>>= 0
+
+cat test/cli/output/remote_enf/asset.txt
+<<<
+>>>
+v2-bob
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+rm -rf test/cli/output/work_enf 2>/dev/null && rm -rf test/cli/output/remote_enf 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

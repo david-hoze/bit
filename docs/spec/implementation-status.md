@@ -98,7 +98,8 @@
 - `bit cas backfill` -- walk historical commits, store blobs into CAS
 - `bit cas gc [--dry-run]` -- mark-and-sweep removal of orphan CAS blobs/chunks/manifests; live set = blobs referenced by any commit (`git rev-list --all`) or the current index
 - `bit cas rehash` -- migrate content hashes MD5->BLAKE3: sets `core.hash-algo=blake3`, rewrites stubs + CAS whole-file blobs + manifest filenames, commits; verify/add dispatch on the stored hash's prefix so migrated repos keep working. Chunk content hashes stay MD5 (content addresses)
-- `bit lock <remote> <path>...` / `bit unlock [--force] <remote> <path>...` / `bit locks <remote>` -- advisory binary-asset locks stored under the remote's `locks/<md5(path)>.lock` (rclone-synced, no server). Owner = bit index repo's git `user.email` + hostname. Lock/unlock refuse paths held by another owner (`--force` overrides unlock). Advisory only; push-time enforcement is a planned next step
+- `bit lock <remote> <path>...` / `bit unlock [--force] <remote> <path>...` / `bit locks <remote>` -- advisory binary-asset locks stored under the remote's `locks/<md5(path)>.lock` (rclone-synced, no server). Owner = bit index repo's git `user.email` + hostname. Lock/unlock refuse paths held by another owner (`--force` overrides unlock)
+- **Push enforcement**: `bit push` refuses to sync any file in the diff set locked by another owner (one `rclone lsf` lists locks; only locked keys are fetched); `bit push --force` overrides. Skipped for metadata-only remotes
 - CAS -- `.bit/cas/<prefix>/<hash>`; restore/checkout/revert copy from CAS (whole blob or CDC reassembly); verification consults CAS
 - `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `revert`, `reset`, `rm`, `mv`, `branch`, `merge` -- delegate to Git; restore/checkout/revert sync binary files from CAS after git updates metadata
 - `bit remote add/show` -- named remotes with device-aware resolution

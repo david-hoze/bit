@@ -98,8 +98,8 @@ users, and it fits the architecture cleanly:
   recording the owner and timestamp.
 - Owner identity = **git's** `user.email` (+ hostname for display) — reuse git's
   identity rather than invent one.
-- Advisory, like Git-LFS locks: `bit push`/`bit add` *warns or refuses* to modify
-  a path locked by someone else.
+- Advisory, like Git-LFS locks: `bit push` *refuses* to sync a path locked by
+  someone else (`--force` overrides).
 
 **Honest limitation:** dumb storage (Drive/S3) has no atomic compare-and-swap, so
 two simultaneous `bit lock` calls can race. The mitigation is read-back-after-
@@ -107,9 +107,9 @@ write contention detection; the fully race-free version would ride git's atomic
 ref-update semantics (a `refs/bit/locks` pointer, push-rejected on conflict) —
 the golden-rule-correct upgrade if stronger guarantees are ever needed.
 
-*(Implemented as a first increment: `bit lock` / `bit unlock` / `bit locks` —
-advisory locks synced through the rclone remote. Push-time enforcement is the
-designed next step, kept out of the hot push path for now.)*
+*(Implemented: `bit lock` / `bit unlock` / `bit locks` — advisory locks synced
+through the rclone remote — plus push-time enforcement: `bit push` refuses to
+sync a file locked by another owner, `--force` overrides.)*
 
 ### 2. Partial / shallow history — lean on git, don't reinvent
 
