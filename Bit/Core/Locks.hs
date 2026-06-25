@@ -22,13 +22,15 @@ module Bit.Core.Locks
   ( lockPaths
   , unlockPaths
   , listLocks
+  , locksBlockingPush
   ) where
 
 import Control.Exception (catch, IOException)
 import Control.Monad (forM, forM_)
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, sortOn)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, catMaybes)
+import qualified Data.Set as Set
 import System.Exit (ExitCode(..))
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.Environment (lookupEnv)
@@ -121,6 +123,30 @@ listLocks cwd remoteName = withRemote cwd remoteName $ \remote -> do
         else forM_ (sortOn lrPath recs) $ \lr ->
                putStrLn $ lrPath lr ++ "\t" ++ displayOwner lr
       pure ExitSuccess
+
+-- | Files in a push set that are locked by someone other than the current user,
+-- as @(path, owner-display)@ pairs. Used by @bit push@ for enforcement.
+--
+-- One @rclone lsf@ lists existing lock filenames; only paths whose key actually
+-- has a lock are fetched, so an unlocked push set costs a single listing.
+-- Returns @[]@ if the remote has no @locks/@ (e.g. metadata-only git remotes).
+locksBlockingPush :: Remote -> [FilePath] -> IO [(FilePath, String)]
+locksBlockingPush remote paths = do
+  owner <- getOwner
+  (code, out, _) <- Transport.lsfRemote remote "locks"
+  case code of
+    ExitFailure _ -> pure []
+    ExitSuccess -> do
+      let existing = Set.fromList
+            [ n | rawLine <- lines out, let n = trim rawLine, ".lock" `isSuffixOf` n ]
+      fmap catMaybes $ forM paths $ \p ->
+        if not (Set.member (pathKey p ++ ".lock") existing)
+          then pure Nothing
+          else do
+            mrec <- fetchLock remote (lockRelPath p)
+            pure $ case mrec of
+              Just lr | lrEmail lr /= ownerEmail owner -> Just (normPath p, displayOwner lr)
+              _                                        -> Nothing
 
 -- ---------------------------------------------------------------------------
 -- Lock records & transport

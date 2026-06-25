@@ -59,6 +59,7 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import Bit.Remote.ChunkIndex (queryRemoteBlobs)
 import Bit.Remote.PushedBlobsCache (readPushedBlobs, writePushedBlobs)
+import qualified Bit.Core.Locks as Locks
 
 -- ============================================================================
 -- Push seam: the only difference between cloud and filesystem push
@@ -456,6 +457,17 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
         else do
             let (copies, others) = List.partition isCopy actions
                 copyPaths = [unPath src | Copy src _ <- copies]
+            -- Lock enforcement: refuse to push files locked by another owner,
+            -- unless --force. Skipped for metadata-only remotes (no rclone locks).
+            forceMode <- asks envForceMode
+            when (forceMode == NoForce && layout /= Device.LayoutMetadata && not (null copyPaths)) $ do
+                blocked <- liftIO $ Locks.locksBlockingPush remote copyPaths
+                unless (null blocked) $ liftIO $ do
+                    hPutStrLn stderr "error: refusing to push files locked by another owner:"
+                    forM_ blocked $ \(p, who) ->
+                        hPutStrLn stderr $ "  " ++ p ++ " -- locked by " ++ who
+                    hPutStrLn stderr "hint: coordinate with the owner, run 'bit unlock', or push with --force to override."
+                    exitWith (ExitFailure 1)
             -- Proof of possession: verify only the files being synced
             unless (null copyPaths || layout == Device.LayoutMetadata) $ liftIO $ do
                 putStrLn $ "Verifying " ++ show (length copyPaths) ++ " file(s) to sync..."
