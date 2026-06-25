@@ -91,6 +91,15 @@ jobs:
       - name: Install rclone
         run: sudo apt-get update && sudo apt-get install -y rclone
 
+      - name: Register a dummy gdrive-test rclone remote
+        # A few CLI tests use the name `gdrive-test:` to exercise cloud-vs-
+        # filesystem remote *classification* (not real transfers — those tests
+        # are excluded below). Classification checks `rclone listremotes`, so the
+        # name must resolve; a local alias is enough.
+        run: |
+          mkdir -p "$RUNNER_TEMP/gdrive-fake"
+          rclone config create gdrive-test alias remote="$RUNNER_TEMP/gdrive-fake"
+
       - name: Install bit and shelltestrunner
         run: |
           cabal install --overwrite-policy=always
