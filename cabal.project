@@ -1,10 +1,10 @@
 packages: .
 
--- blake3-0.3 has no NEON support: on aarch64 its dispatcher references
--- blake3_hash_many_neon, but the package never compiles a NEON source and
--- never defines BLAKE3_NO_NEON, so it fails to link on ARM (e.g. Apple
--- Silicon). Force the portable path. Harmless on x86 (the symbol is unused
+-- blake3-0.3 auto-enables NEON on aarch64 (blake3_impl.h sets
+-- BLAKE3_USE_NEON=1) but never compiles the NEON source, so its dispatcher's
+-- reference to blake3_hash_many_neon fails to link on ARM (e.g. Apple Silicon).
+-- Force the portable path with BLAKE3_USE_NEON=0. No-op on x86 (NEON isn't used
 -- there). The x86 SIMD ISAs are disabled via cabal.project.freeze, so BLAKE3
 -- uses its portable implementation uniformly across architectures.
 package blake3
-  cc-options: -DBLAKE3_NO_NEON
+  cc-options: -DBLAKE3_USE_NEON=0
