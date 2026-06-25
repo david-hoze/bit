@@ -12,7 +12,7 @@ module Bit.Device.RemoteWorkspace
   , lsFilesRemote
   ) where
 
-import Bit.Types (FileEntry(..), EntryKind(..), ContentType(..), Path(..))
+import Bit.Types (FileEntry(..), EntryKind(..), ContentType(..), Path(..), HashAlgo(..))
 import Bit.Remote (Remote)
 import qualified Bit.Scan.Remote as Remote.Scan
 import Bit.Scan.Local (hashAndClassifyFile, binaryExtensions)
@@ -216,7 +216,7 @@ classifyTextCandidates remote config candidates = do
             ExitSuccess ->
                 case kind fe of
                     File{fSize} -> do
-                        (h, contentType) <- hashAndClassifyFile localPath fSize config Nothing
+                        (h, contentType) <- hashAndClassifyFile localPath fSize config MD5 Nothing
                         pure fe { kind = File { fHash = h, fSize = fSize, fContentType = contentType } }
                     _ -> pure fe
             _ -> do

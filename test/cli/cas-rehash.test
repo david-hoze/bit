@@ -1,0 +1,120 @@
+# =============================================================================
+# cas rehash - migrate content hashes from MD5 to BLAKE3
+#
+# Tests: stubs are rewritten from md5: to blake3:, core.hash-algo is set,
+# verify passes against the migrated (blake3) stubs, new adds use blake3, and a
+# dirty working tree is refused.
+# =============================================================================
+
+# ---- CLEANUP ----
+rm -rf test/cli/output/work_rehash 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0
+
+# ======================================================================
+# SETUP: solid-mode repo with CDC, a chunked binary + a whole-blob binary
+# ======================================================================
+
+mkdir -p test/cli/output/work_rehash
+<<<
+>>>
+>>>= 0
+
+cd test/cli/output/work_rehash && bit init
+<<<
+>>> /.*[Ii]nitialized.*/
+>>>= 0
+
+cd test/cli/output/work_rehash && bit config core.mode solid && bit config cdc.enabled true && bit config cdc.min-size 64 && bit config cdc.avg-size 256 && bit config cdc.max-size 1024
+<<<
+>>> /[Ss]olid|Mode set/
+>>>= 0
+
+cd test/cli/output/work_rehash && dd if=/dev/zero of=big.bin bs=1 count=4096 2>/dev/null && head -c 40 /dev/urandom > tiny.bin && printf 'hello text\n' > notes.txt
+<<<
+>>>= 0
+
+cd test/cli/output/work_rehash && bit add . && bit commit -m "Initial (md5)"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+# Stubs start as md5:
+cd test/cli/output/work_rehash && grep -h '^hash:' .bit/index/big.bin
+<<<
+>>> /hash: md5:/
+>>>= 0
+
+# ======================================================================
+# REHASH: migrate to BLAKE3
+# ======================================================================
+
+cd test/cli/output/work_rehash && bit cas rehash
+<<<
+>>> /Rehashed [1-9][0-9]* binary file\(s\) to BLAKE3/
+>>>= 0
+
+# Stubs are now blake3:
+cd test/cli/output/work_rehash && grep -h '^hash:' .bit/index/big.bin
+<<<
+>>> /hash: blake3:/
+>>>= 0
+
+cd test/cli/output/work_rehash && grep -h '^hash:' .bit/index/tiny.bin
+<<<
+>>> /hash: blake3:/
+>>>= 0
+
+# core.hash-algo is now blake3
+cd test/cli/output/work_rehash && bit config core.hash-algo
+<<<
+>>>
+blake3
+>>>= 0
+
+# ======================================================================
+# MIGRATED REPO STILL WORKS: verify passes against blake3 stubs
+# ======================================================================
+
+cd test/cli/output/work_rehash && bit verify
+<<<
+>>> /All .* files? match|Verified|0 issues/
+>>>= 0
+
+# ======================================================================
+# NEW ADDS USE BLAKE3
+# ======================================================================
+
+cd test/cli/output/work_rehash && head -c 128 /dev/urandom > new.bin && bit add new.bin && bit commit -m "Add new.bin"
+<<<
+>>> /\[main|master/
+>>>= 0
+
+cd test/cli/output/work_rehash && grep -h '^hash:' .bit/index/new.bin
+<<<
+>>> /hash: blake3:/
+>>>= 0
+
+# ======================================================================
+# DIRTY TREE IS REFUSED
+# ======================================================================
+
+cd test/cli/output/work_rehash && printf 'dirty\n' >> notes.txt && bit add notes.txt
+<<<
+>>>= 0
+
+cd test/cli/output/work_rehash && bit cas rehash
+<<<
+>>> /uncommitted changes/
+>>>= 0
+
+# ======================================================================
+# CLEANUP
+# ======================================================================
+rm -rf test/cli/output/work_rehash 2>/dev/null && echo cleanup done
+<<<
+>>>
+cleanup done
+>>>= 0

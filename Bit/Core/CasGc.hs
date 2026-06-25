@@ -29,6 +29,7 @@ import qualified System.Directory as Dir
 import Bit.Types (Hash, HashAlgo(..), hashToText)
 import Bit.IO.Concurrency (Concurrency(..))
 import qualified Bit.Scan.Verify as Verify
+import Bit.CAS (stripHashPrefix)
 import Bit.CDC.Manifest (readManifestFromCas)
 import Bit.CDC.Types (ChunkManifest(..), ChunkRef(..))
 import qualified Bit.Git.Run as Git
@@ -123,11 +124,9 @@ sweep dryRun orphans
   where
     removeQuiet p = Dir.removeFile p
 
--- | Hex portion of a hash (the CAS filename), stripping the @md5:@ prefix.
+-- | Hex portion of a hash (the CAS filename), stripping any @<algo>:@ prefix.
 hashHex :: Hash 'MD5 -> String
-hashHex h =
-  let t = hashToText h
-  in T.unpack (maybe t id (T.stripPrefix "md5:" t))
+hashHex = stripHashPrefix . T.unpack . hashToText
 
 dropSuffix :: String -> String -> String
 dropSuffix suf s

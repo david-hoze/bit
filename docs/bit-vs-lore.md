@@ -61,9 +61,9 @@ spec: a 6-byte edit in a 227 MB file → 2 chunks uploaded, 1,370 skipped.
 
 | Gap | bit today | How to close it |
 |---|---|---|
-| Chunk hash | MD5 (collision-weak, ~2× slower than BLAKE3). Fine for accidental-corruption threat model. | Uniform `bit cas rehash` migration (whole-file + chunks together), not piecemeal. Future work. |
+| File hash | MD5 by default. | **`bit cas rehash` implemented** — switches `core.hash-algo` to BLAKE3 and rewrites stubs + CAS whole-file blobs + manifest filenames to BLAKE3, then commits. Verify/add are algorithm-aware (dispatch on the stored hash's prefix). Chunk *content* hashes stay MD5 (a chunk hash is just a content address, independent of file identity), so the chunker is untouched. Pre-migration commits keep their MD5 content for history. |
+| Remote chunk index | `rclone lsf` the whole CAS every push — O(remote size), slow on Drive. | **Implemented** — local `pushed-blobs` cache at `.bit/cache/pushed-blobs/<name>` as a front cache; `rclone lsf` runs only on a cache miss. |
 | Merkle structure | Flat manifest (a list); integrity is end-to-end via whole-file hash, not a per-file Merkle tree. | Acceptable division of labor: git's tree objects provide the *directory* Merkle layer; manifests handle *intra-file* chunking. No need to rebuild git's tree layer. |
-| Remote chunk index | `rclone lsf` the whole CAS every push — O(remote size), slow on Drive. | Add Option C from the spec (line ~498): local `pushed-blobs` cache in `.bit/remotes/<name>/` as a front cache, `rclone lsf` as fallback. Biggest practical speedup on high-latency remotes. |
 | Streaming chunking | **FIXED in this change** — `chunkFile` was loading the entire file into memory; now uses a bounded ~2*maxSize buffer. | See below. |
 | Partial-file reads | None — reassembly is always whole-file. | Deliberate non-goal: bit materializes the real file in the working tree, unlike Lore's sparse workspace. |
 | Inter-chunk delta | None (explicitly out of scope). | Lore doesn't do this either. No gap. |

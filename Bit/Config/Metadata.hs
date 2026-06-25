@@ -10,6 +10,11 @@ module Bit.Config.Metadata
   , displayHash
   , hashFileBytes
   , hashFile
+  , hashBytesWith
+  , hashFileWith
+  , hashFileLike
+  , hashAlgoOf
+  , hashAlgoPrefix
   , hasConflictMarkers
   , validateMetadataDir
   , listAllFiles
@@ -26,6 +31,9 @@ import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8, decodeUtf8')
 import qualified Crypto.Hash.MD5 as MD5
+import qualified Crypto.Hash.SHA256 as SHA256
+import qualified BLAKE3
+import qualified Data.ByteArray as BA
 import Data.ByteString.Base16 (encode)
 
 -- | The single source of truth for what a metadata file contains.
@@ -119,26 +127,73 @@ displayHash h =
   let s = T.unpack (hashToText h)
   in take 16 s ++ if length s > 16 then "..." else ""
 
--- | Compute MD5 hash of raw bytes. Single source of truth for hashing.
-hashFileBytes :: BS.ByteString -> Hash 'MD5
-hashFileBytes bs =
-  let md5hex = decodeUtf8 (encode (MD5.hash bs))
-  in Hash (T.pack "md5:" <> md5hex)
+-- | The on-disk text prefix that tags a hash with its algorithm.
+hashAlgoPrefix :: HashAlgo -> T.Text
+hashAlgoPrefix MD5    = T.pack "md5:"
+hashAlgoPrefix SHA256 = T.pack "sha256:"
+hashAlgoPrefix BLAKE3 = T.pack "blake3:"
 
--- | Compute MD5 hash of a file on disk using streaming (constant memory).
--- Reads file in 64KB chunks to avoid loading entire file into RAM.
-hashFile :: FilePath -> IO (Hash 'MD5)
-hashFile fp = withFile fp ReadMode $ \handle -> do
+-- | Which algorithm produced a stored hash, read from its text prefix.
+-- Defaults to MD5 for un-prefixed legacy hashes.
+hashAlgoOf :: Hash a -> HashAlgo
+hashAlgoOf h =
+  let t = hashToText h
+  in if T.pack "blake3:" `T.isPrefixOf` t then BLAKE3
+     else if T.pack "sha256:" `T.isPrefixOf` t then SHA256
+     else MD5
+
+-- | Compute a hash of raw bytes with the given algorithm.
+hashBytesWith :: HashAlgo -> BS.ByteString -> Hash a
+hashBytesWith algo bs =
+  let hex = decodeUtf8 (encode (digestBytes algo bs))
+  in Hash (hashAlgoPrefix algo <> hex)
+  where
+    digestBytes MD5    = MD5.hash
+    digestBytes SHA256 = SHA256.hash
+    digestBytes BLAKE3 = \b -> BA.convert (BLAKE3.hash Nothing [b] :: BLAKE3.Digest 32)
+
+-- | Compute MD5 hash of raw bytes. Single source of truth for legacy hashing.
+hashFileBytes :: BS.ByteString -> Hash 'MD5
+hashFileBytes = hashBytesWith MD5
+
+-- | Streaming, constant-memory file hash with the given algorithm.
+-- Reads the file in 64KB chunks so files larger than RAM hash correctly.
+hashFileWith :: HashAlgo -> FilePath -> IO (Hash a)
+hashFileWith MD5    fp = streamDigest fp MD5.init    MD5.update    MD5.finalize    MD5
+hashFileWith SHA256 fp = streamDigest fp SHA256.init SHA256.update SHA256.finalize SHA256
+hashFileWith BLAKE3 fp =
+  streamDigest fp (BLAKE3.init Nothing)
+    (\ctx c -> BLAKE3.update ctx [c])
+    (\ctx -> BA.convert (BLAKE3.finalize ctx :: BLAKE3.Digest 32)) BLAKE3
+
+-- | Generic streaming hash driver: fold @update@ over 64KB reads, strictly,
+-- then @finalize@ to raw bytes and tag with the algorithm prefix.
+streamDigest
+  :: FilePath
+  -> ctx
+  -> (ctx -> BS.ByteString -> ctx)
+  -> (ctx -> BS.ByteString)
+  -> HashAlgo
+  -> IO (Hash a)
+streamDigest fp ctx0 upd fin algo = withFile fp ReadMode $ \handle -> do
   let loop !ctx = do
         eof <- hIsEOF handle
         if eof
-          then do
-            let md5hex = decodeUtf8 (encode (MD5.finalize ctx))
-            pure (Hash (T.pack "md5:" <> md5hex))
+          then pure (Hash (hashAlgoPrefix algo <> decodeUtf8 (encode (fin ctx))))
           else do
             chunk <- BS.hGet handle 65536  -- 64KB chunks
-            loop (MD5.update ctx chunk)
-  loop MD5.init
+            loop (upd ctx chunk)
+  loop ctx0
+
+-- | Compute MD5 hash of a file on disk using streaming (constant memory).
+hashFile :: FilePath -> IO (Hash 'MD5)
+hashFile = hashFileWith MD5
+
+-- | Recompute a file's hash using the same algorithm as an existing stored
+-- hash (read from its prefix). This is what verification uses so a repo
+-- migrated to BLAKE3 still compares like-for-like.
+hashFileLike :: Hash a -> FilePath -> IO (Hash a)
+hashFileLike ref = hashFileWith (hashAlgoOf ref)
 
 -- Conflict marker utilities (preserved from old Internal.Metadata) --
 

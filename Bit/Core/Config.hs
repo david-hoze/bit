@@ -6,6 +6,7 @@ module Bit.Core.Config
   ( BitMode(..)
   , getCoreMode
   , getCoreModeWithRoot
+  , getHashAlgoWithRoot
   , configGet
   , configSet
   , configList
@@ -27,6 +28,7 @@ import System.Directory (doesDirectoryExist, doesFileExist, getCurrentDirectory,
 import System.FilePath ((</>), normalise)
 
 import Bit.Utils (atomicWriteFileStr)
+import Bit.Types (HashAlgo(..))
 
 -- | Resolve .bit directory from CWD (follows bitlink). Returns absolute path so read/write use the same file.
 resolveBitDirConfig :: IO (Maybe FilePath)
@@ -102,6 +104,16 @@ getCoreModeWithRoot bitRoot = do
   case mVal of
     Just "solid" -> pure ModeSolid
     _ -> pure ModeLite
+
+-- | Get the content-hash algorithm for new content. Defaults to MD5 if unset
+-- or unrecognized, so existing repos are unaffected.
+getHashAlgoWithRoot :: FilePath -> IO HashAlgo
+getHashAlgoWithRoot bitRoot = do
+  mVal <- getConfigKey bitRoot "core.hash-algo"
+  pure $ case mVal of
+    Just "blake3" -> BLAKE3
+    Just "sha256" -> SHA256
+    _             -> MD5
 
 -- | Get current core.mode (resolves .bit from CWD). Defaults to ModeLite if unset or invalid.
 getCoreMode :: IO BitMode
@@ -180,7 +192,7 @@ configGetWithRoot bitRoot key = do
 -- | Known config keys (spec: unknown keys are rejected to prevent typos).
 -- When adding a key here, use the generic write branch below (do not add a special when (key == "x") path).
 knownConfigKeys :: [String]
-knownConfigKeys = ["core.mode", "cdc.enabled", "cdc.min-size", "cdc.avg-size", "cdc.max-size"]
+knownConfigKeys = ["core.mode", "core.hash-algo", "cdc.enabled", "cdc.min-size", "cdc.avg-size", "cdc.max-size"]
 
 -- | Set config value using explicit .bit path (avoids CWD ambiguity).
 configSetWithRoot :: FilePath -> String -> String -> IO ()
@@ -190,6 +202,9 @@ configSetWithRoot bitRoot key value = do
   when (key == "core.mode") $
     unless (value `elem` ["lite", "solid"]) $
       fail "core.mode must be 'lite' or 'solid'"
+  when (key == "core.hash-algo") $
+    unless (value `elem` ["md5", "blake3", "sha256"]) $
+      fail "core.hash-algo must be 'md5', 'blake3', or 'sha256'"
   when (key == "cdc.enabled") $
     unless (value `elem` ["true", "false"]) $
       fail "cdc.enabled must be 'true' or 'false'"
