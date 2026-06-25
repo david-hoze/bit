@@ -105,7 +105,7 @@ with a bounded-buffer streaming loop:
 Note: `chunkByteString` (the pure in-memory variant) is unchanged and still used
 for testing and small inputs.
 
-## STATUS — tasks 1–5 completed (2026-06-25)
+## STATUS — tasks 1–6 completed (2026-06-25)
 
 The streaming `chunkFile` change was built, verified, and tested on a Linux/WSL
 env with the Haskell toolchain. Results:
@@ -128,10 +128,25 @@ env with the Haskell toolchain. Results:
    "default: enabled" claims in `docs/spec/cdc-spec.md` (INI comment + parameter
    table) and three tutorials (`config.md`, `bare-remotes.md`, `modes-and-cas.md`).
 
-Open follow-up noted: `docs/spec/cdc-spec.md:1000` lists the benchmark's "default"
-chunk config as 128K/512K/2M, which doesn't match the code defaults
-(32K/128K/512K). Left as-is — it's a measured-benchmark record, not a normative
-default — but worth relabeling.
+Resolved follow-up: `docs/spec/cdc-spec.md:1000` previously labeled the benchmark
+config 128K/512K/2M; the measured ~1,370 chunks for 227 MB imply ~174 KB average,
+matching the code defaults (32K/128K/512K), so the line was corrected.
+
+### Optional follow-ups (gap table) — all implemented (2026-06-25)
+
+6a. **Local `pushed-blobs` cache** ✅ — `.bit/cache/pushed-blobs/<name>` front
+    cache; push skips `rclone lsf` on a cache hit. `Bit/Remote/PushedBlobsCache.hs`,
+    test `pushed-blobs-cache.test`.
+6b. **`bit cas gc`** ✅ — mark-and-sweep orphan collection; live set spans all
+    reachable commits + the current index. `Bit/Core/CasGc.hs`, test `cas-gc.test`.
+6c. **`bit cas rehash` (MD5→BLAKE3)** ✅ — `core.hash-algo` config + algorithm-
+    aware hashing/verify; migrates stubs + CAS whole-file blobs + manifest names
+    to BLAKE3 and commits. Chunk content hashes stay MD5 (content addresses), so
+    FastCDC is untouched. `Bit/Core/CasRehash.hs`, test `cas-rehash.test`.
+
+Post-implementation suites: local CLI **1410/0**, binary **20/20**, CDC unit
+gate green. Cloud CLI not re-run after 6a–6c (network-bound; the cache path is
+covered by the filesystem `pushed-blobs-cache.test`).
 
 ## ORIGINAL TASKS FOR THE NEXT AGENT (env with Haskell)
 
