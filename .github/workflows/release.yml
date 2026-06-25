@@ -1,0 +1,95 @@
+name: Release
+
+# Tag-triggered cross-platform release: pushing a v* tag builds prebuilt
+# binaries for Linux/macOS/Windows and attaches them to a single GitHub Release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # Build the `bit` and `bit-git-router` executables on each OS and upload the
+  # packaged archive as a workflow artifact.
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.6.7'
+          cabal-version: '3.14.2.0'
+
+      - name: Cache cabal store and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.setup.outputs.cabal-store }}
+            dist-newstyle
+          key: ${{ runner.os }}-ghc9.6.7-release-${{ hashFiles('**/*.cabal', 'cabal.project*') }}
+          restore-keys: |
+            ${{ runner.os }}-ghc9.6.7-
+
+      - name: Update package index
+        run: cabal update
+
+      - name: Build executables
+        run: cabal build exe:bit exe:bit-git-router
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "$(cabal list-bin exe:bit)" dist/bit
+          cp "$(cabal list-bin exe:bit-git-router)" dist/bit-git-router
+          strip dist/bit dist/bit-git-router || true
+          NAME="bit-${{ github.ref_name }}-${{ runner.os }}-x86_64"
+          tar -C dist -czf "$NAME.tar.gz" bit bit-git-router
+          echo "ASSET=$NAME.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "$(cabal list-bin exe:bit)" dist/bit.exe
+          cp "$(cabal list-bin exe:bit-git-router)" dist/bit-git-router.exe
+          NAME="bit-${{ github.ref_name }}-Windows-x86_64"
+          (cd dist && 7z a "../$NAME.zip" bit.exe bit-git-router.exe)
+          echo "ASSET=$NAME.zip" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ runner.os }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  # Collect all per-OS archives into one draft GitHub Release.
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create draft release with binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          draft: true            # review the binaries, then publish from the UI
+          prerelease: true       # 0.x — pre-1.0
+          generate_release_notes: true
+          fail_on_unmatched_files: true
