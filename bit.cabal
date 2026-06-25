@@ -61,6 +61,7 @@ executable bit
                       Bit.Core.Submodule,
                       Bit.Core.BecomeGit,
                       Bit.Remote.ChunkIndex
+                      Bit.Remote.PushedBlobsCache
     build-depends:    base16-bytestring ^>=1.0.2.0,
                       base,
                       array,

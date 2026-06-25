@@ -58,6 +58,7 @@ import Bit.CDC.Types (ChunkRef(..), ChunkManifest(..))
 import qualified Data.Set as Set
 import Data.Set (Set)
 import Bit.Remote.ChunkIndex (queryRemoteBlobs)
+import Bit.Remote.PushedBlobsCache (readPushedBlobs, writePushedBlobs)
 
 -- ============================================================================
 -- Push seam: the only difference between cloud and filesystem push
@@ -469,10 +470,20 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
             -- TODO: Full layout then syncs same files to readable paths (double bandwidth).
             --       Future optimization: skip CAS upload for files that already exist at readable path.
             let casDir = bitDir </> "cas"
-            -- Query remote CAS to skip blobs that already exist (dedup).
+            -- Determine which CAS blobs the remote already has, for dedup.
+            -- Consult the local pushed-blobs cache first (spec Option C); fall
+            -- back to an O(remote-size) `rclone lsf` only on a cache miss.
             remoteBlobs <- liftIO $ do
-                unless (null copyPaths) $ putStrLn "Querying remote CAS for dedup..."
-                queryRemoteBlobs remote
+                mCached <- readPushedBlobs bitDir (remoteName remote)
+                case mCached of
+                    Just cached -> do
+                        unless (null copyPaths) $
+                            putStrLn $ "Using local blob cache (" ++ show (Set.size cached)
+                                ++ " blob(s) known on remote)..."
+                        pure cached
+                    Nothing -> do
+                        unless (null copyPaths) $ putStrLn "Querying remote CAS for dedup..."
+                        queryRemoteBlobs remote
             -- Collect all CAS-relative paths to upload in one batch.
             -- In lite mode, CAS blobs may not exist locally — stage them from the working tree.
             casRelPaths <- fmap concat $ liftIO $ mapM (collectCasPaths remoteBlobs cwd indexDir casDir) copyPaths
@@ -488,6 +499,14 @@ syncRemoteFiles mRemoteHash layout = withRemote $ \remote -> do
                 CopyProgress.withSyncProgressReporter progress $
                     CopyProgress.rcloneCopyFilesWithFlags ["--transfers", "32"]
                         bitDir (remoteUrl remote) casRelPaths progress
+            -- Upload succeeded: every blob for the copied files is now on the
+            -- remote (was already there, or we just uploaded it). Refresh the
+            -- local pushed-blobs cache so the next push can skip `rclone lsf`.
+            -- Skip for metadata-only remotes, which carry no CAS.
+            unless (layout == Device.LayoutMetadata) $ liftIO $ do
+                pushedHashes <- concat <$> mapM (collectFileBlobHashes indexDir casDir) copyPaths
+                writePushedBlobs bitDir (remoteName remote)
+                    (remoteBlobs `Set.union` Set.fromList pushedHashes)
             -- Full layout: also sync readable paths and apply move/delete.
             -- Bare layout: no readable tree, so Move/Delete are intentionally not applied.
             when (layout == Device.LayoutFull) $ do
@@ -532,6 +551,20 @@ collectCasPaths remoteBlobs cwd indexDir casDir filePath = do
                             if exists
                                 then pure [casBlobPath "cas" h]
                                 else pure []
+        Nothing -> pure []
+
+-- | All CAS blob hashes a file resolves to: its chunk hashes if chunked, else
+-- its whole-file hash. Used to refresh the pushed-blobs cache after a push.
+-- Manifests are intentionally excluded (they are not tracked as remote blobs).
+collectFileBlobHashes :: FilePath -> FilePath -> FilePath -> IO [Hash 'MD5]
+collectFileBlobHashes indexDir casDir filePath = do
+    mMeta <- parseMetadataFile (indexDir </> filePath)
+    case mMeta of
+        Just mc -> do
+            mManifest <- readManifestFromCas casDir (metaHash mc)
+            pure $ case mManifest of
+                Just manifest -> map crHash (cmChunks manifest)
+                Nothing       -> [metaHash mc]
         Nothing -> pure []
 
 -- ============================================================================

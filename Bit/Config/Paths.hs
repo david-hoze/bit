@@ -12,14 +12,23 @@ newtype GitRelPath = GitRelPath FilePath deriving (Show, Eq)
 -- | Path relative to CWD. Used for direct filesystem operations (copyFile, doesFileExist, etc).
 newtype CwdPath = CwdPath FilePath deriving (Show, Eq)
 
-bitDir, bitTargetPath, bitGitDir, bitIndexPath, bitDevicesDir, bitRemotesDir, bitCasDir :: FilePath
+bitDir, bitTargetPath, bitGitDir, bitIndexPath, bitDevicesDir, bitRemotesDir, bitCasDir, bitCacheDir :: FilePath
 bitDir           = ".bit"
 bitTargetPath    = bitDir </> "target"
 bitDevicesDir    = bitDir </> "devices"
 bitRemotesDir    = bitDir </> "remotes"
 bitCasDir        = bitDir </> "cas"
+bitCacheDir      = bitDir </> "cache"
 bitIndexPath     = bitDir </> "index"
 bitGitDir        = bitIndexPath </> ".git"
+
+-- | Local "pushed blobs" cache for a remote: the set of CAS blob hashes known
+-- to exist on that remote, used as a front cache to avoid @rclone lsf@-ing the
+-- whole remote CAS on every push. Lives outside @.bit/remotes/@ (where every
+-- file is treated as a remote name). @absBitDir@ is the absolute @.bit@ path.
+pushedBlobsCachePath :: FilePath -> String -> FilePath
+pushedBlobsCachePath absBitDir name =
+    absBitDir </> "cache" </> "pushed-blobs" </> sanitizeRemoteName name
 
 -- | Per-remote bundle for cloud remotes. Each remote gets its own bundle at .git/bundles/<name>.bundle
 -- so sequential fetches (e.g. bit fetch gdrive; bit fetch backup) don't clobber each other.

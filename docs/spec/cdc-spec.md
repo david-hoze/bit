@@ -495,7 +495,7 @@ parseBlobHash line =
        else Just (Hash ("md5:" <> filename))
 ```
 
-**Future optimization:** Option C (local push tracking) is added as a transparent cache in front of the `rclone lsf`. The local pushed-blobs set is consulted first; `rclone lsf` is the fallback for cache misses or stale state. This optimization is documented here for future implementation but is not part of the initial CDC spec.
+**Implemented (Option C — local push tracking):** a transparent cache in front of the `rclone lsf`. After each successful push, the set of blob hashes now known to be on the remote is written to `.bit/cache/pushed-blobs/<name>` (one `md5:<hex>` per line). Subsequent pushes read this cache as the known-remote set and skip the `rclone lsf` entirely; `rclone lsf` runs only on a cache miss (no cache file). The cache holds only hashes we have confirmed present (already there, or just uploaded), so a present entry is safe to trust for dedup. The one stale case is a blob deleted from the remote out of band — deleting the cache file forces a fresh `rclone lsf` on the next push. See `Bit/Remote/PushedBlobsCache.hs`.
 
 ### Batched Chunk Upload
 
