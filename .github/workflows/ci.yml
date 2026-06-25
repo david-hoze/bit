@@ -39,6 +39,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ghc9.6.7-
 
+      - name: Update package index
+        run: cabal update
+
       - name: Build everything
         run: cabal build all
 
@@ -73,6 +76,9 @@ jobs:
           key: ${{ runner.os }}-ghc9.6.7-${{ hashFiles('**/*.cabal', 'cabal.project*') }}
           restore-keys: |
             ${{ runner.os }}-ghc9.6.7-
+
+      - name: Update package index
+        run: cabal update
 
       - name: Install rclone
         run: sudo apt-get update && sudo apt-get install -y rclone
