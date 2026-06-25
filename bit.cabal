@@ -42,6 +42,7 @@ executable bit
                       Bit.Core.Pull,
                       Bit.Core.RemoteManagement,
                       Bit.Core.Verify,
+                      Bit.Core.CasGc,
                       Bit.Git.Run,
                       Bit.Config.Paths,
                       Bit.Config.File,

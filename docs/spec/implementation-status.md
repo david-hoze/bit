@@ -96,6 +96,7 @@
 - `bit add` -- scans files, computes MD5 hashes, writes metadata, stages in Git; solid mode populates CAS
 - `bit config` -- get/set/list `.bit/config`; `core.mode` gates CAS writes
 - `bit cas backfill` -- walk historical commits, store blobs into CAS
+- `bit cas gc [--dry-run]` -- mark-and-sweep removal of orphan CAS blobs/chunks/manifests; live set = blobs referenced by any commit (`git rev-list --all`) or the current index
 - CAS -- `.bit/cas/<prefix>/<hash>`; restore/checkout/revert copy from CAS (whole blob or CDC reassembly); verification consults CAS
 - `bit commit`, `diff`, `status`, `log`, `restore`, `checkout`, `revert`, `reset`, `rm`, `mv`, `branch`, `merge` -- delegate to Git; restore/checkout/revert sync binary files from CAS after git updates metadata
 - `bit remote add/show` -- named remotes with device-aware resolution

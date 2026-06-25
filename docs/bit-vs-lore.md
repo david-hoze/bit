@@ -67,7 +67,7 @@ spec: a 6-byte edit in a 227 MB file → 2 chunks uploaded, 1,370 skipped.
 | Streaming chunking | **FIXED in this change** — `chunkFile` was loading the entire file into memory; now uses a bounded ~2*maxSize buffer. | See below. |
 | Partial-file reads | None — reassembly is always whole-file. | Deliberate non-goal: bit materializes the real file in the working tree, unlike Lore's sparse workspace. |
 | Inter-chunk delta | None (explicitly out of scope). | Lore doesn't do this either. No gap. |
-| Orphan-chunk GC | None yet (`bit cas gc` is future work). | Mark-sweep over live manifests. |
+| Orphan-chunk GC | **Implemented** — `bit cas gc [--dry-run]` mark-sweeps orphan blobs/chunks/manifests; live set spans all reachable commits + the current index. | Mark-sweep over live manifests. |
 
 ## Bottom line
 
