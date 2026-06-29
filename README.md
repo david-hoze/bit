@@ -345,20 +345,25 @@ page — no toolchain required. Each archive contains `bit` and `bit-git-router`
 **Linux (x86_64):**
 
 ```bash
-curl -L https://github.com/david-hoze/bit/releases/download/v0.1.0/bit-v0.1.0-Linux-x86_64.tar.gz | tar xz
+curl -L https://github.com/david-hoze/bit/releases/download/v0.1.1/bit-v0.1.1-Linux-X64.tar.gz | tar xz
 sudo mv bit bit-git-router /usr/local/bin/
 bit --version
 ```
 
-**Windows (x86_64):** download `bit-v0.1.0-Windows-x86_64.zip` from the
+**macOS (Apple Silicon):**
+
+```bash
+curl -L https://github.com/david-hoze/bit/releases/download/v0.1.1/bit-v0.1.1-macOS-ARM64.tar.gz | tar xz
+sudo mv bit bit-git-router /usr/local/bin/
+bit --version
+```
+
+**Windows (x86_64):** download `bit-v0.1.1-Windows-X64.zip` from the
 [Releases](https://github.com/david-hoze/bit/releases/latest) page, extract it,
 and add the folder to your `PATH`.
 
 `bit` shells out to [`git`](https://git-scm.com/) and
 [`rclone`](https://rclone.org/) — install those too.
-
-> macOS (Apple Silicon) binaries are not published yet; build from source for
-> now. Tracked in [ROADMAP.md](ROADMAP.md).
 
 ### From source
 
