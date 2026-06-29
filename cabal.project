@@ -7,4 +7,4 @@ packages: .
 -- there). The x86 SIMD ISAs are disabled via cabal.project.freeze, so BLAKE3
 -- uses its portable implementation uniformly across architectures.
 package blake3
-  cc-options: -DBLAKE3_USE_NEON=0
+  ghc-options: -optc-DBLAKE3_USE_NEON=0
