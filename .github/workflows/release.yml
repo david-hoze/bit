@@ -15,19 +15,10 @@ jobs:
   build:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    # macOS (Apple Silicon) is non-blocking: blake3-0.3 fails to link on arm64
-    # (it auto-references a NEON impl it never compiles, and cabal cc-options
-    # don't reach the store-built dep to disable it). Linux + Windows ship now;
-    # macOS will auto-join once BLAKE3 is sourced differently (e.g. crypton).
-    continue-on-error: ${{ matrix.experimental == true }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-          - os: windows-latest
-          - os: macos-latest
-            experimental: true
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -61,7 +52,7 @@ jobs:
           cp "$(cabal list-bin exe:bit)" dist/bit
           cp "$(cabal list-bin exe:bit-git-router)" dist/bit-git-router
           strip dist/bit dist/bit-git-router || true
-          NAME="bit-${{ github.ref_name }}-${{ runner.os }}-x86_64"
+          NAME="bit-${{ github.ref_name }}-${{ runner.os }}-${{ runner.arch }}"
           tar -C dist -czf "$NAME.tar.gz" bit bit-git-router
           echo "ASSET=$NAME.tar.gz" >> "$GITHUB_ENV"
 
@@ -72,7 +63,7 @@ jobs:
           mkdir -p dist
           cp "$(cabal list-bin exe:bit)" dist/bit.exe
           cp "$(cabal list-bin exe:bit-git-router)" dist/bit-git-router.exe
-          NAME="bit-${{ github.ref_name }}-Windows-x86_64"
+          NAME="bit-${{ github.ref_name }}-${{ runner.os }}-${{ runner.arch }}"
           (cd dist && 7z a "../$NAME.zip" bit.exe bit-git-router.exe)
           echo "ASSET=$NAME.zip" >> "$GITHUB_ENV"
 
